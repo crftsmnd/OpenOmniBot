@@ -1,0 +1,534 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:ui/theme/app_colors.dart';
+import './bot_status.dart';
+
+/// 深度思考卡片组件
+/// 用于展示流式返回的思考内容（task_description, sub_tasks, preparation）
+class DeepThinkingCard extends StatefulWidget {
+  /// 思考内容文本（已格式化）
+  final String thinkingText;
+
+  /// 是否正在加载中
+  final bool isLoading;
+
+  /// 卡片最大高度
+  final double maxHeight;
+
+  /// 思考阶段：1-正在识别你的需求类型，2-规划任务中，3-正在帮你规划任务，4-完成思考，5-已取消
+  final int stage;
+
+  /// 开始时间（毫秒时间戳）
+  final int? startTime;
+
+  /// 结束时间（毫秒时间戳）
+  final int? endTime;
+
+  /// 任务 ID
+  final String? taskId;
+
+  /// 取消任务回调，参数为 taskId
+  final void Function(String taskId)? onCancelTask;
+
+  /// 任务是否可执行（影响是否显示操作行）
+  final bool isExecutable;
+
+  /// 是否允许点击折叠/展开思考内容
+  final bool isCollapsible;
+
+  /// 外层消息列表滚动控制器，用于内外滚动联动
+  final ScrollController? parentScrollController;
+
+  const DeepThinkingCard({
+    super.key,
+    required this.thinkingText,
+    this.isLoading = true,
+    this.maxHeight = 210.0,
+    this.stage = 1,
+    this.startTime,
+    this.endTime,
+    this.taskId,
+    this.onCancelTask,
+    this.isExecutable = false,
+    this.isCollapsible = false,
+    this.parentScrollController,
+  });
+
+  @override
+  State<DeepThinkingCard> createState() => _DeepThinkingCardState();
+}
+
+class _DeepThinkingCardState extends State<DeepThinkingCard> {
+  Timer? _timer;
+  int _elapsedSeconds = 0;
+  final ScrollController _scrollController = ScrollController();
+  bool _showGradient = false;
+  bool _isCollapsed = false;
+  static const double _bottomTolerance = 1.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _isCollapsed = widget.isCollapsible && widget.stage == 4;
+    _updateElapsedTime(notify: false);
+    // 如果正在进行中（未完成且未取消），启动计时器
+    if (widget.stage != 4 && widget.stage != 5) {
+      _startTimer();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToLatestIfNeeded(force: true);
+      _checkOverflow();
+    });
+  }
+
+  @override
+  void didUpdateWidget(DeepThinkingCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // 更新已用时间
+    _updateElapsedTime();
+
+    final becameCompleted =
+        oldWidget.stage != 4 && oldWidget.stage != 5 && widget.stage == 4;
+    final becameThinking =
+        (oldWidget.stage == 4 || oldWidget.stage == 5) &&
+        widget.stage != 4 &&
+        widget.stage != 5;
+
+    // 如果从非完成状态变为完成状态（stage 变为 4）
+    if (becameCompleted) {
+      _stopTimer();
+      if (widget.isCollapsible && !_isCollapsed) {
+        setState(() {
+          _isCollapsed = true;
+        });
+      }
+    }
+
+    // 如果从完成/取消状态变回非完成状态，重新启动计时器并展开内容
+    if (becameThinking) {
+      _startTimer();
+      if (_isCollapsed) {
+        setState(() {
+          _isCollapsed = false;
+        });
+      }
+    }
+
+    final textChanged = widget.thinkingText != oldWidget.thinkingText;
+
+    // 内容更新后自动跟随到最新文本，并更新渐变遮罩
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToLatestIfNeeded(force: textChanged);
+      _checkOverflow();
+    });
+  }
+
+  /// 计算已用时间
+  void _updateElapsedTime({bool notify = true}) {
+    final nextElapsedSeconds = widget.startTime == null
+        ? 0
+        : (widget.endTime != null
+                  ? DateTime.fromMillisecondsSinceEpoch(
+                      widget.endTime!,
+                    ).difference(
+                      DateTime.fromMillisecondsSinceEpoch(widget.startTime!),
+                    )
+                  : DateTime.now().difference(
+                      DateTime.fromMillisecondsSinceEpoch(widget.startTime!),
+                    ))
+              .inSeconds;
+
+    if (nextElapsedSeconds == _elapsedSeconds) return;
+
+    if (!notify || !mounted) {
+      _elapsedSeconds = nextElapsedSeconds;
+      return;
+    }
+
+    setState(() {
+      _elapsedSeconds = nextElapsedSeconds;
+    });
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      _updateElapsedTime();
+    });
+  }
+
+  void _stopTimer() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
+  void _checkOverflow() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final maxExtent = position.maxScrollExtent;
+    final hasOverflow = maxExtent > 0;
+    final distanceToBottom = (maxExtent - position.pixels).clamp(
+      0.0,
+      maxExtent,
+    );
+    final isAtBottom = distanceToBottom <= _bottomTolerance;
+    final shouldShowGradient = hasOverflow && !isAtBottom;
+
+    if (shouldShowGradient != _showGradient) {
+      setState(() => _showGradient = shouldShowGradient);
+    }
+  }
+
+  void _scrollToLatestIfNeeded({bool force = false}) {
+    if (!mounted || !_scrollController.hasClients) return;
+    if (_isCollapsed || widget.stage == 5) return;
+    if (!force && widget.stage == 4) return;
+
+    final position = _scrollController.position;
+    final maxExtent = position.maxScrollExtent;
+    if (maxExtent <= 0) return;
+
+    final current = position.pixels.clamp(0.0, maxExtent);
+    if ((maxExtent - current).abs() <= _bottomTolerance) return;
+
+    _scrollController.jumpTo(maxExtent);
+  }
+
+  void _toggleCollapsed() {
+    if (!widget.isCollapsible || widget.stage != 4) return;
+    setState(() {
+      _isCollapsed = !_isCollapsed;
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  String _formatTime(int seconds) {
+    if (seconds < 60) {
+      return '$seconds 秒';
+    } else {
+      final minutes = seconds ~/ 60;
+      final remainingSeconds = seconds % 60;
+      return '$minutes 分 $remainingSeconds 秒';
+    }
+  }
+
+  /// 构建文本显示
+  Widget _buildText(String text, Color textColor) {
+    return Text(
+      text,
+      style: TextStyle(
+        color: textColor,
+        fontSize: 12,
+        fontFamily: 'PingFang SC',
+        fontWeight: FontWeight.w400,
+        height: 1.50,
+        letterSpacing: 0.33,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parentScrollPosition =
+        widget.parentScrollController?.hasClients == true
+        ? widget.parentScrollController!.position
+        : Scrollable.maybeOf(context)?.position;
+    const textColor = Color(0x80353E53); // rgba(53,62,83,0.5)
+    final bool hasContent = widget.thinkingText.isNotEmpty;
+    final bool canCollapse = widget.isCollapsible && widget.stage == 4;
+    final sizeAnimationDuration = canCollapse
+        ? const Duration(milliseconds: 180)
+        : Duration.zero;
+
+    // 根据阶段显示不同的文案
+    String hintText;
+    switch (widget.stage) {
+      case 1:
+        hintText = '正在思考';
+        break;
+      case 2:
+        hintText = '正在思考';
+        break;
+      case 3:
+        hintText = '正在思考';
+        break;
+      case 4:
+      case 5:
+        hintText = '完成思考';
+        break;
+      default:
+        hintText = '正在思考';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (canCollapse && hasContent)
+          InkWell(
+            onTap: _toggleCollapsed,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    BotStatus(
+                      status: (widget.stage == 4 || widget.stage == 5)
+                          ? BotStatusType.completed
+                          : BotStatusType.hint,
+                      hintText: hintText,
+                      costTime: _formatTime(_elapsedSeconds),
+                    ),
+                    const SizedBox(width: 2),
+                    Icon(
+                      _isCollapsed
+                          ? Icons.keyboard_arrow_down_rounded
+                          : Icons.keyboard_arrow_up_rounded,
+                      size: 16,
+                      color: const Color(0x80353E53),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          BotStatus(
+            status: (widget.stage == 4 || widget.stage == 5)
+                ? BotStatusType.completed
+                : BotStatusType.hint,
+            hintText: hintText,
+            costTime: _formatTime(_elapsedSeconds),
+          ),
+
+        AnimatedSize(
+          duration: sizeAnimationDuration,
+          curve: Curves.easeInOut,
+          child:
+              (hasContent &&
+                  widget.stage != 5 &&
+                  (!canCollapse || !_isCollapsed))
+              ? Container(
+                  width: double.infinity,
+                  constraints: BoxConstraints(maxHeight: widget.maxHeight),
+                  margin: const EdgeInsets.only(top: 8.0),
+                  decoration: const BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: AppColors.text10, // 左边框
+                        width: 1.0,
+                      ),
+                    ),
+                  ),
+                  child: Stack(
+                    children: [
+                      NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          _checkOverflow();
+                          return _forwardScrollToParent(
+                            notification,
+                            parentScrollPosition,
+                          );
+                        },
+                        child: SingleChildScrollView(
+                          controller: _scrollController,
+                          physics: const ClampingScrollPhysics(),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 12.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildText(widget.thinkingText, textColor),
+                                // 加载中时在内容下方显示 indicator
+                                // if (widget.isLoading)
+                                //   const Padding(padding: EdgeInsets.only(top: 12.0), child: ThinkingDotsIndicator()),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // 底部渐变遮罩
+                      if (_showGradient)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          height: 40,
+                          child: IgnorePointer(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: const BorderRadius.only(
+                                  bottomLeft: Radius.circular(4),
+                                  bottomRight: Radius.circular(4),
+                                ),
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    const Color(
+                                      0xCCF1F8FF,
+                                    ).withValues(alpha: 0.0),
+                                    const Color(
+                                      0xCCF1F8FF,
+                                    ).withValues(alpha: 0.8),
+                                    const Color(0xCCF1F8FF),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
+
+        // Stage 4: 显示操作行（准备执行任务 + 取消任务），仅在任务可执行时显示
+        if (widget.stage == 4 && widget.isExecutable)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '准备执行任务...',
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 12,
+                    fontFamily: 'PingFang SC',
+                    fontWeight: FontWeight.w500,
+                    height: 1.67,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: widget.taskId != null && widget.onCancelTask != null
+                      ? () => widget.onCancelTask!(widget.taskId!)
+                      : null,
+                  child: const Text(
+                    '取消任务',
+                    style: TextStyle(
+                      color: Color(0xFF576B95),
+                      fontSize: 12,
+                      fontFamily: 'PingFang SC',
+                      fontWeight: FontWeight.w500,
+                      height: 1.50,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // Stage 5: 显示已取消提示
+        if (widget.stage == 5)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '任务已取消',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 12,
+                fontFamily: 'PingFang SC',
+                fontWeight: FontWeight.w500,
+                height: 1.83,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  bool _forwardScrollToParent(
+    ScrollNotification notification,
+    ScrollPosition? parentPosition,
+  ) {
+    if (parentPosition == null || !parentPosition.hasPixels) {
+      return false;
+    }
+
+    final pointerDelta = _resolvePointerDelta(notification);
+    if (pointerDelta == null || pointerDelta.abs() < 0.5) {
+      return false;
+    }
+
+    final parentDelta = _pointerDeltaToScrollDelta(
+      pointerDelta,
+      parentPosition.axisDirection,
+    );
+    if (parentDelta.abs() < 0.5) {
+      return false;
+    }
+
+    final current = parentPosition.pixels;
+    final min = parentPosition.minScrollExtent;
+    final max = parentPosition.maxScrollExtent;
+    final next = (current + parentDelta).clamp(min, max).toDouble();
+
+    if ((next - current).abs() < 0.5) {
+      return false;
+    }
+
+    parentPosition.jumpTo(next);
+    return true;
+  }
+
+  double? _resolvePointerDelta(ScrollNotification notification) {
+    final dragDelta = switch (notification) {
+      OverscrollNotification(:final dragDetails?) => _primaryDelta(
+        dragDetails.delta,
+        notification.metrics.axis,
+      ),
+      _ => null,
+    };
+    if (dragDelta != null) {
+      return dragDelta;
+    }
+
+    final scrollDelta = switch (notification) {
+      OverscrollNotification(:final overscroll) => overscroll,
+      _ => null,
+    };
+    if (scrollDelta == null || scrollDelta.abs() < 0.5) {
+      return null;
+    }
+
+    return _scrollDeltaToPointerDelta(
+      scrollDelta,
+      notification.metrics.axisDirection,
+    );
+  }
+
+  double _primaryDelta(Offset offset, Axis axis) {
+    return axis == Axis.vertical ? offset.dy : offset.dx;
+  }
+
+  double _scrollDeltaToPointerDelta(
+    double scrollDelta,
+    AxisDirection axisDirection,
+  ) {
+    return switch (axisDirection) {
+      AxisDirection.down || AxisDirection.right => -scrollDelta,
+      AxisDirection.up || AxisDirection.left => scrollDelta,
+    };
+  }
+
+  double _pointerDeltaToScrollDelta(
+    double pointerDelta,
+    AxisDirection axisDirection,
+  ) {
+    return switch (axisDirection) {
+      AxisDirection.down || AxisDirection.right => -pointerDelta,
+      AxisDirection.up || AxisDirection.left => pointerDelta,
+    };
+  }
+}

@@ -1,0 +1,83 @@
+package cn.com.omnimind.bot.ui.channel
+
+import android.content.Context
+import io.flutter.embedding.engine.FlutterEngine
+
+/**
+ * 用来管理flutter通道
+ */
+class ChannelManager {
+
+    private var specialPermissionChannel: SpecialPermissionChannel = SpecialPermissionChannel()
+    private var assistsCoreChannel: AssistsCoreChannel = AssistsCoreChannel()
+    private var httpChannel: HttpChannel = HttpChannel()
+    private var cacheChannel: CacheChannel = CacheChannel()
+    private var speechRecognitionChannel: SpeechRecognitionChannel = SpeechRecognitionChannel()
+    private var deviceInfoChannel: DeviceInfoChannel = DeviceInfoChannel()
+    private var appStateChannel: AppStateChannel = AppStateChannel()
+    private var fileSaveChannel: FileSaveChannel = FileSaveChannel()
+    private var hideFromRecentsChannel: HideFromRecentsChannel = HideFromRecentsChannel()
+
+    private var uiRouterChannel: UIRouterChannel = UIRouterChannel()
+
+    private var mcpServerChannel: McpServerChannel = McpServerChannel()
+    private var remoteMcpConfigChannel: RemoteMcpConfigChannel = RemoteMcpConfigChannel()
+    private var mem0ConfigChannel: Mem0ConfigChannel = Mem0ConfigChannel()
+    private var overlayChannel: OverlayChannel = OverlayChannel()
+    fun getUIRouterChannel(): UIRouterChannel {
+        return uiRouterChannel
+    }
+    fun getAssistsCoreChannel(): AssistsCoreChannel {
+        return assistsCoreChannel
+    }
+
+    fun configureFlutterEngine(flutterEngine: FlutterEngine
+    ) {
+        specialPermissionChannel.setChannel(flutterEngine)
+        assistsCoreChannel.setChannel( flutterEngine)
+        httpChannel.setChannel(flutterEngine)
+        cacheChannel.setChannel(flutterEngine);
+        speechRecognitionChannel.setChannel(flutterEngine)
+        deviceInfoChannel.setChannel(flutterEngine)
+        appStateChannel.setChannel(flutterEngine)
+        fileSaveChannel.setChannel(flutterEngine)
+        hideFromRecentsChannel.setChannel(flutterEngine)
+        uiRouterChannel.setChannel(flutterEngine)
+        mcpServerChannel.setChannel(flutterEngine)
+        remoteMcpConfigChannel.setChannel(flutterEngine)
+        mem0ConfigChannel.setChannel(flutterEngine)
+        overlayChannel.setChannel(flutterEngine)
+    }
+
+    fun onCreate(context: Context) {
+        specialPermissionChannel.onCreate(context)
+        assistsCoreChannel.onCreate(context)
+        speechRecognitionChannel.onCreate(context)
+        deviceInfoChannel.onCreate(context)
+        appStateChannel.onCreate(context)
+        fileSaveChannel.onCreate(context)
+        hideFromRecentsChannel.onCreate(context)
+        mcpServerChannel.onCreate(context)
+        remoteMcpConfigChannel.onCreate()
+        mem0ConfigChannel.onCreate()
+    }
+
+    fun clearChannel() {
+        specialPermissionChannel.clear()
+        assistsCoreChannel.clear()
+        speechRecognitionChannel.clear()
+        deviceInfoChannel.clear()
+        appStateChannel.clear()
+        fileSaveChannel.clear()
+        hideFromRecentsChannel.clear()
+        uiRouterChannel.clear()
+        cacheChannel.clear()
+        httpChannel.clear()
+        mcpServerChannel.clear()
+        remoteMcpConfigChannel.clear()
+        mem0ConfigChannel.clear()
+        overlayChannel.clear()
+    }
+
+
+}

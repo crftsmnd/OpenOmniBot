@@ -1,0 +1,247 @@
+package cn.com.omnimind.bot.ui.channel
+
+import android.app.Activity
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.core.content.FileProvider
+import cn.com.omnimind.baselib.util.OmniLog
+import cn.com.omnimind.bot.util.AssistsUtil
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import java.io.File
+
+class FileSaveChannel {
+    companion object {
+        private const val TAG = "FileSaveChannel"
+        private const val CHANNEL = "cn.com.omnimind.bot/file_save"
+        private const val REQUEST_CODE_CREATE_DOCUMENT = 39121
+        private const val FILE_PROVIDER_AUTHORITY = "cn.com.omnimind.bot.fileprovider"
+
+        @Volatile
+        private var pendingResult: MethodChannel.Result? = null
+
+        @Volatile
+        private var pendingSourcePath: String? = null
+
+        fun onActivityResult(
+            activity: Activity,
+            requestCode: Int,
+            resultCode: Int,
+            data: Intent?
+        ): Boolean {
+            if (requestCode != REQUEST_CODE_CREATE_DOCUMENT) return false
+
+            val result = pendingResult
+            val sourcePath = pendingSourcePath
+            pendingResult = null
+            pendingSourcePath = null
+
+            if (result == null) return true
+
+            if (resultCode != Activity.RESULT_OK) {
+                result.success(null)
+                return true
+            }
+
+            val targetUri = data?.data
+            if (targetUri == null) {
+                result.error("SAVE_FAILED", "Target uri is null", null)
+                return true
+            }
+            if (sourcePath.isNullOrBlank()) {
+                result.error("SAVE_FAILED", "Source path is null", null)
+                return true
+            }
+
+            try {
+                val source = File(sourcePath)
+                if (!source.exists()) {
+                    result.error("SAVE_FAILED", "Source file missing", sourcePath)
+                    return true
+                }
+                if (source.length() <= 0L) {
+                    result.error("SAVE_FAILED", "Source file is empty", sourcePath)
+                    return true
+                }
+                copyFileToUri(activity, source, targetUri)
+                result.success(targetUri.toString())
+            } catch (e: Exception) {
+                OmniLog.e(TAG, "Failed to save file", e)
+                result.error("SAVE_FAILED", e.message, e.toString())
+            }
+
+            return true
+        }
+
+        private fun copyFileToUri(context: Context, source: File, targetUri: Uri) {
+            context.contentResolver.openOutputStream(targetUri, "w")?.use { output ->
+                source.inputStream().use { input ->
+                    input.copyTo(output)
+                }
+            } ?: error("Cannot open output stream for target uri")
+        }
+    }
+
+    private var channel: MethodChannel? = null
+    private var context: Context? = null
+
+    fun onCreate(context: Context) {
+        this.context = context
+    }
+
+    fun setChannel(flutterEngine: FlutterEngine) {
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        channel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "saveFileWithSystemDialog" -> saveFileWithSystemDialog(call, result)
+                "openFile" -> openFile(call, result)
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun openFile(call: MethodCall, result: MethodChannel.Result) {
+        val activity = context as? Activity
+        if (activity == null) {
+            result.error("INIT_FAILED", "Not attached to activity", null)
+            return
+        }
+        val args = call.arguments as? Map<*, *>
+        val sourcePath = args?.get("sourcePath") as? String
+        val mimeType = args?.get("mimeType") as? String ?: "*/*"
+        if (sourcePath.isNullOrBlank()) {
+            result.error("INVALID_ARGS", "sourcePath is required", null)
+            return
+        }
+
+        try {
+            val sourceFile = File(sourcePath)
+            if (!sourceFile.exists()) {
+                result.error("INVALID_ARGS", "sourcePath does not exist", sourcePath)
+                return
+            }
+            val contentUri = FileProvider.getUriForFile(
+                activity,
+                FILE_PROVIDER_AUTHORITY,
+                sourceFile
+            )
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, if (mimeType.isBlank()) "*/*" else mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(Intent.createChooser(intent, "打开文件"))
+            result.success(true)
+        } catch (e: Exception) {
+            OmniLog.e(TAG, "Failed to open file", e)
+            result.error("OPEN_FAILED", e.message, e.toString())
+        }
+    }
+
+    private fun saveFileWithSystemDialog(call: MethodCall, result: MethodChannel.Result) {
+        val activity = context as? Activity
+        if (activity == null) {
+            result.error("INIT_FAILED", "Not attached to activity", null)
+            return
+        }
+        if (pendingResult != null) {
+            result.error("BUSY", "Another save operation is in progress", null)
+            return
+        }
+
+        val args = call.arguments as? Map<*, *>
+        val sourcePath = args?.get("sourcePath") as? String
+        val fileName = args?.get("fileName") as? String ?: "attachment"
+        val mimeType = args?.get("mimeType") as? String ?: "*/*"
+
+        if (sourcePath.isNullOrBlank()) {
+            result.error("INVALID_ARGS", "sourcePath is required", null)
+            return
+        }
+
+        val sourceFile = File(sourcePath)
+        if (!sourceFile.exists()) {
+            result.error("INVALID_ARGS", "sourcePath does not exist", sourcePath)
+            return
+        }
+
+        // When chat half-screen is showing, avoid opening a system activity to prevent
+        // half-screen being dismissed after returning from the picker.
+        if (AssistsUtil.UI.isChatBotDialogShowing()) {
+            try {
+                val savedUri = saveFileDirectlyToDownloads(activity, sourceFile, fileName, mimeType)
+                if (savedUri != null) {
+                    result.success(savedUri.toString())
+                    return
+                }
+            } catch (e: Exception) {
+                OmniLog.e(TAG, "Direct save failed, fallback to system dialog", e)
+            }
+        }
+
+        pendingResult = result
+        pendingSourcePath = sourcePath
+
+        try {
+            val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = if (mimeType.isBlank()) "*/*" else mimeType
+                putExtra(Intent.EXTRA_TITLE, fileName)
+            }
+            activity.startActivityForResult(intent, REQUEST_CODE_CREATE_DOCUMENT)
+        } catch (e: Exception) {
+            pendingResult = null
+            pendingSourcePath = null
+            result.error("INIT_FAILED", e.message, e.toString())
+        }
+    }
+
+    private fun saveFileDirectlyToDownloads(
+        context: Context,
+        sourceFile: File,
+        fileName: String,
+        mimeType: String
+    ): Uri? {
+        val resolver = context.contentResolver
+        val safeMimeType = if (mimeType.isBlank()) "application/octet-stream" else mimeType
+        val safeName = fileName.ifBlank { "attachment" }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                put(MediaStore.Downloads.MIME_TYPE, safeMimeType)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+
+            val targetUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+
+            try {
+                resolver.openOutputStream(targetUri, "w")?.use { output ->
+                    sourceFile.inputStream().use { input -> input.copyTo(output) }
+                } ?: error("Cannot open output stream for target uri")
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(targetUri, values, null, null)
+                return targetUri
+            } catch (e: Exception) {
+                resolver.delete(targetUri, null, null)
+                throw e
+            }
+        }
+
+        return null
+    }
+
+    fun clear() {
+        channel?.setMethodCallHandler(null)
+        channel = null
+    }
+}

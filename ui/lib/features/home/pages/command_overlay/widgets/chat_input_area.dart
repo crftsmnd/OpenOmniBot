@@ -1,0 +1,267 @@
+// lib/widgets/chat_input_area.dart
+import 'dart:async';
+import 'dart:io';
+import 'dart:math' as math;
+import 'dart:ui';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:ui/services/speech_channel_service.dart';
+import 'package:ui/services/special_permission.dart';
+import 'package:ui/widgets/text_input_context_menu.dart';
+
+part 'chat_input_area_recording.dart';
+part 'chat_input_area_composer.dart';
+part 'chat_input_area_popup.dart';
+
+const String _kLucideMicSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" '
+    'viewBox="0 0 24 24" fill="none" stroke="url(#paint0_linear_mic)" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round" '
+    'class="lucide lucide-mic-icon lucide-mic">'
+    '<path d="M12 19v3"/>'
+    '<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>'
+    '<rect x="9" y="2" width="6" height="13" rx="3"/>'
+    '<defs>'
+    '<linearGradient id="paint0_linear_mic" x1="3.4" y1="-1.8" x2="27.6" y2="7.9" gradientUnits="userSpaceOnUse">'
+    '<stop stop-color="#1930D9"/>'
+    '<stop offset="1" stop-color="#2DA5F0"/>'
+    '</linearGradient>'
+    '</defs>'
+    '</svg>';
+
+enum RecordingState { idle, starting, recording, stopping, waitingServerStop }
+
+class ChatInputAttachment {
+  final String id;
+  final String name;
+  final String path;
+  final int? size;
+  final String? mimeType;
+  final bool isImage;
+
+  const ChatInputAttachment({
+    required this.id,
+    required this.name,
+    required this.path,
+    this.size,
+    this.mimeType,
+    this.isImage = false,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'path': path,
+      if (size != null) 'size': size,
+      if (mimeType != null) 'mimeType': mimeType,
+      'isImage': isImage,
+    };
+  }
+}
+
+class ChatInputArea extends StatefulWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool isProcessing;
+  final VoidCallback onSendMessage;
+  final VoidCallback onCancelTask;
+  final ValueChanged<bool>? onPopupVisibilityChanged;
+  final ValueChanged<RecordingState>? onRecordingStateChanged;
+  final ValueChanged<double>? onInputHeightChanged;
+  final bool? openClawEnabled;
+  final ValueChanged<bool>? onToggleOpenClaw;
+  final VoidCallback? onLongPressOpenClaw;
+
+  /// 是否使用毛玻璃效果（command_overlay 使用毛玻璃，chatbotsheet 使用白色+阴影）
+  final bool useFrostedGlass;
+  final bool useLargeComposerStyle;
+  final bool useAttachmentPickerForPlus;
+  final Future<void> Function()? onPickAttachment;
+  final List<ChatInputAttachment> attachments;
+  final ValueChanged<String>? onRemoveAttachment;
+
+  const ChatInputArea({
+    super.key,
+    required this.controller,
+    required this.focusNode,
+    required this.isProcessing,
+    required this.onSendMessage,
+    required this.onCancelTask,
+    this.onPopupVisibilityChanged,
+    this.onRecordingStateChanged,
+    this.onInputHeightChanged,
+    this.openClawEnabled,
+    this.onToggleOpenClaw,
+    this.onLongPressOpenClaw,
+    this.useFrostedGlass = false,
+    this.useLargeComposerStyle = false,
+    this.useAttachmentPickerForPlus = false,
+    this.onPickAttachment,
+    this.attachments = const [],
+    this.onRemoveAttachment,
+  });
+
+  @override
+  State<ChatInputArea> createState() => ChatInputAreaState();
+}
+
+class ChatInputAreaState extends _ChatInputAreaStateBase
+    with
+        _ChatInputAreaRecordingMixin,
+        _ChatInputAreaComposerMixin,
+        _ChatInputAreaPopupMixin {}
+
+abstract class _ChatInputAreaStateBase extends State<ChatInputArea>
+    with TickerProviderStateMixin {
+  late ValueNotifier<bool> _hasTextNotifier;
+  late ValueNotifier<bool> _isFocusedNotifier;
+  bool _isPopupVisible = false;
+
+  // 录音相关状态
+  RecordingState _recordingState = RecordingState.idle;
+  String _textBeforeRecording = ''; // 录音开始前的文本
+  String _currentTranscript = ''; // 当前语音识别的文本
+  StreamSubscription? _transcriptionSubscription;
+  Completer<void>? _streamDoneCompleter;
+  Timer? _waitingServerStopTimer;
+  bool _isFinalizingTranscription = false;
+  final ScrollController _textFieldScrollController = ScrollController();
+
+  bool get isPopupVisible => _isPopupVisible;
+  bool get isRecording => _recordingState != RecordingState.idle;
+
+  // 超时兜底：防止 start/stop 卡死在 starting/stopping（例如通道调用挂起）
+  final Duration _startTimeout = const Duration(seconds: 8);
+  final Duration _stopTimeout = const Duration(seconds: 5);
+  final Duration _waitingServerStopTimeout = const Duration(seconds: 4);
+
+  // 时间窗口限流：频繁点击不下发到原生，直接提示
+  final int _toggleMinIntervalMs = 800;
+  int _lastToggleAcceptedAtMs = 0;
+
+  // 提示去抖：避免疯狂点击导致 toast 刷屏
+  final int _fastTapToastMinIntervalMs = 800;
+  int _lastFastTapToastAtMs = 0;
+  bool _toggleInProgress = false;
+  double _lastReportedInputHeight = 44;
+  bool _inputHeightReportScheduled = false;
+  bool _isComposerHovered = false;
+  late AnimationController _composerFlowController;
+
+  late Widget _micSvg;
+  late Widget _sendSvg;
+  late Widget _pauseSvg;
+  late Widget _addSvg;
+  late Widget _closeSvg;
+
+  // 按钮动画相关
+  final Duration _buttonAnimationDuration = const Duration(milliseconds: 200);
+  final Curve _buttonAnimationCurve = Curves.easeInOut;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasTextNotifier = ValueNotifier<bool>(false);
+    _isFocusedNotifier = ValueNotifier<bool>(false);
+    widget.controller.addListener(_onTextChanged);
+    widget.focusNode.addListener(_onFocusChanged);
+
+    _micSvg = SvgPicture.string(_kLucideMicSvg, width: 24, height: 24);
+    _sendSvg = SvgPicture.asset(
+      'assets/home/send_icon.svg',
+      width: 24,
+      height: 24,
+    );
+    _pauseSvg = SvgPicture.asset(
+      'assets/home/input_pause_icon.svg',
+      width: 20,
+      height: 20,
+    );
+    _addSvg = SvgPicture.asset(
+      'assets/home/input_add_icon.svg',
+      width: 20,
+      height: 20,
+    );
+    _closeSvg = SvgPicture.asset(
+      'assets/home/input_add_close_icon.svg',
+      width: 20,
+      height: 20,
+    );
+
+    // 进入界面先预取 asr ws token（仅用于 WS 握手）
+    _initSpeechRecognition();
+    _composerFlowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 8000),
+    )..repeat();
+    _reportInputHeightAfterBuild();
+  }
+
+  Future<void> _initSpeechRecognition() async {
+    try {
+      await AsrSpeechRecognitionService.ensureInitialized();
+    } catch (e) {
+      debugPrint('Failed to init speech recognition: $e');
+    }
+  }
+
+  void _onTextChanged() {
+    _hasTextNotifier.value = widget.controller.text.trim().isNotEmpty;
+    _reportInputHeightAfterBuild();
+  }
+
+  void _onFocusChanged() {
+    _isFocusedNotifier.value = widget.focusNode.hasFocus;
+    _reportInputHeightAfterBuild();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatInputArea oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.attachments != widget.attachments ||
+        oldWidget.useLargeComposerStyle != widget.useLargeComposerStyle ||
+        oldWidget.useFrostedGlass != widget.useFrostedGlass) {
+      _reportInputHeightAfterBuild();
+    }
+  }
+
+  @override
+  void dispose() {
+    _transcriptionSubscription?.cancel();
+    _waitingServerStopTimer?.cancel();
+    _textFieldScrollController.dispose();
+    _hasTextNotifier.dispose();
+    _isFocusedNotifier.dispose();
+    _composerFlowController.dispose();
+    widget.controller.removeListener(_onTextChanged);
+    widget.focusNode.removeListener(_onFocusChanged);
+    super.dispose();
+  }
+
+  void _setRecordingState(RecordingState state) {
+    if (mounted) {
+      setState(() => _recordingState = state);
+    } else {
+      _recordingState = state;
+    }
+    widget.onRecordingStateChanged?.call(state);
+  }
+
+  void _reportInputHeightAfterBuild() {
+    if (_inputHeightReportScheduled) return;
+    _inputHeightReportScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _inputHeightReportScheduled = false;
+      if (!mounted) return;
+      final renderBox = context.findRenderObject() as RenderBox?;
+      if (renderBox == null || !renderBox.hasSize) return;
+      final height = renderBox.size.height;
+      if ((height - _lastReportedInputHeight).abs() < 0.5) return;
+      _lastReportedInputHeight = height;
+      widget.onInputHeightChanged?.call(height);
+    });
+  }
+}

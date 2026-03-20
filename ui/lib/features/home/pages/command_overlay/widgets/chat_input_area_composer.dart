@@ -1,0 +1,725 @@
+part of 'chat_input_area.dart';
+
+mixin _ChatInputAreaComposerMixin
+    on _ChatInputAreaStateBase, _ChatInputAreaRecordingMixin {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (widget.useLargeComposerStyle) {
+      return SafeArea(child: _buildLargeComposerShell(theme));
+    }
+
+    if (widget.useFrostedGlass) {
+      // command_overlay 样式：毛玻璃效果
+      return SafeArea(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+              decoration: BoxDecoration(
+                color: const Color(0xE6F1F8FF), // rgba(241,248,255,0.9)
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: _buildInputContent(theme),
+            ),
+          ),
+        ),
+      );
+    } else {
+      // chatbotsheet 样式：白色+阴影
+      return SafeArea(
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              height: 44,
+              padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: _buildInputContent(theme),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  /// 构建输入框内容区域（按钮、文本框等）
+  Widget _buildInputContent(ThemeData theme) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _hasTextNotifier,
+      builder: (context, hasText, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: _isFocusedNotifier,
+          builder: (context, isFocused, _) {
+            final openClawButton = _buildOpenClawButton();
+            final hasPayload = hasText || widget.attachments.isNotEmpty;
+            return Row(
+              children: [
+                Expanded(child: _buildTextField()),
+                const SizedBox(width: 9),
+                _buildAnimatedButtonRow(
+                  theme: theme,
+                  hasText: hasPayload,
+                  isFocused: isFocused,
+                  openClawButton: openClawButton,
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLargeComposer(ThemeData theme) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _hasTextNotifier,
+      builder: (context, hasText, _) {
+        return ValueListenableBuilder<bool>(
+          valueListenable: _isFocusedNotifier,
+          builder: (context, _, _) {
+            final hasPayload = hasText || widget.attachments.isNotEmpty;
+
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (widget.attachments.isNotEmpty) ...[
+                  _buildAttachmentPreview(),
+                  const SizedBox(height: 8),
+                ],
+                _buildTextField(multiline: true),
+                const SizedBox(height: 6),
+                _buildLargeActionRow(theme: theme, hasPayload: hasPayload),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLargeActionRow({
+    required ThemeData theme,
+    required bool hasPayload,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(width: 28, height: 28, child: _buildLargeAddButton()),
+        const Spacer(),
+        SizedBox(
+          width: 28,
+          height: 28,
+          child:
+              _buildMicButtonAnimated(theme: theme) ?? const SizedBox.shrink(),
+        ),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: _buildLargeSendOrStopButton(hasPayload: hasPayload),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLargeAddButton() {
+    return IconButton(
+      padding: EdgeInsets.zero,
+      iconSize: 20,
+      icon: _addSvg,
+      onPressed: () {
+        if (widget.useAttachmentPickerForPlus &&
+            widget.onPickAttachment != null) {
+          if (_isPopupVisible) {
+            setState(() => _isPopupVisible = false);
+            widget.onPopupVisibilityChanged?.call(false);
+          }
+          widget.onPickAttachment?.call();
+          return;
+        }
+
+        setState(() {
+          _isPopupVisible = false;
+        });
+        widget.onPopupVisibilityChanged?.call(false);
+      },
+    );
+  }
+
+  Widget _buildLargeSendOrStopButton({required bool hasPayload}) {
+    final isProcessing = widget.isProcessing;
+    final canSend = hasPayload;
+    final canTap = isProcessing || canSend;
+    final icon = isProcessing ? _pauseSvg : _sendSvg;
+
+    return AnimatedOpacity(
+      duration: _buttonAnimationDuration,
+      curve: _buttonAnimationCurve,
+      opacity: canTap ? 1 : 0.38,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        icon: AnimatedSwitcher(
+          duration: _buttonAnimationDuration,
+          switchInCurve: _buttonAnimationCurve,
+          switchOutCurve: _buttonAnimationCurve,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            );
+          },
+          child: SizedBox(key: ValueKey<bool>(isProcessing), child: icon),
+        ),
+        onPressed: !canTap
+            ? null
+            : () {
+                if (isProcessing) {
+                  widget.onCancelTask();
+                } else {
+                  widget.onSendMessage();
+                }
+              },
+      ),
+    );
+  }
+
+  Widget _buildLargeComposerShell(ThemeData theme) {
+    final content = RepaintBoundary(child: _buildLargeComposer(theme));
+    return MouseRegion(
+      onEnter: (_) {
+        if (_isComposerHovered) return;
+        setState(() => _isComposerHovered = true);
+      },
+      onExit: (_) {
+        if (!_isComposerHovered) return;
+        setState(() => _isComposerHovered = false);
+      },
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _isFocusedNotifier,
+        child: content,
+        builder: (context, focused, child) {
+          const inputSurfaceColor = Color(0xFFF9FCFF);
+          final hovered = _isComposerHovered;
+          const minShellHeight = 72.0;
+          const shellRadius = 20.0;
+          const borderInset = 1.5;
+          final innerRadius = math.max(0.0, shellRadius - borderInset);
+          const contentPadding = EdgeInsets.fromLTRB(14, 8, 12, 8);
+          final shouldGlowStrong = focused || hovered || isRecording;
+
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            constraints: BoxConstraints(minHeight: minShellHeight),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(shellRadius),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0x1F2F7BFF).withValues(
+                    alpha: focused
+                        ? 0.2
+                        : hovered
+                        ? 0.15
+                        : 0.1,
+                  ),
+                  blurRadius: focused ? 16 : 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Stack(
+              children: [
+                AnimatedPadding(
+                  duration: const Duration(milliseconds: 240),
+                  curve: Curves.easeOutCubic,
+                  padding: EdgeInsets.all(borderInset),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(innerRadius),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      padding: contentPadding,
+                      decoration: BoxDecoration(
+                        color: inputSurfaceColor,
+                        borderRadius: BorderRadius.circular(innerRadius),
+                        border: Border.all(
+                          color: Colors.white.withValues(
+                            alpha: focused
+                                ? 0.32
+                                : hovered
+                                ? 0.2
+                                : 0.1,
+                          ),
+                          width: 1,
+                        ),
+                      ),
+                      child: AnimatedSize(
+                        duration: const Duration(milliseconds: 220),
+                        curve: Curves.easeOutCubic,
+                        alignment: Alignment.topCenter,
+                        child: child ?? const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _ComposerFlowBorderPainter(
+                        progress: _composerFlowController,
+                        interactive: shouldGlowStrong,
+                        focused: focused,
+                        forceStrong: isRecording,
+                        radius: shellRadius,
+                        strokeWidth: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildAttachmentPreview() {
+    return SizedBox(
+      height: 72,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: widget.attachments.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final item = widget.attachments[index];
+          if (item.isImage) {
+            return _buildImageAttachmentTile(item);
+          }
+          return _buildFileAttachmentTile(item);
+        },
+      ),
+    );
+  }
+
+  Widget _buildImageAttachmentTile(ChatInputAttachment item) {
+    return Stack(
+      children: [
+        Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFD3E3FB), width: 1),
+            color: const Color(0xFFF1F6FF),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Image.file(
+            File(item.path),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const Center(
+              child: Icon(
+                Icons.image_not_supported_outlined,
+                size: 20,
+                color: Color(0xFF6A83AA),
+              ),
+            ),
+          ),
+        ),
+        _buildAttachmentRemoveButton(item.id),
+      ],
+    );
+  }
+
+  Widget _buildFileAttachmentTile(ChatInputAttachment item) {
+    final sizeText = _formatAttachmentSize(item.size);
+    return Stack(
+      children: [
+        Container(
+          width: 160,
+          height: 72,
+          padding: const EdgeInsets.fromLTRB(10, 8, 28, 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F6FF),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFD3E3FB), width: 1),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.insert_drive_file_outlined,
+                size: 18,
+                color: Color(0xFF3B6FD6),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  sizeText.isEmpty ? item.name : '${item.name}\n$sizeText',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF35517A),
+                    fontWeight: FontWeight.w500,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _buildAttachmentRemoveButton(item.id),
+      ],
+    );
+  }
+
+  Widget _buildAttachmentRemoveButton(String attachmentId) {
+    if (widget.onRemoveAttachment == null) {
+      return const SizedBox.shrink();
+    }
+    return Positioned(
+      right: 4,
+      top: 4,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => widget.onRemoveAttachment?.call(attachmentId),
+        child: Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.62),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.close_rounded, size: 12, color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  String _formatAttachmentSize(int? size) {
+    if (size == null || size <= 0) return '';
+    if (size < 1024) return '${size}B';
+    if (size < 1024 * 1024) return '${(size / 1024).toStringAsFixed(1)}KB';
+    return '${(size / (1024 * 1024)).toStringAsFixed(1)}MB';
+  }
+
+  /// 构建带动画的按钮行
+  Widget _buildAnimatedButtonRow({
+    required ThemeData theme,
+    required bool hasText,
+    required bool isFocused,
+    required Widget? openClawButton,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // OpenClaw 按钮 - 始终显示在固定位置
+        if (openClawButton != null) ...[
+          openClawButton,
+          const SizedBox(width: 2),
+        ],
+        SizedBox(
+          width: 24,
+          height: 24,
+          child: _buildMicButtonAnimated(theme: theme),
+        ),
+        const SizedBox(width: 2),
+        // 发送/添加按钮
+        _buildSendButton(theme: theme, hasText: hasText, isFocused: isFocused),
+      ],
+    );
+  }
+
+  /// 构建带动画的麦克风按钮（点击开始/停止录音）
+  Widget? _buildMicButtonAnimated({required ThemeData theme}) {
+    return _buildMicControlButton(iconSize: 18);
+  }
+
+  Widget _buildMicControlButton({required double iconSize}) {
+    final recordingActive = isRecording;
+    final bgColor = recordingActive
+        ? const Color(0x1AE53935)
+        : Colors.transparent;
+    return IconButton(
+      padding: EdgeInsets.zero,
+      iconSize: iconSize,
+      icon: AnimatedContainer(
+        duration: _buttonAnimationDuration,
+        curve: _buttonAnimationCurve,
+        width: 24,
+        height: 24,
+        decoration: BoxDecoration(color: bgColor, shape: BoxShape.circle),
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            SizedBox(width: iconSize, height: iconSize, child: _micSvg),
+            if (recordingActive)
+              Positioned(
+                right: 2,
+                top: 2,
+                child: Container(
+                  width: 6,
+                  height: 6,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE53935),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      onPressed: () {
+        toggleRecording();
+      },
+    );
+  }
+
+  /// 统一的输入框组件（录音模式和输入模式共用）
+  Widget _buildTextField({bool multiline = false}) {
+    final textStyle = TextStyle(
+      fontSize: multiline ? 15.0 : 14.0,
+      height: multiline ? 1.45 : 1.43,
+      color: const Color(0xFF353E53),
+      letterSpacing: 0.333,
+    );
+    return GestureDetector(
+      onTap: () {
+        if (isRecording) {
+          // 录音模式下点击，停止录音并切换到输入模式
+          _onTranscriptTap();
+        } else {
+          widget.focusNode.requestFocus();
+        }
+      },
+      child: AbsorbPointer(
+        absorbing: isRecording || !widget.focusNode.hasFocus,
+        child: TextField(
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          scrollController: _textFieldScrollController,
+          keyboardType: TextInputType.text,
+          minLines: 1,
+          maxLines: multiline ? 2 : 1,
+          scrollPhysics: const ClampingScrollPhysics(),
+          textAlignVertical: multiline
+              ? TextAlignVertical.top
+              : TextAlignVertical.center,
+          textCapitalization: TextCapitalization.sentences,
+          style: textStyle,
+          contextMenuBuilder: (context, editableTextState) =>
+              TextInputContextMenu(editableTextState: editableTextState),
+          decoration: InputDecoration(
+            hintText: isRecording ? '输入或直接说，我在听' : '请输入内容',
+            hintStyle: TextStyle(
+              fontSize: multiline ? 15.0 : 14.0,
+              color: const Color(0x80353E53), // rgba(53,62,83,0.5)
+              height: multiline ? 1.45 : 1.43,
+              letterSpacing: 0.333,
+            ),
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.symmetric(vertical: multiline ? 2 : 12),
+            isDense: true,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// OpenClaw 开关按钮（位于语音按钮左侧）
+  /// 点击切换开关，长按唤出配置面板
+  Widget? _buildOpenClawButton() {
+    if (widget.openClawEnabled == null || widget.onToggleOpenClaw == null) {
+      return null;
+    }
+
+    final isEnabled = widget.openClawEnabled == true;
+
+    return GestureDetector(
+      onLongPress: widget.onLongPressOpenClaw,
+      child: SizedBox(
+        width: 24,
+        height: 24,
+        child: IconButton(
+          padding: EdgeInsets.zero,
+          iconSize: 20,
+          icon: AnimatedSwitcher(
+            duration: _buttonAnimationDuration,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(scale: animation, child: child),
+              );
+            },
+            child: SvgPicture.asset(
+              isEnabled
+                  ? 'assets/home/openclaw.svg'
+                  : 'assets/home/openclaw_gray.svg',
+              key: ValueKey<bool>(isEnabled),
+              width: 20,
+              height: 20,
+            ),
+          ),
+          onPressed: () => widget.onToggleOpenClaw?.call(!isEnabled),
+        ),
+      ),
+    );
+  }
+
+  /// 右侧发送/添加按钮
+  Widget _buildSendButton({
+    required ThemeData theme,
+    required bool hasText,
+    required bool isFocused,
+  }) {
+    Widget icon;
+    VoidCallback? onPressed;
+    String iconKey;
+
+    if (widget.isProcessing) {
+      icon = _pauseSvg;
+      iconKey = 'pause';
+      onPressed = () {
+        widget.onCancelTask();
+      };
+    } else if (hasText) {
+      icon = _sendSvg;
+      iconKey = 'send';
+      onPressed = () {
+        widget.onSendMessage();
+      };
+    } else {
+      icon = _addSvg;
+      iconKey = 'add';
+      if (widget.useAttachmentPickerForPlus &&
+          widget.onPickAttachment != null) {
+        onPressed = () {
+          if (_isPopupVisible) {
+            setState(() => _isPopupVisible = false);
+            widget.onPopupVisibilityChanged?.call(false);
+          }
+          widget.onPickAttachment?.call();
+        };
+      } else {
+        if (_isPopupVisible) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            setState(() => _isPopupVisible = false);
+            widget.onPopupVisibilityChanged?.call(false);
+          });
+        }
+        onPressed = null;
+      }
+    }
+
+    return SizedBox(
+      width: 24,
+      height: 24,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        iconSize: 20,
+        icon: AnimatedSwitcher(
+          duration: _buttonAnimationDuration,
+          switchInCurve: _buttonAnimationCurve,
+          switchOutCurve: _buttonAnimationCurve,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            );
+          },
+          child: SizedBox(key: ValueKey<String>(iconKey), child: icon),
+        ),
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
+class _ComposerFlowBorderPainter extends CustomPainter {
+  final Animation<double> progress;
+  final bool interactive;
+  final bool focused;
+  final bool forceStrong;
+  final double radius;
+  final double strokeWidth;
+
+  _ComposerFlowBorderPainter({
+    required this.progress,
+    required this.interactive,
+    required this.focused,
+    required this.forceStrong,
+    required this.radius,
+    required this.strokeWidth,
+  }) : super(repaint: progress);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final flow = progress.value;
+    final breath = (math.sin(flow * 2 * math.pi) + 1) / 2;
+    final speed = focused ? 1.6 : 1.0;
+    final shift = ((flow * speed) % 1.0) * 2 - 1;
+    final rawOpacity = forceStrong
+        ? 0.9
+        : (interactive ? (focused ? 1.0 : 0.82) : (0.3 + breath * 0.4));
+    final clampedOpacity = rawOpacity.clamp(0.0, 1.0);
+    if (clampedOpacity <= 0 || size.isEmpty) return;
+
+    final rect = Offset.zero & size;
+    final rrect = RRect.fromRectAndRadius(
+      rect.deflate(strokeWidth / 2),
+      Radius.circular(radius - strokeWidth / 2),
+    );
+    final gradient = LinearGradient(
+      begin: Alignment(-1 + shift, 0),
+      end: Alignment(1 + shift, 0),
+      colors: [
+        const Color(0xFFFF6A01).withValues(alpha: clampedOpacity),
+        const Color(0xFFF8C91C).withValues(alpha: clampedOpacity),
+        const Color(0xFF8A2BE2).withValues(alpha: clampedOpacity),
+        const Color(0xFF00BFFF).withValues(alpha: clampedOpacity),
+        const Color(0xFFFF0055).withValues(alpha: clampedOpacity),
+        const Color(0xFFFF6A01).withValues(alpha: clampedOpacity),
+      ],
+      stops: const [0.0, 0.2, 0.4, 0.62, 0.82, 1.0],
+    );
+
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..isAntiAlias = true
+      ..shader = gradient.createShader(rect);
+
+    canvas.drawRRect(rrect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ComposerFlowBorderPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.interactive != interactive ||
+        oldDelegate.focused != focused ||
+        oldDelegate.forceStrong != forceStrong ||
+        oldDelegate.radius != radius ||
+        oldDelegate.strokeWidth != strokeWidth;
+  }
+}

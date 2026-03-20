@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+   <style name="Theme.OmnibotApp.Splash" parent="android:Theme.Material.Light.NoActionBar">
+       <!-- Android 12+ Splash Screen API 配置 -->
+       <item name="android:windowSplashScreenBackground">@android:color/white</item>
+       <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+       <item name="android:windowSplashScreenIconBackgroundColor">@android:color/white</item>
+       <item name="android:windowSplashScreenAnimationDuration">200</item>
+      
+       <!-- 主窗口：使用与低版本相同的背景 -->
+       <item name="android:windowBackground">@drawable/splash_background</item>
+       <item name="android:statusBarColor">@android:color/white</item>
+       <item name="android:navigationBarColor">@android:color/white</item>
+       <item name="android:windowLightStatusBar">false</item>
+       <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+   </style>
+</resources>
+
+

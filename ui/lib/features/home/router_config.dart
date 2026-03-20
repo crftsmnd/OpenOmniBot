@@ -1,0 +1,227 @@
+import 'package:flutter/widgets.dart';
+import 'package:go_router/go_router.dart';
+import 'package:ui/features/home/pages/alarm_setting/alarm_setting_page.dart';
+import 'package:ui/features/home/pages/authorize_setting/authorize_setting_page.dart';
+import 'package:ui/features/home/pages/companion_setting/companion_setting_page.dart';
+import 'package:ui/features/home/pages/chat_history/chat_history_page.dart';
+import 'package:ui/features/home/pages/permission_guide/permission_guide_detail_page.dart';
+import 'package:ui/features/home/pages/permission_guide/permission_guide_page.dart';
+import 'pages/authorize/authorize_page.dart';
+import 'pages/authorize/authorize_page_args.dart';
+import 'pages/chat/chat_page.dart';
+import 'pages/command_overlay/command_overlay.dart';
+import 'pages/edit_profile/edit_profile_page.dart';
+import 'pages/mem0/mem0_setting_page.dart';
+import 'pages/omnibot_workspace/omnibot_artifact_preview_page.dart';
+import 'pages/omnibot_workspace/omnibot_workspace_page.dart';
+import 'pages/webview/webview_page.dart';
+import 'pages/settings/settings_page.dart';
+import 'pages/mcp/remote_mcp_servers_page.dart';
+import 'pages/termux_setting/termux_setting_page.dart';
+import 'pages/scene_model_setting/scene_model_setting_page.dart';
+import 'pages/vlm_model_setting/vlm_model_setting_page.dart';
+
+/// Home模块路由配置
+const String kNativeRouteFlag = '__from_native__';
+List<GoRoute> homeRoutes = [
+  // 兼容旧首页路由，统一落到聊天页
+  GoRoute(
+    path: '/home/home',
+    name: 'home/home',
+    builder: (context, state) {
+      final conversationIdFromQuery =
+          state.uri.queryParameters['conversationId'];
+      final argsFromExtra = state.extra as List<String>? ?? [];
+      final args = conversationIdFromQuery != null
+          ? [conversationIdFromQuery, kNativeRouteFlag]
+          : argsFromExtra;
+      return ChatPage(args: args);
+    },
+  ),
+  GoRoute(
+    path: '/home/blank_page',
+    name: 'home/blank_page',
+    builder: (context, state) => const SizedBox.shrink(),
+  ),
+
+  // 聊天页
+  GoRoute(
+    path: '/home/chat',
+    name: 'home/chat',
+    builder: (context, state) {
+      // 支持两种参数传递方式：
+      // 1. 从原生端跳转时使用 query parameter: /home/chat?conversationId=123
+      // 2. 从 Flutter 导航时使用 extra: GoRouterManager.push('/home/chat', extra: ['123'])
+      final conversationIdFromQuery =
+          state.uri.queryParameters['conversationId'];
+      final argsFromExtra = state.extra as List<String>? ?? [];
+
+      // 优先使用 query parameter，如果没有则使用 extra
+      final args = conversationIdFromQuery != null
+          ? [conversationIdFromQuery, kNativeRouteFlag]
+          : argsFromExtra;
+      return ChatPage(args: args);
+    },
+  ),
+
+  // 聊天历史页
+  GoRoute(
+    path: '/home/chat_history',
+    name: 'home/chat_history',
+    builder: (context, state) => const ChatHistoryPage(),
+  ),
+
+  // 输入框悬浮窗
+  GoRoute(
+    path: '/home/command_overlay',
+    name: 'home/command_overlay',
+    builder: (context, state) {
+      final scene = state.uri.queryParameters['scene'];
+      return CommandOverlay(scene: scene);
+    },
+  ),
+
+  GoRoute(
+    path: '/home/omnibot_artifact_preview',
+    name: 'home/omnibot_artifact_preview',
+    builder: (context, state) {
+      final extra = state.extra as Map<String, dynamic>? ?? const {};
+      return OmnibotArtifactPreviewPage(
+        path: (extra['path'] ?? '').toString(),
+        uri: extra['uri']?.toString(),
+        title: (extra['title'] ?? '文件预览').toString(),
+        previewKind: (extra['previewKind'] ?? 'file').toString(),
+        mimeType: (extra['mimeType'] ?? 'application/octet-stream').toString(),
+        shellPath: extra['shellPath']?.toString(),
+        exists: extra['exists'] != false,
+      );
+    },
+  ),
+
+  GoRoute(
+    path: '/home/omnibot_workspace',
+    name: 'home/omnibot_workspace',
+    builder: (context, state) {
+      final extra = state.extra as Map<String, dynamic>? ?? const {};
+      return OmnibotWorkspacePage(
+        workspacePath: (extra['workspacePath'] ?? '').toString(),
+        workspaceId: extra['workspaceId']?.toString(),
+        workspaceShellPath: extra['workspaceShellPath']?.toString(),
+      );
+    },
+  ),
+
+  // 授权页
+  GoRoute(
+    path: '/home/authorize',
+    name: 'home/authorize',
+    builder: (context, state) =>
+        AuthorizePage(args: state.extra as AuthorizePageArgs?),
+  ),
+
+  // 编辑资料页
+  GoRoute(
+    path: '/home/edit_profile',
+    name: 'home/edit_profile',
+    builder: (context, state) {
+      final extra = state.extra as Map<String, dynamic>?;
+      return EditProfilePage(
+        initialAvatarIndex: extra?['initialAvatarIndex'] as int?,
+        initialNickname: extra?['initialNickname'] as String?,
+      );
+    },
+  ),
+
+  // Webview通用页面
+  GoRoute(
+    path: '/webview/webview_page',
+    name: 'webview/webview_page',
+    builder: (context, state) {
+      final params = state.extra as Map<String, dynamic>?;
+      return WebViewPage(
+        url: params?['url'] ?? '',
+        title: params?['title'] ?? '',
+        showAppBar: params?['showAppBar'] ?? true,
+        enableJavaScript: params?['enableJavaScript'] ?? true,
+        enableZoom: params?['enableZoom'] ?? true,
+        showRefreshButton: params?['showRefreshButton'] ?? false,
+      );
+    },
+  ),
+
+  // 设置页
+  GoRoute(
+    path: '/home/settings',
+    name: 'home/settings',
+    builder: (context, state) => const SettingsPage(),
+  ),
+
+  GoRoute(
+    path: '/home/permission_guide',
+    name: 'home/permission_guide',
+    builder: (context, state) => PermissionGuidePage(
+      initialBrand: state.uri.queryParameters['brand'],
+    ),
+  ),
+
+  GoRoute(
+    path: '/home/permission_guide/detail',
+    name: 'home/permission_guide/detail',
+    builder: (context, state) => PermissionGuideDetailPage(
+      type: state.uri.queryParameters['type'] ?? '',
+      initialBrand: state.uri.queryParameters['brand'],
+    ),
+  ),
+
+  // 闹钟设置页
+  GoRoute(
+    path: '/home/alarm_setting',
+    name: 'home/alarm_setting',
+    builder: (context, state) => const AlarmSettingPage(),
+  ),
+
+  GoRoute(
+    path: '/home/mcp_tools',
+    name: 'home/mcp_tools',
+    builder: (context, state) => const RemoteMcpServersPage(),
+  ),
+
+  GoRoute(
+    path: '/home/mem0_setting',
+    name: 'home/mem0_setting',
+    builder: (context, state) => const Mem0SettingPage(),
+  ),
+
+  // VLM 模型配置页
+  GoRoute(
+    path: '/home/vlm_model_setting',
+    name: 'home/vlm_model_setting',
+    builder: (context, state) => const VlmModelSettingPage(),
+  ),
+
+  GoRoute(
+    path: '/home/scene_model_setting',
+    name: 'home/scene_model_setting',
+    builder: (context, state) => const SceneModelSettingPage(),
+  ),
+
+  GoRoute(
+    path: '/home/termux_setting',
+    name: 'home/termux_setting',
+    builder: (context, state) => const TermuxSettingPage(),
+  ),
+
+  // 应用权限授权页
+  GoRoute(
+    path: '/home/authorize_setting',
+    name: 'home/authorize_setting',
+    builder: (context, state) => const AuthorizeSettingPage(),
+  ),
+
+  // 陪伴权限授权页
+  GoRoute(
+    path: '/home/companion_setting',
+    name: 'home/companion_setting',
+    builder: (context, state) => const CompanionSettingPage(),
+  ),
+];

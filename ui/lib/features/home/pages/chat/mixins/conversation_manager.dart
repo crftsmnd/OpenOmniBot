@@ -1,0 +1,466 @@
+import 'package:flutter/material.dart';
+import '../../../../../models/conversation_model.dart';
+import '../../../../../models/chat_message_model.dart';
+import '../../../../../services/conversation_service.dart';
+import '../../../../../services/conversation_history_service.dart';
+
+/// 对话管理 Mixin
+/// 负责对话的创建、加载、保存、切换等功能
+mixin ConversationManager<T extends StatefulWidget> on State<T> {
+  static const String _kNativeRouteFlag = '__from_native__';
+  bool _hasSavedConversation = false;
+
+  // ===================== 抽象属性/方法（需要在主类中实现）=====================
+  
+  List<ChatMessageModel> get messages;
+  int? get currentConversationId;
+  set currentConversationId(int? value);
+  ConversationModel? get currentConversation;
+  set currentConversation(ConversationModel? value);
+  List<String> get widgetArgs;
+  void onConversationReset() {}
+  void onConversationLoaded(
+    int conversationId,
+    ConversationModel? conversation,
+    List<ChatMessageModel> messages,
+  ) {}
+  void onConversationPersisted(
+    int conversationId,
+    ConversationModel conversation,
+    List<ChatMessageModel> messages,
+  ) {}
+
+  // ===================== 对话初始化 =====================
+
+  /// 初始化对话
+  Future<void> initializeConversation() async {
+    // 多引擎/跨隔离场景下，仅在原生路由携带 conversationId 时刷新缓存
+    if (widgetArgs.contains(_kNativeRouteFlag)) {
+      await ConversationHistoryService.reloadLocalCache();
+    }
+
+    if (widgetArgs.isNotEmpty) {
+      final idStr = widgetArgs.first;
+
+      // 检查是否是新对话的特殊标识
+      if (idStr == 'new' || idStr == '__new__') {
+        // 清除当前对话状态，开始新对话
+        await ConversationService.setCurrentConversationId(null);
+        await ConversationHistoryService.saveCurrentConversationId(null);
+        setState(() {
+          messages.clear();
+          currentConversationId = null;
+          currentConversation = null;
+          _hasSavedConversation = false;
+        });
+        onConversationReset();
+        return;
+      }
+
+      final conversationId = int.tryParse(idStr);
+      if (conversationId != null) {
+        await loadConversation(conversationId);
+        await ConversationService.setCurrentConversationId(conversationId);
+
+        // 加载对话后，再次验证对话是否仍然存在
+        verifyConversationExists();
+        return;
+      }
+    }
+
+    // 如果没有传入conversationId，尝试恢复上次的对话
+    final savedConversationId = await ConversationHistoryService.getCurrentConversationId();
+    if (savedConversationId != null) {
+      await loadConversation(savedConversationId);
+      await ConversationService.setCurrentConversationId(savedConversationId);
+
+      // 恢复对话后，再次验证对话是否仍然存在
+      verifyConversationExists();
+      return;
+    }
+
+    await _restoreLatestConversationOrReset();
+  }
+
+  Future<void> _restoreLatestConversationOrReset() async {
+    try {
+      final conversations = await ConversationService.getAllConversations();
+      if (conversations.isNotEmpty) {
+        final latestConversation = conversations.first;
+        await loadConversation(latestConversation.id);
+        await ConversationService.setCurrentConversationId(latestConversation.id);
+        await ConversationHistoryService.saveCurrentConversationId(
+          latestConversation.id,
+        );
+        verifyConversationExists();
+        return;
+      }
+    } catch (e) {
+      debugPrint('恢复最近对话失败: $e');
+    }
+
+    if (mounted) {
+      setState(() {
+        messages.clear();
+        currentConversationId = null;
+        currentConversation = null;
+        _hasSavedConversation = false;
+      });
+    } else {
+      messages.clear();
+      currentConversationId = null;
+      currentConversation = null;
+      _hasSavedConversation = false;
+    }
+
+    onConversationReset();
+    await ConversationService.setCurrentConversationId(null);
+    await ConversationHistoryService.saveCurrentConversationId(null);
+  }
+
+  /// 加载对话
+  Future<void> loadConversation(int conversationId) async {
+    try {
+      final conversations = await ConversationService.getAllConversations();
+      ConversationModel? conversation;
+      try {
+        conversation = conversations.firstWhere((c) => c.id == conversationId);
+      } catch (_) {
+        conversation = null;
+      }
+      
+      if (conversation != null) {
+        setState(() {
+          currentConversationId = conversation!.id;
+          currentConversation = conversation;
+          _hasSavedConversation = false;
+        });
+      } else {
+        setState(() {
+          currentConversationId = conversationId;
+          currentConversation = null;
+          _hasSavedConversation = false;
+        });
+      }
+
+      final savedMessages = await ConversationHistoryService.getConversationMessages(conversationId);
+      if (savedMessages.isNotEmpty) {
+        setState(() {
+          messages.clear();
+          messages.addAll(savedMessages);
+        });
+      }
+      onConversationLoaded(
+        conversationId,
+        conversation,
+        List<ChatMessageModel>.from(messages),
+      );
+    } catch (e) {
+      debugPrint('加载对话失败: $e');
+    }
+  }
+
+  // ===================== 对话存在性检查 =====================
+
+  /// 检查当前对话是否还存在，如果不存在则切换到新对话
+  Future<void> checkConversationExists() async {
+    if (currentConversationId == null) return;
+
+    try {
+      final allConversations = await ConversationService.getAllConversations();
+      final exists = allConversations.any((c) => c.id == currentConversationId);
+
+      if (!exists) {
+        final restored = await _restoreConversationFromMessages(currentConversationId!);
+        if (restored) {
+          debugPrint('当前对话不在列表中，已从消息记录恢复: $currentConversationId');
+          return;
+        }
+
+        if (allConversations.isNotEmpty) {
+          final fallbackConversation = allConversations.first;
+          await loadConversation(fallbackConversation.id);
+          await ConversationService.setCurrentConversationId(fallbackConversation.id);
+          await ConversationHistoryService.saveCurrentConversationId(
+            fallbackConversation.id,
+          );
+          debugPrint('当前对话已失效，已切换到最近对话: ${fallbackConversation.id}');
+          return;
+        }
+
+        if (mounted) {
+          // 对话已被删除，切换到新对话
+          setState(() {
+            messages.clear();
+            currentConversationId = null;
+            currentConversation = null;
+          });
+        } else {
+          messages.clear();
+          currentConversationId = null;
+          currentConversation = null;
+        }
+        await ConversationService.setCurrentConversationId(null);
+        await ConversationHistoryService.saveCurrentConversationId(null);
+        debugPrint('当前对话已被删除，已切换到新对话');
+      }
+    } catch (e) {
+      debugPrint('检查对话存在性失败: $e');
+    }
+  }
+
+  Future<bool> _restoreConversationFromMessages(int conversationId) async {
+    try {
+      final savedMessages = await ConversationHistoryService.getConversationMessages(conversationId);
+      if (savedMessages.isEmpty) return false;
+
+      final firstUserMessage = savedMessages.firstWhere(
+        (m) => m.user == 1 && (m.text ?? '').isNotEmpty,
+        orElse: () => ChatMessageModel.userMessage("新对话"),
+      );
+      final titleText = firstUserMessage.text ?? '新对话';
+      final title = titleText.length > 20 ? '${titleText.substring(0, 20)}...' : titleText;
+
+      final newest = savedMessages.isNotEmpty ? savedMessages.first : null;
+      final oldest = savedMessages.isNotEmpty ? savedMessages.last : null;
+      final lastText = newest?.text ?? '';
+      final createdAt = oldest?.createAt.millisecondsSinceEpoch ?? DateTime.now().millisecondsSinceEpoch;
+      final updatedAt = newest?.createAt.millisecondsSinceEpoch ?? createdAt;
+
+      final recovered = ConversationModel(
+        id: conversationId,
+        title: title,
+        summary: currentConversation?.summary,
+        status: currentConversation?.status ?? 0,
+        lastMessage: lastText,
+        messageCount: savedMessages.length,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+      );
+
+      await ConversationService.updateConversation(recovered);
+      await ConversationService.setCurrentConversationId(conversationId);
+      await ConversationHistoryService.saveCurrentConversationId(conversationId);
+
+      if (mounted) {
+        setState(() {
+          currentConversation = recovered;
+          if (messages.isEmpty) {
+            messages
+              ..clear()
+              ..addAll(savedMessages);
+          }
+        });
+      } else {
+        currentConversation = recovered;
+        if (messages.isEmpty) {
+          messages
+            ..clear()
+            ..addAll(savedMessages);
+        }
+      }
+
+      return true;
+    } catch (e) {
+      debugPrint('从消息记录恢复对话失败: $e');
+      return false;
+    }
+  }
+
+  /// 验证对话是否存在（延迟执行，避免阻塞初始化）
+  void verifyConversationExists() {
+    // 延迟检查，给 UI 渲染留出时间
+    Future.delayed(const Duration(milliseconds: 100), () async {
+      if (!mounted) return;
+      await checkConversationExists();
+    });
+  }
+
+  /// 检查并处理已删除的对话（用于 drawer 关闭时）
+  void checkAndHandleDeletedConversation() {
+    if (currentConversationId == null) return;
+
+    // 延迟检查，确保 drawer 关闭动画完成且路由导航完成
+    Future.delayed(const Duration(milliseconds: 300), () async {
+      if (!mounted) return;
+      await checkConversationExists();
+    });
+  }
+
+  // ===================== 对话保存 =====================
+
+  /// 构建对话历史文本
+  String buildConversationHistoryText(List<ChatMessageModel> msgs) {
+    final buffer = StringBuffer();
+    for (final message in msgs) {
+      if (message.user == 1) {
+        final text = message.content?['text'] as String? ?? '';
+        if (text.isNotEmpty) {
+          buffer.write('用户: $text\n');
+        }
+      }
+      // else if (message.user == 2) {
+      //   final text = message.content?['text'] as String? ?? '';
+      //   if (text.isNotEmpty) {
+      //     buffer.write('助手: $text\n');
+      //   }
+      // }
+    }
+    return buffer.toString().trim();
+  }
+
+  /// 持久化对话快照
+  Future<void> persistConversationSnapshot({
+    bool generateSummary = false,
+    bool markComplete = false,
+  }) async {
+    if (messages.isEmpty) return;
+    
+    // 立即捕获状态，防止异步操作期间上下文切换导致的脏读
+    final snapshotMessages = List<ChatMessageModel>.from(messages);
+    final snapshotConversationId = currentConversationId;
+    final snapshotConversation = currentConversation;
+
+    try {
+      print("[conversation manager] 对话持久化 generateSummary: $generateSummary markComplete: $markComplete");
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final lastMessage = snapshotMessages.isNotEmpty ? (snapshotMessages[0].text ?? '') : '';
+      final messageCount = snapshotMessages.length;
+
+      final firstUserMessage = snapshotMessages.firstWhere(
+        (m) => m.user == 1,
+        orElse: () => ChatMessageModel.userMessage("新对话"),
+      );
+      final userText = firstUserMessage.text ?? '新对话';
+      final title = userText.length > 20 ? '${userText.substring(0, 20)}...' : userText;
+
+      String? summary;
+      if (generateSummary) {
+        final conversationHistory = buildConversationHistoryText(snapshotMessages);
+        summary = conversationHistory.isEmpty
+            ? null
+            : await ConversationService.generateConversationSummary(
+                conversationHistory: conversationHistory,
+              );
+      }
+
+      int? targetId = snapshotConversationId;
+
+      if (targetId == null) {
+        final newConversationId = await ConversationService.createConversation(
+          title: title,
+          summary: summary,
+        );
+
+        if (newConversationId != null) {
+          targetId = newConversationId;
+          
+          if (mounted && currentConversationId == snapshotConversationId) {
+            setState(() {
+              currentConversationId = newConversationId;
+              currentConversation = ConversationModel(
+                id: newConversationId,
+                title: title,
+                summary: summary,
+                status: 0,
+                lastMessage: lastMessage,
+                messageCount: messageCount,
+                createdAt: now,
+                updatedAt: now,
+              );
+            });
+          }
+
+          if (currentConversationId == snapshotConversationId) {
+             await ConversationService.setCurrentConversationId(newConversationId);
+             await ConversationHistoryService.saveCurrentConversationId(newConversationId);
+          }
+        }
+      }
+
+      if (targetId != null) {
+        // 只有当前上下文仍然是该对话时，才更新全局当前对话ID
+        if (currentConversationId == snapshotConversationId) {
+          await ConversationService.setCurrentConversationId(targetId);
+          await ConversationHistoryService.saveCurrentConversationId(targetId);
+        }
+        
+        await ConversationHistoryService.saveConversationMessages(
+          targetId,
+          snapshotMessages,
+        );
+
+        final baseConversation = snapshotConversation ?? ConversationModel(
+          id: targetId,
+          title: title,
+          summary: summary,
+          status: 0,
+          lastMessage: lastMessage,
+          messageCount: messageCount,
+          createdAt: now,
+          updatedAt: now,
+        );
+
+        final updatedConversation = baseConversation.copyWith(
+          summary: summary ?? baseConversation.summary,
+          lastMessage: lastMessage,
+          messageCount: messageCount,
+          updatedAt: now,
+        );
+
+        await ConversationService.updateConversation(updatedConversation);
+        
+        if (mounted && currentConversationId == snapshotConversationId) {
+          setState(() {
+            currentConversation = updatedConversation;
+          });
+        }
+
+        onConversationPersisted(
+          targetId,
+          updatedConversation,
+          List<ChatMessageModel>.from(snapshotMessages),
+        );
+
+        if (markComplete) {
+          await ConversationService.completeConversation(targetId);
+        }
+      }
+    } catch (e) {
+      debugPrint('保存对话失败: $e');
+    }
+  }
+
+  /// 保存对话且总结
+  Future<void> saveConversationWithSummary() async {
+    if (_hasSavedConversation) {
+      await persistConversationSnapshot(
+        generateSummary: true,
+        markComplete: true,
+      );
+    }
+  }
+
+  /// 保存对话
+  Future<void> saveConversation() async {
+    _hasSavedConversation = true;
+    await persistConversationSnapshot(
+      generateSummary: false,
+      markComplete: true,
+    );
+  }
+
+  /// 创建新对话
+  Future<void> createNewConversation() async {
+    setState(() {
+      messages.clear();
+      currentConversationId = null;
+      currentConversation = null;
+      _hasSavedConversation = false;
+    });
+    onConversationReset();
+
+    await ConversationService.setCurrentConversationId(null);
+    await ConversationHistoryService.saveCurrentConversationId(null);
+  }
+}

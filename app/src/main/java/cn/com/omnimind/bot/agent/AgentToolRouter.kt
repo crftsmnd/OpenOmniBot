@@ -1,0 +1,2684 @@
+package cn.com.omnimind.bot.agent
+
+import android.content.Context
+import android.provider.Settings
+import cn.com.omnimind.assists.api.interfaces.OnMessagePushListener
+import cn.com.omnimind.baselib.util.OmniLog
+import cn.com.omnimind.bot.mem0.Mem0ApiResult
+import cn.com.omnimind.bot.mem0.Mem0Client
+import cn.com.omnimind.bot.mem0.Mem0Defaults
+import cn.com.omnimind.bot.mem0.Mem0MemoryAdvisor
+import cn.com.omnimind.bot.mem0.Mem0MemoryItem
+import cn.com.omnimind.bot.mem0.Mem0ResolvedConfig
+import cn.com.omnimind.bot.mem0.Mem0ToolUtils
+import cn.com.omnimind.bot.mcp.RemoteMcpClient
+import cn.com.omnimind.bot.mcp.RemoteMcpConfigStore
+import cn.com.omnimind.bot.mcp.RemoteMcpToolDescriptor
+import cn.com.omnimind.bot.termux.TermuxCommandResult
+import cn.com.omnimind.bot.termux.TermuxCommandRunner
+import cn.com.omnimind.bot.termux.TermuxCommandSpec
+import cn.com.omnimind.bot.termux.TermuxCommandBuilder
+import cn.com.omnimind.bot.util.AssistsUtil
+import cn.com.omnimind.bot.workspace.WorkspaceStorageAccess
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import java.io.File
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
+
+class AgentToolRouter(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val scheduleToolBridge: AgentScheduleToolBridge,
+    private val workspaceManager: AgentWorkspaceManager
+) {
+    data class ExecutionEnvironment(
+        val mem0Config: Mem0ResolvedConfig?,
+        val agentRunId: String,
+        val userMessage: String,
+        val currentPackageName: String?,
+        val runtimeContextRepository: AgentRuntimeContextRepository,
+        val workspaceDescriptor: AgentWorkspaceDescriptor,
+        val resolvedSkills: List<ResolvedSkillContext>,
+        val workspaceManager: AgentWorkspaceManager
+    )
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+        prettyPrint = true
+    }
+    private val tag = "AgentToolRouter"
+    private val alarmToolService = AgentAlarmToolService(context)
+    private val calendarToolService = AgentCalendarToolService(context)
+    private val skillIndexService = SkillIndexService(context, workspaceManager)
+    private val skillLoader = SkillLoader(workspaceManager)
+    @Volatile
+    private var tmuxAvailabilityCached: Boolean? = null
+    @Volatile
+    private var browserUseEngine: BrowserUseEngine? = null
+
+    companion object {
+        private const val DEFAULT_CONTEXT_QUERY_LIMIT = 20
+        private const val MAX_TERMINAL_AUTO_RETRIES = 3
+        private const val DEFAULT_FILE_READ_MAX_CHARS = 8000
+        private const val DEFAULT_FILE_LIST_LIMIT = 200
+        private const val DEFAULT_FILE_SEARCH_LIMIT = 50
+        private const val DEFAULT_TERMINAL_SESSION_READ_MAX_CHARS = 4000
+        private const val DEFAULT_SKILLS_LIST_LIMIT = 50
+        private const val DEFAULT_SKILL_READ_MAX_CHARS = 16_000
+    }
+
+    private suspend fun ensureRunActive() {
+        currentCoroutineContext().ensureActive()
+    }
+
+    private suspend fun reportToolProgress(
+        callback: AgentCallback,
+        toolName: String,
+        progress: String,
+        extras: Map<String, Any?> = emptyMap()
+    ) {
+        callback.onToolCallProgress(toolName, progress, extras)
+        ensureRunActive()
+    }
+
+    private data class VlmExecutionArgs(
+        val goal: String,
+        val packageName: String?,
+        val needSummary: Boolean,
+        val startFromCurrent: Boolean
+    )
+
+    private data class VlmArgsSanitizeResult(
+        val args: VlmExecutionArgs,
+        val reasons: List<String>
+    )
+
+    private data class TerminalExecuteArgs(
+        val command: String,
+        val executionMode: String,
+        val prootDistro: String?,
+        val workingDirectory: String?,
+        val timeoutSeconds: Int
+    )
+
+    private data class TerminalSessionStartArgs(
+        val sessionName: String?,
+        val workingDirectory: String?
+    )
+
+    private data class TerminalSessionExecArgs(
+        val sessionId: String,
+        val command: String,
+        val workingDirectory: String?,
+        val timeoutSeconds: Int
+    )
+
+    private data class TerminalSessionReadArgs(
+        val sessionId: String,
+        val maxChars: Int
+    )
+
+    suspend fun execute(
+        toolCall: cn.com.omnimind.baselib.llm.AssistantToolCall,
+        args: JsonObject,
+        runtimeDescriptor: AgentToolRegistry.RuntimeToolDescriptor,
+        env: ExecutionEnvironment,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        ensureRunActive()
+        return when (toolCall.function.name) {
+            "context_apps_query" -> executeContextAppsQuery(
+                args = args,
+                runtimeContextRepository = env.runtimeContextRepository,
+                callback = callback
+            )
+
+            "context_time_now" -> executeContextTimeNow(
+                args = args,
+                callback = callback
+            )
+
+            "vlm_task" -> executeVlmTask(
+                args = args,
+                userMessage = env.userMessage,
+                runtimeContextRepository = env.runtimeContextRepository,
+                currentPackageName = env.currentPackageName,
+                resolvedSkills = env.resolvedSkills,
+                callback = callback
+            )
+            "terminal_execute" -> executeTerminalTool(
+                args = args,
+                workspace = env.workspaceDescriptor,
+                callback = callback
+            )
+            "terminal_session_start" -> executeTerminalSessionStart(
+                args = args,
+                workspace = env.workspaceDescriptor,
+                callback = callback
+            )
+            "terminal_session_exec" -> executeTerminalSessionExec(
+                args = args,
+                workspace = env.workspaceDescriptor,
+                callback = callback
+            )
+            "terminal_session_read" -> executeTerminalSessionRead(
+                args = args,
+                workspace = env.workspaceDescriptor,
+                callback = callback
+            )
+            "terminal_session_stop" -> executeTerminalSessionStop(
+                args = args,
+                workspace = env.workspaceDescriptor,
+                callback = callback
+            )
+            "browser_use" -> executeBrowserUse(
+                args = args,
+                env = env,
+                callback = callback
+            )
+            "file_read" -> executeFileRead(args, env.workspaceDescriptor, callback)
+            "file_write" -> executeFileWrite(args, env.workspaceDescriptor, callback)
+            "file_edit" -> executeFileEdit(args, env.workspaceDescriptor, callback)
+            "file_list" -> executeFileList(args, env.workspaceDescriptor, callback)
+            "file_search" -> executeFileSearch(args, env.workspaceDescriptor, callback)
+            "file_stat" -> executeFileStat(args, env.workspaceDescriptor, callback)
+            "file_move" -> executeFileMove(args, env.workspaceDescriptor, callback)
+            "skills_list" -> executeSkillsList(args, env.workspaceDescriptor, callback)
+            "skills_read" -> executeSkillsRead(args, env.workspaceDescriptor, callback)
+            "schedule_task_create",
+            "schedule_task_list",
+            "schedule_task_update",
+            "schedule_task_delete" -> executeScheduleTool(
+                toolCall.function.name,
+                args,
+                env.runtimeContextRepository,
+                callback
+            )
+
+            "alarm_reminder_create",
+            "alarm_reminder_list",
+            "alarm_reminder_delete" -> executeAlarmTool(
+                toolName = toolCall.function.name,
+                args = args,
+                callback = callback
+            )
+
+            "calendar_list",
+            "calendar_event_create",
+            "calendar_event_list",
+            "calendar_event_update",
+            "calendar_event_delete" -> executeCalendarTool(
+                toolName = toolCall.function.name,
+                args = args,
+                callback = callback
+            )
+
+            in Mem0ToolUtils.toolDisplayNames.keys -> executeMem0Tool(
+                toolName = toolCall.function.name,
+                args = args,
+                mem0Config = env.mem0Config,
+                agentRunId = env.agentRunId,
+                callback = callback
+            )
+
+            else -> {
+                val remoteTool = runtimeDescriptor.remoteTool
+                if (remoteTool != null) {
+                    executeMcpTool(remoteTool, args, callback)
+                } else {
+                    ToolExecutionResult.Error(toolCall.function.name, "Unknown tool: ${toolCall.function.name}")
+                }
+            }
+        }
+    }
+
+    suspend fun dispose() {
+        browserUseEngine?.let { engine ->
+            runCatching { engine.close() }
+        }
+        browserUseEngine = null
+    }
+
+    private suspend fun executeContextAppsQuery(
+        args: JsonObject,
+        runtimeContextRepository: AgentRuntimeContextRepository,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "context_apps_query"
+        return try {
+            reportToolProgress(callback, toolName, "正在查询已安装应用")
+            ensureRunActive()
+            val query = args["query"]?.jsonPrimitive?.contentOrNull?.trim()
+            val limit = parseContextQueryLimit(args["limit"]?.jsonPrimitive?.intOrNull)
+            val items = runtimeContextRepository.queryInstalledApps(query = query, limit = limit)
+            val payload = linkedMapOf<String, Any?>(
+                "query" to query.orEmpty(),
+                "limit" to limit,
+                "count" to items.size,
+                "items" to items.map { item ->
+                    mapOf(
+                        "appName" to item.appName,
+                        "packageName" to item.packageName
+                    )
+                }
+            )
+            val payloadJson = json.encodeToString(mapToJsonElement(payload))
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = if (items.isEmpty()) {
+                    "未找到匹配的已安装应用。"
+                } else {
+                    "找到 ${items.size} 个已安装应用。"
+                },
+                previewJson = payloadJson,
+                rawResultJson = payloadJson,
+                success = true
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (error: Exception) {
+            ToolExecutionResult.Error(toolName, error.message ?: "查询已安装应用失败")
+        }
+    }
+
+    private suspend fun executeBrowserUse(
+        args: JsonObject,
+        env: ExecutionEnvironment,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "browser_use"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val request = BrowserUseRequest.fromJson(args)
+            reportToolProgress(
+                callback,
+                toolName,
+                request.toolTitle,
+                mapOf("summary" to request.toolTitle)
+            )
+            val engine = browserUseEngine ?: BrowserUseEngine(
+                context = context,
+                workspaceManager = workspaceManager,
+                agentRunId = env.agentRunId,
+                workspace = env.workspaceDescriptor
+            ).also { browserUseEngine = it }
+            val outcome = engine.execute(request)
+            val payload = linkedMapOf<String, Any?>(
+                "toolTitle" to request.toolTitle
+            ).apply {
+                putAll(outcome.payload)
+            }
+            val encoded = json.encodeToString(mapToJsonElement(payload))
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = outcome.summaryText,
+                previewJson = encoded,
+                rawResultJson = encoded,
+                success = true,
+                artifacts = outcome.artifacts,
+                workspaceId = env.workspaceDescriptor.id,
+                actions = outcome.actions
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "浏览器操作失败")
+        }
+    }
+
+    private suspend fun executeContextTimeNow(
+        args: JsonObject,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "context_time_now"
+        return try {
+            reportToolProgress(callback, toolName, "正在查询当前时间")
+            ensureRunActive()
+            val timezoneArg = args["timezone"]?.jsonPrimitive?.contentOrNull?.trim()
+            val zoneId = timezoneArg
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { value ->
+                    runCatching { ZoneId.of(value) }.getOrElse {
+                        throw IllegalArgumentException("Invalid timezone: $value")
+                    }
+                } ?: ZoneId.systemDefault()
+            val now = ZonedDateTime.now(zoneId)
+            val payload = linkedMapOf<String, Any?>(
+                "timezone" to zoneId.id,
+                "epochMillis" to now.toInstant().toEpochMilli(),
+                "iso8601" to now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
+                "date" to now.toLocalDate().toString(),
+                "time" to now.toLocalTime().format(DateTimeFormatter.ISO_LOCAL_TIME),
+                "dayOfWeek" to now.dayOfWeek.name
+            )
+            val payloadJson = json.encodeToString(mapToJsonElement(payload))
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "当前时间：${payload["iso8601"]}",
+                previewJson = payloadJson,
+                rawResultJson = payloadJson,
+                success = true
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (error: Exception) {
+            ToolExecutionResult.Error(toolName, error.message ?: "查询当前时间失败")
+        }
+    }
+
+    private suspend fun executeVlmTask(
+        args: JsonObject,
+        userMessage: String,
+        runtimeContextRepository: AgentRuntimeContextRepository,
+        currentPackageName: String?,
+        resolvedSkills: List<ResolvedSkillContext>,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        return try {
+            ensureRunActive()
+            val missing = checkExecutionPrerequisites()
+            if (missing.isNotEmpty()) {
+                callback.onPermissionRequired(missing)
+                return ToolExecutionResult.PermissionRequired(missing)
+            }
+
+            val goal = args["goal"]?.jsonPrimitive?.content
+                ?: throw IllegalArgumentException("Missing goal")
+            val packageName = args["packageName"]?.jsonPrimitive?.contentOrNull
+            val needSummary = args["needSummary"]?.jsonPrimitive?.contentOrNull
+                ?.toBooleanStrictOrNull() ?: false
+            val startFromCurrent = args["startFromCurrent"]?.jsonPrimitive?.contentOrNull
+                ?.toBooleanStrictOrNull() ?: false
+
+            val rawArgs = VlmExecutionArgs(
+                goal = goal,
+                packageName = packageName?.takeIf { it.isNotBlank() },
+                needSummary = needSummary,
+                startFromCurrent = startFromCurrent
+            )
+            val appNameToPackage = runtimeContextRepository.getAppNameToPackageMap()
+            val sanitized = sanitizeVlmExecutionArgs(
+                rawArgs = rawArgs,
+                userMessage = userMessage,
+                appNameToPackage = appNameToPackage,
+                currentPackageName = currentPackageName
+            )
+            val safeArgs = sanitized.args
+
+            if (sanitized.reasons.isNotEmpty()) {
+                OmniLog.w(
+                    tag,
+                    "vlm_task args corrected: reasons=${sanitized.reasons.joinToString(",")}"
+                )
+            }
+
+            ensureRunActive()
+            val taskId = UUID.randomUUID().toString()
+            AssistsUtil.Core.createVLMOperationTask(
+                context = context,
+                goal = safeArgs.goal,
+                model = "scene.vlm.operation.primary",
+                maxSteps = null,
+                packageName = if (safeArgs.startFromCurrent) null else safeArgs.packageName,
+                onMessagePushListener = object : OnMessagePushListener {
+                    private val finishNotified = AtomicBoolean(false)
+
+                    private fun notifyVlmFinishedOnce(source: String) {
+                        if (!finishNotified.compareAndSet(false, true)) return
+                        scope.launch {
+                            try {
+                                callback.onVlmTaskFinished()
+                            } catch (e: Exception) {
+                                OmniLog.e(tag, "notify onVlmTaskFinished failed[$source]: ${e.message}")
+                            }
+                        }
+                    }
+
+                    override suspend fun onChatMessage(taskID: String, content: String, type: String?) = Unit
+                    override suspend fun onChatMessageEnd(taskID: String) = Unit
+                    override fun onTaskFinish() {
+                        notifyVlmFinishedOnce("onTaskFinish")
+                    }
+
+                    override fun onVLMTaskFinish() {
+                        notifyVlmFinishedOnce("onVLMTaskFinish")
+                    }
+
+                    override fun onVLMRequestUserInput(question: String) {
+                        scope.launch { callback.onClarifyRequired(question, null) }
+                    }
+                },
+                needSummary = safeArgs.needSummary,
+                skipGoHome = safeArgs.startFromCurrent,
+                stepSkillGuidance = resolvedSkills.joinToString("\n\n") { it.stepGuidance() }
+            )
+
+            ToolExecutionResult.VlmTaskStarted(taskId, safeArgs.goal)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.Error("vlm_task", e.message ?: "Unknown error")
+        }
+    }
+
+    private suspend fun executeTerminalTool(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "terminal_execute"
+        return try {
+            reportToolProgress(
+                callback,
+                toolName,
+                "正在调用 Termux 执行命令",
+                mapOf(
+                    "summary" to "正在调用 Termux 执行命令",
+                    "terminalStreamState" to "starting"
+                )
+            )
+            val rawArgs = parseTerminalExecuteArgs(args)
+            val parsedArgs = rawArgs.copy(
+                workingDirectory = rawArgs.workingDirectory
+                    ?.let { workspaceManager.resolveShellPath(it, workspace, allowRootDirectories = true) }
+                    ?: workspace.currentCwd
+            )
+            val commandResult = TermuxCommandRunner.execute(
+                context = context,
+                spec = TermuxCommandSpec(
+                    command = parsedArgs.command,
+                    executionMode = parsedArgs.executionMode,
+                    prootDistro = parsedArgs.prootDistro,
+                    workingDirectory = parsedArgs.workingDirectory,
+                    timeoutSeconds = parsedArgs.timeoutSeconds
+                ),
+                onLiveUpdate = { update ->
+                    reportToolProgress(
+                        callback,
+                        toolName,
+                        update.summary,
+                        mapOf(
+                            "summary" to update.summary,
+                            "terminalSessionId" to update.sessionId,
+                            "terminalOutputDelta" to update.outputDelta,
+                            "terminalStreamState" to update.streamState
+                        )
+                    )
+                }
+            )
+            buildTerminalToolResult(
+                toolName = toolName,
+                args = parsedArgs,
+                result = commandResult,
+                workspace = workspace,
+                sourceTool = toolName
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.TerminalResult(
+                toolName = toolName,
+                summaryText = e.message ?: "终端命令执行失败",
+                previewJson = json.encodeToString(
+                    mapToJsonElement(
+                        mapOf("error" to (e.message ?: "终端命令执行失败"))
+                    )
+                ),
+                rawResultJson = json.encodeToString(
+                    mapToJsonElement(
+                        mapOf("error" to (e.message ?: "终端命令执行失败"))
+                    )
+                ),
+                success = false,
+                terminalOutput = e.message ?: "终端命令执行失败",
+                terminalStreamState = "error",
+                workspaceId = workspace.id
+            )
+        }
+    }
+
+    private suspend fun executeTerminalSessionStart(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "terminal_session_start"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
+            reportToolProgress(callback, toolName, "正在启动终端会话")
+            val parsedArgs = parseTerminalSessionStartArgs(args)
+            val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionName)
+            val workingDirectory = resolveShellWorkingDirectory(parsedArgs.workingDirectory, workspace)
+            terminalSessionDirectory(workspace, sessionId).mkdirs()
+            val result = executeTerminalCommand(
+                command = """
+                    tmux has-session -t ${quoteShell(sessionId)} 2>/dev/null || tmux new-session -d -s ${quoteShell(sessionId)} -c ${quoteShell(workingDirectory)}
+                    echo "session_started:$sessionId"
+                """.trimIndent(),
+                workingDirectory = workingDirectory,
+                timeoutSeconds = 60
+            )
+            val payload = linkedMapOf<String, Any?>(
+                "sessionId" to sessionId,
+                "workingDirectory" to workingDirectory,
+                "success" to result.success,
+                "stdout" to truncateText(result.stdout, 2000),
+                "stderr" to truncateText(result.stderr, 2000)
+            )
+            ToolExecutionResult.TerminalResult(
+                toolName = toolName,
+                summaryText = if (result.success) {
+                    "终端会话已启动：$sessionId"
+                } else {
+                    buildTerminalSummary(result)
+                },
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = result.success,
+                terminalOutput = result.terminalOutput.ifBlank { result.stdout + result.stderr },
+                terminalSessionId = sessionId,
+                terminalStreamState = if (result.success) "ready" else "error",
+                workspaceId = workspace.id,
+                actions = listOf(
+                    ArtifactAction(
+                        type = "workspace",
+                        label = "打开工作区",
+                        target = workspace.uriRoot,
+                        payload = mapOf(
+                            "workspaceId" to workspace.id,
+                            "workspacePath" to workspace.androidRootPath,
+                            "workspaceShellPath" to workspace.rootPath
+                        )
+                    )
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "终端会话启动失败")
+        }
+    }
+
+    private suspend fun executeTerminalSessionExec(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "terminal_session_exec"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
+            val parsedArgs = parseTerminalSessionExecArgs(args)
+            val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionId)
+            val sessionDir = terminalSessionDirectory(workspace, sessionId).apply { mkdirs() }
+            val shellWorkingDirectory = resolveShellWorkingDirectory(parsedArgs.workingDirectory, workspace)
+            val androidWorkingDirectory = resolveAndroidWorkingDirectory(parsedArgs.workingDirectory, workspace)
+            val commandId = UUID.randomUUID().toString().take(8)
+            val commandScript = File(sessionDir, "command_$commandId.sh")
+            val runnerScript = File(sessionDir, "run_$commandId.sh")
+            val logFile = File(sessionDir, "latest.log")
+            val shellSessionDir = workspaceManager.shellPathForAndroid(sessionDir)
+                ?: throw IllegalStateException("无法映射终端会话目录")
+            val shellCommandScriptPath = workspaceManager.shellPathForAndroid(commandScript)
+                ?: throw IllegalStateException("无法映射终端会话脚本")
+            val shellRunnerScriptPath = workspaceManager.shellPathForAndroid(runnerScript)
+                ?: throw IllegalStateException("无法映射终端会话运行器")
+            val shellLogPath = workspaceManager.shellPathForAndroid(logFile)
+                ?: throw IllegalStateException("无法映射终端会话日志")
+            val marker = "__OMNIBOT_DONE__:$commandId:"
+            commandScript.writeText(parsedArgs.command)
+            commandScript.setExecutable(true)
+            runnerScript.writeText(
+                """
+                #!/usr/bin/env bash
+                set -o pipefail
+                mkdir -p ${quoteShell(shellSessionDir)}
+                : > ${quoteShell(shellLogPath)}
+                cd ${quoteShell(shellWorkingDirectory)}
+                {
+                  bash ${quoteShell(shellCommandScriptPath)}
+                } > >(tee -a ${quoteShell(shellLogPath)}) 2> >(tee -a ${quoteShell(shellLogPath)} >&2)
+                status=$?
+                printf '\n$marker%s\n' "${'$'}status" | tee -a ${quoteShell(shellLogPath)}
+                exit "${'$'}status"
+                """.trimIndent()
+            )
+            runnerScript.setExecutable(true)
+
+            reportToolProgress(callback, toolName, "正在向终端会话发送命令")
+            val sendResult = executeTerminalCommand(
+                command = """
+                    tmux has-session -t ${quoteShell(sessionId)} 2>/dev/null || tmux new-session -d -s ${quoteShell(sessionId)} -c ${quoteShell(shellWorkingDirectory)}
+                    tmux send-keys -t ${quoteShell(sessionId)} ${quoteShell("bash $shellRunnerScriptPath")} C-m
+                    echo "command_dispatched:$commandId"
+                """.trimIndent(),
+                workingDirectory = shellWorkingDirectory,
+                timeoutSeconds = 60
+            )
+            if (!sendResult.success) {
+                return buildTerminalToolResult(
+                    toolName = toolName,
+                    args = TerminalExecuteArgs(
+                        command = parsedArgs.command,
+                        executionMode = TermuxCommandSpec.EXECUTION_MODE_PROOT,
+                        prootDistro = TermuxCommandSpec.DEFAULT_PROOT_DISTRO,
+                        workingDirectory = shellWorkingDirectory,
+                        timeoutSeconds = parsedArgs.timeoutSeconds
+                    ),
+                    result = sendResult,
+                    workspace = workspace,
+                    sourceTool = toolName
+                )
+            }
+
+            val completedLog = waitForCommandLog(
+                logFile = logFile,
+                markerPrefix = marker,
+                timeoutSeconds = parsedArgs.timeoutSeconds,
+                callback = callback,
+                toolName = toolName
+            )
+            val completed = completedLog.contains(marker)
+            val exitCode = Regex("${Regex.escape(marker)}(-?\\d+)").find(completedLog)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            val cleanedOutput = TermuxCommandRunner.sanitizeTerminalNoise(
+                completedLog.replace(Regex("\n?${Regex.escape(marker)}-?\\d+\n?"), "\n").trim()
+            )
+            val artifact = workspaceManager.buildArtifactForFile(logFile, toolName)
+            val rawResult = linkedMapOf<String, Any?>(
+                "sessionId" to sessionId,
+                "commandId" to commandId,
+                "workingDirectory" to shellWorkingDirectory,
+                "androidWorkingDirectory" to androidWorkingDirectory.absolutePath,
+                "command" to parsedArgs.command,
+                "exitCode" to exitCode,
+                "completed" to completed,
+                "logPath" to shellLogPath,
+                "androidLogPath" to logFile.absolutePath,
+                "logUri" to artifact.uri,
+                "stdout" to truncateText(cleanedOutput, 12000),
+                "terminalOutput" to truncateText(cleanedOutput, 12000),
+                "success" to (completed && exitCode == 0)
+            )
+            ToolExecutionResult.TerminalResult(
+                toolName = toolName,
+                summaryText = if (!completed) {
+                    "会话命令仍在运行或等待超时，请先读取日志确认状态"
+                } else if (exitCode == 0) {
+                    "会话命令执行完成"
+                } else {
+                    "会话命令执行失败（exit=$exitCode）"
+                },
+                previewJson = json.encodeToString(mapToJsonElement(rawResult)),
+                rawResultJson = json.encodeToString(mapToJsonElement(rawResult)),
+                success = completed && exitCode == 0,
+                terminalOutput = cleanedOutput,
+                terminalSessionId = sessionId,
+                terminalStreamState = if (completed) "completed" else "running",
+                artifacts = listOf(artifact),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "终端会话命令执行失败")
+        }
+    }
+
+    private suspend fun executeTerminalSessionRead(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "terminal_session_read"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val parsedArgs = parseTerminalSessionReadArgs(args)
+            val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionId)
+            val logFile = File(terminalSessionDirectory(workspace, sessionId), "latest.log")
+            val content = if (logFile.exists()) {
+                truncateText(
+                    TermuxCommandRunner.sanitizeTerminalNoise(logFile.readText()),
+                    parsedArgs.maxChars
+                )
+            } else {
+                ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
+                val capture = executeTerminalCommand(
+                    command = """
+                        tmux capture-pane -p -t ${quoteShell(sessionId)} -S -120
+                    """.trimIndent(),
+                    workingDirectory = workspace.currentCwd,
+                    timeoutSeconds = 30
+                )
+                truncateText(
+                    TermuxCommandRunner.sanitizeTerminalNoise(
+                        capture.stdout.ifBlank { capture.stderr }
+                    ),
+                    parsedArgs.maxChars
+                )
+            }
+            val artifacts = if (logFile.exists()) {
+                listOf(workspaceManager.buildArtifactForFile(logFile, toolName))
+            } else {
+                emptyList()
+            }
+            val payload = linkedMapOf<String, Any?>(
+                "sessionId" to sessionId,
+                "content" to content,
+                "contentLength" to content.length
+            )
+            ToolExecutionResult.TerminalResult(
+                toolName = toolName,
+                summaryText = if (content.isBlank()) "终端会话暂无输出" else "已读取终端会话输出",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                terminalOutput = content,
+                terminalSessionId = sessionId,
+                terminalStreamState = "completed",
+                artifacts = artifacts,
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "读取终端会话失败")
+        }
+    }
+
+    private suspend fun executeTerminalSessionStop(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "terminal_session_stop"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
+            reportToolProgress(callback, toolName, "正在结束终端会话")
+            val sessionId = sanitizeTerminalSessionId(
+                args["sessionId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            )
+            val result = executeTerminalCommand(
+                command = """
+                    tmux has-session -t ${quoteShell(sessionId)} 2>/dev/null && tmux kill-session -t ${quoteShell(sessionId)} || true
+                    echo "session_stopped:$sessionId"
+                """.trimIndent(),
+                workingDirectory = workspace.currentCwd,
+                timeoutSeconds = 30
+            )
+            val payload = linkedMapOf<String, Any?>(
+                "sessionId" to sessionId,
+                "success" to result.success
+            )
+            ToolExecutionResult.TerminalResult(
+                toolName = toolName,
+                summaryText = if (result.success) "终端会话已结束：$sessionId" else buildTerminalSummary(result),
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = result.success,
+                terminalOutput = result.stdout.ifBlank { result.stderr },
+                terminalSessionId = sessionId,
+                terminalStreamState = if (result.success) "stopped" else "error",
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "结束终端会话失败")
+        }
+    }
+
+    private suspend fun executeFileRead(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_read"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val file = workspaceManager.resolvePath(
+                inputPath = args["path"]?.jsonPrimitive?.content?.trim().orEmpty(),
+                workspace = workspace
+            )
+            require(file.exists()) { "文件不存在：${file.absolutePath}" }
+            require(file.isFile) { "目标不是文件：${file.absolutePath}" }
+            val maxChars = args["maxChars"]?.jsonPrimitive?.intOrNull
+                ?.coerceIn(128, 64_000)
+                ?: DEFAULT_FILE_READ_MAX_CHARS
+            val offset = args["offset"]?.jsonPrimitive?.intOrNull?.coerceAtLeast(0) ?: 0
+            val lineStart = args["lineStart"]?.jsonPrimitive?.intOrNull?.coerceAtLeast(1)
+            val lineCount = args["lineCount"]?.jsonPrimitive?.intOrNull?.coerceAtLeast(1)
+            val content = file.readText()
+            val sliced = when {
+                lineStart != null -> {
+                    val lines = content.lines()
+                    val from = (lineStart - 1).coerceAtMost(lines.size)
+                    val until = if (lineCount != null) {
+                        (from + lineCount).coerceAtMost(lines.size)
+                    } else {
+                        lines.size
+                    }
+                    lines.subList(from, until).joinToString("\n")
+                }
+                offset > 0 -> content.drop(offset)
+                else -> content
+            }
+            val artifact = workspaceManager.buildArtifactForFile(file, toolName)
+            val payload = linkedMapOf<String, Any?>(
+                "path" to (workspaceManager.shellPathForAndroid(file) ?: file.absolutePath),
+                "androidPath" to file.absolutePath,
+                "uri" to artifact.uri,
+                "content" to truncateText(sliced, maxChars),
+                "size" to file.length(),
+                "mimeType" to workspaceManager.guessMimeType(file)
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "已读取文件：${file.name}",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                artifacts = listOf(artifact),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "读取文件失败")
+        }
+    }
+
+    private suspend fun executeFileWrite(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_write"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            reportToolProgress(callback, toolName, "正在写入文件")
+            val file = workspaceManager.resolvePath(
+                inputPath = args["path"]?.jsonPrimitive?.content?.trim().orEmpty(),
+                workspace = workspace
+            )
+            val content = args["content"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("缺少 content")
+            val append = args["append"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            file.parentFile?.mkdirs()
+            if (append) {
+                file.appendText(content)
+            } else {
+                file.writeText(content)
+            }
+            val artifact = workspaceManager.buildArtifactForFile(file, toolName)
+            val payload = linkedMapOf<String, Any?>(
+                "path" to (workspaceManager.shellPathForAndroid(file) ?: file.absolutePath),
+                "androidPath" to file.absolutePath,
+                "uri" to artifact.uri,
+                "size" to file.length(),
+                "append" to append
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = if (append) "已追加写入文件：${file.name}" else "已写入文件：${file.name}",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                artifacts = listOf(artifact),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "写入文件失败")
+        }
+    }
+
+    private suspend fun executeFileEdit(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_edit"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            reportToolProgress(callback, toolName, "正在编辑文件")
+            val file = workspaceManager.resolvePath(
+                inputPath = args["path"]?.jsonPrimitive?.content?.trim().orEmpty(),
+                workspace = workspace
+            )
+            require(file.exists() && file.isFile) { "目标文件不存在：${file.absolutePath}" }
+            val oldText = args["oldText"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("缺少 oldText")
+            val newText = args["newText"]?.jsonPrimitive?.content ?: ""
+            val replaceAll = args["replaceAll"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            val original = file.readText()
+            require(original.contains(oldText)) { "文件中未找到 oldText" }
+            val updated = if (replaceAll) {
+                original.replace(oldText, newText)
+            } else {
+                original.replaceFirst(oldText, newText)
+            }
+            file.writeText(updated)
+            val artifact = workspaceManager.buildArtifactForFile(file, toolName)
+            val payload = linkedMapOf<String, Any?>(
+                "path" to (workspaceManager.shellPathForAndroid(file) ?: file.absolutePath),
+                "androidPath" to file.absolutePath,
+                "uri" to artifact.uri,
+                "replaceAll" to replaceAll
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "已更新文件：${file.name}",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                artifacts = listOf(artifact),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "编辑文件失败")
+        }
+    }
+
+    private suspend fun executeFileList(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_list"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val pathArg = args["path"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val directory = if (pathArg.isBlank()) {
+                File(workspace.androidRootPath)
+            } else {
+                workspaceManager.resolvePath(pathArg, workspace)
+            }
+            require(directory.exists() && directory.isDirectory) { "目录不存在：${directory.absolutePath}" }
+            val recursive = args["recursive"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            val maxDepth = args["maxDepth"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 6) ?: 2
+            val limit = args["limit"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 1000) ?: DEFAULT_FILE_LIST_LIMIT
+            val files = if (recursive) {
+                directory.walkTopDown().maxDepth(maxDepth).drop(1).take(limit).toList()
+            } else {
+                directory.listFiles()?.sortedBy { it.name.lowercase() }?.take(limit) ?: emptyList()
+            }
+            val payload = linkedMapOf<String, Any?>(
+                "path" to (workspaceManager.shellPathForAndroid(directory) ?: directory.absolutePath),
+                "androidPath" to directory.absolutePath,
+                "count" to files.size,
+                "items" to files.map { entry ->
+                    mapOf(
+                        "name" to entry.name,
+                        "path" to (workspaceManager.shellPathForAndroid(entry) ?: entry.absolutePath),
+                        "androidPath" to entry.absolutePath,
+                        "isDirectory" to entry.isDirectory,
+                        "size" to if (entry.isFile) entry.length() else 0L
+                    )
+                }
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "共找到 ${files.size} 项",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                workspaceId = workspace.id,
+                actions = listOf(
+                    ArtifactAction(
+                        type = "workspace",
+                        label = "打开工作区",
+                        target = workspace.uriRoot,
+                        payload = mapOf(
+                            "workspaceId" to workspace.id,
+                            "workspacePath" to directory.absolutePath,
+                            "workspaceShellPath" to (workspaceManager.shellPathForAndroid(directory) ?: workspace.rootPath)
+                        )
+                    )
+                )
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "列目录失败")
+        }
+    }
+
+    private suspend fun executeFileSearch(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_search"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val query = args["query"]?.jsonPrimitive?.content?.trim().orEmpty()
+            require(query.isNotEmpty()) { "缺少 query" }
+            val pathArg = args["path"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val directory = if (pathArg.isBlank()) File(workspace.androidRootPath) else workspaceManager.resolvePath(pathArg, workspace)
+            require(directory.exists() && directory.isDirectory) { "目录不存在：${directory.absolutePath}" }
+            val caseSensitive = args["caseSensitive"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            val maxResults = args["maxResults"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 200) ?: DEFAULT_FILE_SEARCH_LIMIT
+            val searchNeedle = if (caseSensitive) query else query.lowercase()
+            val results = mutableListOf<Map<String, Any?>>()
+            directory.walkTopDown().forEach { file ->
+                if (results.size >= maxResults) return@forEach
+                if (!file.isFile) return@forEach
+                val normalizedName = if (caseSensitive) file.name else file.name.lowercase()
+                if (normalizedName.contains(searchNeedle)) {
+                    results.add(
+                        mapOf(
+                            "path" to (workspaceManager.shellPathForAndroid(file) ?: file.absolutePath),
+                            "androidPath" to file.absolutePath,
+                            "matchType" to "file_name",
+                            "snippet" to file.name
+                        )
+                    )
+                    return@forEach
+                }
+                if (file.length() > 512 * 1024) return@forEach
+                val text = runCatching { file.readText() }.getOrNull() ?: return@forEach
+                val haystack = if (caseSensitive) text else text.lowercase()
+                val index = haystack.indexOf(searchNeedle)
+                if (index >= 0) {
+                    val start = (index - 40).coerceAtLeast(0)
+                    val end = (index + query.length + 120).coerceAtMost(text.length)
+                    results.add(
+                        mapOf(
+                            "path" to (workspaceManager.shellPathForAndroid(file) ?: file.absolutePath),
+                            "androidPath" to file.absolutePath,
+                            "matchType" to "content",
+                            "snippet" to text.substring(start, end)
+                        )
+                    )
+                }
+            }
+            val payload = linkedMapOf<String, Any?>(
+                "query" to query,
+                "path" to (workspaceManager.shellPathForAndroid(directory) ?: directory.absolutePath),
+                "androidPath" to directory.absolutePath,
+                "count" to results.size,
+                "items" to results
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = if (results.isEmpty()) "未找到匹配结果" else "找到 ${results.size} 个匹配结果",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "搜索文件失败")
+        }
+    }
+
+    private suspend fun executeFileStat(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_stat"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val file = workspaceManager.resolvePath(
+                args["path"]?.jsonPrimitive?.content?.trim().orEmpty(),
+                workspace,
+                allowRootDirectories = true
+            )
+            require(file.exists()) { "路径不存在：${file.absolutePath}" }
+            val artifact = file.takeIf { it.isFile }?.let { workspaceManager.buildArtifactForFile(it, toolName) }
+            val payload = linkedMapOf<String, Any?>(
+                "path" to (workspaceManager.shellPathForAndroid(file) ?: file.absolutePath),
+                "androidPath" to file.absolutePath,
+                "name" to file.name,
+                "exists" to file.exists(),
+                "isDirectory" to file.isDirectory,
+                "isFile" to file.isFile,
+                "size" to if (file.isFile) file.length() else 0L,
+                "lastModified" to file.lastModified(),
+                "mimeType" to if (file.isFile) workspaceManager.guessMimeType(file) else "inode/directory",
+                "uri" to artifact?.uri
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "已读取路径信息：${file.name.ifBlank { workspaceManager.shellPathForAndroid(file) ?: file.absolutePath }}",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                artifacts = artifact?.let { listOf(it) } ?: emptyList(),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "查看文件信息失败")
+        }
+    }
+
+    private suspend fun executeFileMove(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "file_move"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            reportToolProgress(callback, toolName, "正在移动文件")
+            val source = workspaceManager.resolvePath(
+                args["sourcePath"]?.jsonPrimitive?.content?.trim().orEmpty(),
+                workspace
+            )
+            val target = workspaceManager.resolvePath(
+                args["targetPath"]?.jsonPrimitive?.content?.trim().orEmpty(),
+                workspace
+            )
+            require(source.exists()) { "源文件不存在：${source.absolutePath}" }
+            val overwrite = args["overwrite"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+            require(overwrite || !target.exists()) { "目标已存在：${target.absolutePath}" }
+            target.parentFile?.mkdirs()
+            if (overwrite && target.exists()) {
+                target.deleteRecursively()
+            }
+            source.copyRecursively(target, overwrite = overwrite)
+            source.deleteRecursively()
+            val artifact = target.takeIf { it.isFile }?.let { workspaceManager.buildArtifactForFile(it, toolName) }
+            val payload = linkedMapOf<String, Any?>(
+                "sourcePath" to (workspaceManager.shellPathForAndroid(source) ?: source.absolutePath),
+                "androidSourcePath" to source.absolutePath,
+                "targetPath" to (workspaceManager.shellPathForAndroid(target) ?: target.absolutePath),
+                "androidTargetPath" to target.absolutePath,
+                "overwrite" to overwrite,
+                "targetUri" to artifact?.uri
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "已移动到：${target.name}",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                artifacts = artifact?.let { listOf(it) } ?: emptyList(),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "移动文件失败")
+        }
+    }
+
+    private suspend fun executeSkillsList(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "skills_list"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val query = args["query"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+            val limit = args["limit"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 200)
+                ?: DEFAULT_SKILLS_LIST_LIMIT
+            val availableOnly = args["availableOnly"]?.jsonPrimitive?.contentOrNull
+                ?.toBooleanStrictOrNull() ?: false
+            val normalizedQuery = query.lowercase()
+            val entries = skillIndexService.listInstalledSkills()
+                .filter { entry ->
+                    val compatibility = SkillCompatibilityChecker.evaluate(entry)
+                    if (availableOnly && !compatibility.available) {
+                        return@filter false
+                    }
+                    if (normalizedQuery.isBlank()) {
+                        true
+                    } else {
+                        listOf(
+                            entry.id,
+                            entry.name,
+                            entry.description,
+                            entry.shellSkillFilePath,
+                            entry.shellRootPath
+                        ).any { field ->
+                            field.lowercase().contains(normalizedQuery)
+                        }
+                    }
+                }
+                .take(limit)
+
+            val items = entries.map { entry ->
+                val compatibility = SkillCompatibilityChecker.evaluate(entry)
+                mapOf(
+                    "id" to entry.id,
+                    "name" to entry.name,
+                    "description" to entry.description,
+                    "available" to compatibility.available,
+                    "unavailableReason" to compatibility.reason,
+                    "rootPath" to entry.shellRootPath,
+                    "androidRootPath" to entry.rootPath,
+                    "skillFilePath" to entry.shellSkillFilePath,
+                    "androidSkillFilePath" to entry.skillFilePath,
+                    "capabilities" to buildList {
+                        if (entry.hasScripts) add("scripts")
+                        if (entry.hasReferences) add("references")
+                        if (entry.hasAssets) add("assets")
+                        if (entry.hasEvals) add("evals")
+                    },
+                    "metadata" to entry.metadata
+                )
+            }
+
+            val payload = linkedMapOf<String, Any?>(
+                "query" to query,
+                "availableOnly" to availableOnly,
+                "count" to items.size,
+                "skillsRoot" to workspaceManager.shellPathForAndroid(workspaceManager.skillsRoot()),
+                "androidSkillsRoot" to workspaceManager.skillsRoot().absolutePath,
+                "items" to items
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = if (items.isEmpty()) {
+                    "当前没有匹配的 skills"
+                } else {
+                    "共找到 ${items.size} 个 skill"
+                },
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "列出 skills 失败")
+        }
+    }
+
+    private suspend fun executeSkillsRead(
+        args: JsonObject,
+        workspace: AgentWorkspaceDescriptor,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        val toolName = "skills_read"
+        return try {
+            requireWorkspaceStorageAccess(callback)?.let { return it }
+            val skillId = args["skillId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            require(skillId.isNotEmpty()) { "缺少 skillId" }
+            val maxChars = args["maxChars"]?.jsonPrimitive?.intOrNull?.coerceIn(512, 64_000)
+                ?: DEFAULT_SKILL_READ_MAX_CHARS
+            val entry = skillIndexService.findInstalledSkill(skillId)
+                ?: throw IllegalArgumentException("未找到 skill：$skillId")
+            val compatibility = SkillCompatibilityChecker.evaluate(entry)
+            val resolved = skillLoader.load(entry, "agent 主动读取 skill")
+                ?: throw IllegalStateException("读取 SKILL.md 失败：${entry.shellSkillFilePath}")
+            val skillFile = File(entry.skillFilePath)
+            val artifact = workspaceManager.buildArtifactForFile(skillFile, toolName)
+            val payload = linkedMapOf<String, Any?>(
+                "id" to entry.id,
+                "name" to entry.name,
+                "description" to entry.description,
+                "available" to compatibility.available,
+                "unavailableReason" to compatibility.reason,
+                "rootPath" to entry.shellRootPath,
+                "androidRootPath" to entry.rootPath,
+                "skillFilePath" to entry.shellSkillFilePath,
+                "androidSkillFilePath" to entry.skillFilePath,
+                "scriptsDir" to resolved.scriptsDir,
+                "assetsDir" to resolved.assetsDir,
+                "references" to resolved.loadedReferences,
+                "metadata" to resolved.metadata,
+                "frontmatter" to resolved.frontmatter,
+                "bodyMarkdown" to truncateText(resolved.bodyMarkdown, maxChars),
+                "uri" to artifact.uri
+            )
+            ToolExecutionResult.ContextResult(
+                toolName = toolName,
+                summaryText = "已读取 skill：${entry.name}",
+                previewJson = json.encodeToString(mapToJsonElement(payload)),
+                rawResultJson = json.encodeToString(mapToJsonElement(payload)),
+                success = true,
+                artifacts = listOf(artifact),
+                workspaceId = workspace.id
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            workspacePermissionResult(e, callback)?.let { return it }
+            ToolExecutionResult.Error(toolName, e.message ?: "读取 skill 失败")
+        }
+    }
+
+    private suspend fun executeScheduleTool(
+        toolName: String,
+        args: JsonObject,
+        runtimeContextRepository: AgentRuntimeContextRepository,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        return try {
+            when (toolName) {
+                "schedule_task_create" -> {
+                    reportToolProgress(callback, toolName, "正在创建定时任务")
+                    val payload = jsonObjectToMap(args).toMutableMap()
+                    val targetKind = payload["targetKind"]?.toString()?.trim().orEmpty()
+                    if (targetKind != "vlm") {
+                        throw IllegalArgumentException("targetKind 仅支持 vlm")
+                    }
+                    if (!payload.containsKey("enabled")) {
+                        payload["enabled"] = true
+                    }
+                    val result = scheduleToolBridge.createTask(payload)
+                    ToolExecutionResult.ScheduleResult(
+                        toolName = toolName,
+                        summaryText = result["summary"]?.toString()
+                            ?: "定时任务已创建",
+                        previewJson = json.encodeToString(mapToJsonElement(result)),
+                        success = result["success"] != false,
+                        taskId = result["taskId"]?.toString()
+                    )
+                }
+
+                "schedule_task_list" -> {
+                    reportToolProgress(callback, toolName, "正在读取定时任务列表")
+                    val result = scheduleToolBridge.listTasks()
+                    val preview = json.encodeToString(mapToJsonElement(result))
+                    val summary = if (result.isEmpty()) {
+                        "当前没有定时任务。"
+                    } else {
+                        "当前共有 ${result.size} 个定时任务。"
+                    }
+                    ToolExecutionResult.ScheduleResult(
+                        toolName = toolName,
+                        summaryText = summary,
+                        previewJson = preview,
+                        success = true
+                    )
+                }
+
+                "schedule_task_update" -> {
+                    reportToolProgress(callback, toolName, "正在更新定时任务")
+                    val result = scheduleToolBridge.updateTask(jsonObjectToMap(args))
+                    ToolExecutionResult.ScheduleResult(
+                        toolName = toolName,
+                        summaryText = result["summary"]?.toString()
+                            ?: "定时任务已更新",
+                        previewJson = json.encodeToString(mapToJsonElement(result)),
+                        success = result["success"] != false,
+                        taskId = result["taskId"]?.toString()
+                    )
+                }
+
+                "schedule_task_delete" -> {
+                    reportToolProgress(callback, toolName, "正在删除定时任务")
+                    val result = scheduleToolBridge.deleteTask(jsonObjectToMap(args))
+                    ToolExecutionResult.ScheduleResult(
+                        toolName = toolName,
+                        summaryText = result["summary"]?.toString()
+                            ?: "定时任务已删除",
+                        previewJson = json.encodeToString(mapToJsonElement(result)),
+                        success = result["success"] != false,
+                        taskId = result["taskId"]?.toString()
+                    )
+                }
+
+                else -> ToolExecutionResult.Error(toolName, "Unknown schedule tool")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.Error(toolName, e.message ?: "Schedule bridge failed")
+        }
+    }
+
+    private suspend fun executeAlarmTool(
+        toolName: String,
+        args: JsonObject,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        return try {
+            when (toolName) {
+                "alarm_reminder_create" -> {
+                    reportToolProgress(callback, toolName, "正在创建提醒闹钟")
+                    val mode = args["mode"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    val title = args["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    val triggerAt = args["triggerAt"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    val message = args["message"]?.jsonPrimitive?.contentOrNull?.trim()
+                    val timezone = args["timezone"]?.jsonPrimitive?.contentOrNull?.trim()
+                    val allowWhileIdle = args["allowWhileIdle"]?.jsonPrimitive?.contentOrNull
+                        ?.toBooleanStrictOrNull() ?: true
+                    val skipUi = args["skipUi"]?.jsonPrimitive?.contentOrNull
+                        ?.toBooleanStrictOrNull() ?: false
+
+                    if (title.isBlank()) {
+                        throw IllegalArgumentException("title 不能为空")
+                    }
+                    if (triggerAt.isBlank()) {
+                        throw IllegalArgumentException("triggerAt 不能为空")
+                    }
+
+                    if (mode == "exact_alarm" && !alarmToolService.hasExactAlarmPermission()) {
+                        alarmToolService.openExactAlarmPermissionSettings()
+                        val missing = listOf("精确闹钟权限(SCHEDULE_EXACT_ALARM)")
+                        callback.onPermissionRequired(missing)
+                        return ToolExecutionResult.PermissionRequired(missing)
+                    }
+                    if (mode == "exact_alarm" && !alarmToolService.hasNotificationPermission()) {
+                        val granted = alarmToolService.requestNotificationPermission()
+                        if (!granted) {
+                            val missing = listOf("通知权限(POST_NOTIFICATIONS)")
+                            callback.onPermissionRequired(missing)
+                            return ToolExecutionResult.PermissionRequired(missing)
+                        }
+                    }
+
+                    val payload = alarmToolService.createReminder(
+                        AgentAlarmCreateRequest(
+                            mode = mode,
+                            title = title,
+                            triggerAt = triggerAt,
+                            message = message,
+                            timezone = timezone,
+                            allowWhileIdle = allowWhileIdle,
+                            skipUi = skipUi
+                        )
+                    )
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = payload["summary"]?.toString().orEmpty().ifBlank { "提醒闹钟已创建" },
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = payload["success"] != false
+                    )
+                }
+
+                "alarm_reminder_list" -> {
+                    reportToolProgress(callback, toolName, "正在读取提醒闹钟列表")
+                    val items = alarmToolService.listExactReminders()
+                    val payload = mapOf(
+                        "count" to items.size,
+                        "items" to items
+                    )
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = if (items.isEmpty()) "当前没有提醒闹钟。" else "当前共有 ${items.size} 个提醒闹钟。",
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = true
+                    )
+                }
+
+                "alarm_reminder_delete" -> {
+                    reportToolProgress(callback, toolName, "正在删除提醒闹钟")
+                    val alarmId = args["alarmId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    if (alarmId.isBlank()) {
+                        throw IllegalArgumentException("alarmId 不能为空")
+                    }
+                    val payload = alarmToolService.deleteExactReminder(alarmId)
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = payload["summary"]?.toString().orEmpty().ifBlank { "提醒闹钟已删除" },
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = payload["success"] != false
+                    )
+                }
+
+                else -> ToolExecutionResult.Error(toolName, "Unknown alarm tool")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.Error(toolName, e.message ?: "Alarm tool failed")
+        }
+    }
+
+    private suspend fun executeCalendarTool(
+        toolName: String,
+        args: JsonObject,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        return try {
+            if (!calendarToolService.hasCalendarPermissions()) {
+                reportToolProgress(callback, toolName, "正在请求日历权限")
+                val granted = calendarToolService.requestCalendarPermissions()
+                if (!granted) {
+                    val missing = listOf("日历权限(READ/WRITE_CALENDAR)")
+                    callback.onPermissionRequired(missing)
+                    return ToolExecutionResult.PermissionRequired(missing)
+                }
+            }
+
+            when (toolName) {
+                "calendar_list" -> {
+                    reportToolProgress(callback, toolName, "正在读取日历列表")
+                    val writableOnly = args["writableOnly"]?.jsonPrimitive?.contentOrNull
+                        ?.toBooleanStrictOrNull() ?: true
+                    val visibleOnly = args["visibleOnly"]?.jsonPrimitive?.contentOrNull
+                        ?.toBooleanStrictOrNull() ?: true
+                    val items = calendarToolService.listCalendars(
+                        writableOnly = writableOnly,
+                        visibleOnly = visibleOnly
+                    )
+                    val payload = mapOf(
+                        "count" to items.size,
+                        "items" to items
+                    )
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = if (items.isEmpty()) {
+                            "未找到符合条件的日历。"
+                        } else {
+                            "找到 ${items.size} 个日历。"
+                        },
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = true
+                    )
+                }
+
+                "calendar_event_create" -> {
+                    reportToolProgress(callback, toolName, "正在创建日程")
+                    val title = args["title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    val startAt = args["startAt"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    val endAt = args["endAt"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    if (title.isBlank()) throw IllegalArgumentException("title 不能为空")
+                    if (startAt.isBlank()) throw IllegalArgumentException("startAt 不能为空")
+                    if (endAt.isBlank()) throw IllegalArgumentException("endAt 不能为空")
+
+                    val payload = calendarToolService.createEvent(
+                        CalendarEventCreateRequest(
+                            title = title,
+                            startAt = startAt,
+                            endAt = endAt,
+                            calendarId = args["calendarId"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            description = args["description"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            location = args["location"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            timezone = args["timezone"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            allDay = args["allDay"]?.jsonPrimitive?.contentOrNull
+                                ?.toBooleanStrictOrNull() ?: false,
+                            reminderMinutes = parseIntegerArray(args["reminderMinutes"] as? JsonArray)
+                        )
+                    )
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = payload["summary"]?.toString().orEmpty().ifBlank { "日程已创建" },
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = payload["success"] != false
+                    )
+                }
+
+                "calendar_event_list" -> {
+                    reportToolProgress(callback, toolName, "正在查询日程")
+                    val payload = calendarToolService.listEvents(
+                        CalendarEventListRequest(
+                            calendarId = args["calendarId"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            startAt = args["startAt"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            endAt = args["endAt"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            query = args["query"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            limit = calendarToolService.normalizeListLimit(
+                                args["limit"]?.jsonPrimitive?.intOrNull
+                            )
+                        )
+                    )
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = "找到 ${payload["count"] ?: 0} 条日程。",
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = payload["success"] != false
+                    )
+                }
+
+                "calendar_event_update" -> {
+                    reportToolProgress(callback, toolName, "正在修改日程")
+                    val eventId = args["eventId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    if (eventId.isBlank()) throw IllegalArgumentException("eventId 不能为空")
+                    val payload = calendarToolService.updateEvent(
+                        CalendarEventUpdateRequest(
+                            eventId = eventId,
+                            title = args["title"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            startAt = args["startAt"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            endAt = args["endAt"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            description = args["description"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            location = args["location"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            timezone = args["timezone"]?.jsonPrimitive?.contentOrNull?.trim(),
+                            allDay = args["allDay"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull(),
+                            reminderMinutes = if (args.containsKey("reminderMinutes")) {
+                                parseIntegerArray(args["reminderMinutes"] as? JsonArray)
+                            } else {
+                                null
+                            }
+                        )
+                    )
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = payload["summary"]?.toString().orEmpty().ifBlank { "日程已更新" },
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = payload["success"] != false
+                    )
+                }
+
+                "calendar_event_delete" -> {
+                    reportToolProgress(callback, toolName, "正在删除日程")
+                    val eventId = args["eventId"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+                    if (eventId.isBlank()) throw IllegalArgumentException("eventId 不能为空")
+                    val payload = calendarToolService.deleteEvent(eventId)
+                    val payloadJson = json.encodeToString(mapToJsonElement(payload))
+                    ToolExecutionResult.ContextResult(
+                        toolName = toolName,
+                        summaryText = payload["summary"]?.toString().orEmpty().ifBlank { "日程已删除" },
+                        previewJson = payloadJson,
+                        rawResultJson = payloadJson,
+                        success = payload["success"] != false
+                    )
+                }
+
+                else -> ToolExecutionResult.Error(toolName, "Unknown calendar tool")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.Error(toolName, e.message ?: "Calendar tool failed")
+        }
+    }
+
+    private suspend fun executeMcpTool(
+        remoteTool: RemoteMcpToolDescriptor,
+        args: JsonObject,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        return try {
+            reportToolProgress(
+                callback,
+                remoteTool.encodedToolName,
+                "正在调用 ${remoteTool.serverName} 的 ${remoteTool.toolName}"
+            )
+            val config = RemoteMcpConfigStore.getServer(remoteTool.serverId)
+                ?: throw IllegalStateException("Remote MCP server not found")
+            val result = RemoteMcpClient.callTool(
+                config = config,
+                toolName = remoteTool.toolName,
+                arguments = jsonObjectToMap(args)
+            )
+            ToolExecutionResult.McpResult(
+                toolName = remoteTool.encodedToolName,
+                serverName = remoteTool.serverName,
+                summaryText = result.summaryText,
+                previewJson = result.previewJson,
+                rawResultJson = result.rawResultJson,
+                success = result.success
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.Error(remoteTool.encodedToolName, e.message ?: "MCP tool call failed")
+        }
+    }
+
+    private suspend fun executeMem0Tool(
+        toolName: String,
+        args: JsonObject,
+        mem0Config: Mem0ResolvedConfig?,
+        agentRunId: String,
+        callback: AgentCallback
+    ): ToolExecutionResult {
+        if (mem0Config == null) {
+            return ToolExecutionResult.Error(toolName, "Mem0 未配置，当前已降级为无记忆模式。")
+        }
+        val confirmation = Mem0ToolUtils.validateConfirmation(toolName, args)
+        if (!confirmation.confirmed) {
+            val question = confirmation.clarifyQuestion ?: "请先确认后再执行该 Mem0 操作。"
+            callback.onClarifyRequired(question, listOf("confirm"))
+            return ToolExecutionResult.Clarify(question, listOf("confirm"))
+        }
+
+        return try {
+            val result = when (toolName) {
+                Mem0ToolUtils.TOOL_CONFIGURE -> {
+                    reportToolProgress(callback, toolName, "正在同步 Mem0 配置")
+                    Mem0Client.configure(
+                        config = mem0Config,
+                        payload = buildMem0Payload(args)
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_ADD -> {
+                    reportToolProgress(callback, toolName, "正在写入长期记忆")
+                    executeMem0AddWithSmartUpdate(
+                        config = mem0Config,
+                        payload = buildMem0Payload(args),
+                        runId = agentRunId,
+                        callback = callback
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_LIST -> {
+                    reportToolProgress(callback, toolName, "正在读取记忆列表")
+                    Mem0Client.listMemories(
+                        config = mem0Config,
+                        payload = buildMem0Payload(args)
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_GET -> {
+                    reportToolProgress(callback, toolName, "正在读取记忆详情")
+                    val memoryId = args["memoryId"]?.jsonPrimitive?.content
+                        ?: throw IllegalArgumentException("Missing memoryId")
+                    Mem0Client.getMemory(
+                        config = mem0Config,
+                        memoryId = memoryId,
+                        payload = buildMem0Payload(args, excludedKeys = setOf("memoryId"))
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_UPDATE -> {
+                    reportToolProgress(callback, toolName, "正在更新记忆")
+                    val memoryId = args["memoryId"]?.jsonPrimitive?.content
+                        ?: throw IllegalArgumentException("Missing memoryId")
+                    Mem0Client.updateMemory(
+                        config = mem0Config,
+                        memoryId = memoryId,
+                        payload = buildMem0Payload(args, excludedKeys = setOf("memoryId")),
+                        runId = agentRunId
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_DELETE -> {
+                    reportToolProgress(callback, toolName, "正在删除记忆")
+                    val memoryId = args["memoryId"]?.jsonPrimitive?.content
+                        ?: throw IllegalArgumentException("Missing memoryId")
+                    Mem0Client.deleteMemory(
+                        config = mem0Config,
+                        memoryId = memoryId,
+                        payload = buildMem0Payload(args, excludedKeys = setOf("memoryId"))
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_HISTORY -> {
+                    reportToolProgress(callback, toolName, "正在读取记忆历史")
+                    val memoryId = args["memoryId"]?.jsonPrimitive?.content
+                        ?: throw IllegalArgumentException("Missing memoryId")
+                    Mem0Client.getMemoryHistory(
+                        config = mem0Config,
+                        memoryId = memoryId,
+                        payload = buildMem0Payload(args, excludedKeys = setOf("memoryId"))
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_SEARCH -> {
+                    reportToolProgress(callback, toolName, "正在检索长期记忆")
+                    Mem0Client.search(
+                        config = mem0Config,
+                        payload = buildMem0Payload(args)
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_DELETE_ALL -> {
+                    reportToolProgress(callback, toolName, "正在清空当前 Mem0 记忆")
+                    Mem0Client.deleteAll(
+                        config = mem0Config,
+                        payload = buildMem0Payload(args, excludedKeys = setOf("confirm"))
+                    )
+                }
+
+                Mem0ToolUtils.TOOL_RESET -> {
+                    reportToolProgress(callback, toolName, "正在重置当前 Mem0 记忆空间")
+                    Mem0Client.reset(
+                        config = mem0Config,
+                        payload = buildMem0Payload(args, excludedKeys = setOf("confirm"))
+                    )
+                }
+
+                else -> throw IllegalArgumentException("Unknown Mem0 tool: $toolName")
+            }
+            ToolExecutionResult.Mem0Result(
+                toolName = toolName,
+                summaryText = result.summaryText,
+                previewJson = result.previewJson,
+                rawResultJson = result.rawResultJson,
+                success = result.success
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ToolExecutionResult.Error(toolName, e.message ?: "Mem0 tool call failed")
+        }
+    }
+
+    private suspend fun executeMem0AddWithSmartUpdate(
+        config: Mem0ResolvedConfig,
+        payload: Map<String, Any?>,
+        runId: String,
+        callback: AgentCallback
+    ): Mem0ApiResult {
+        val incomingText = extractMem0MemoryText(payload)
+        if (incomingText.isBlank()) {
+            return Mem0Client.addMemory(
+                config = config,
+                payload = payload,
+                runId = runId
+            )
+        }
+
+        val similarItems = Mem0Client.searchWithFallback(
+            config = config,
+            query = incomingText,
+            limit = Mem0Defaults.DEFAULT_SEARCH_LIMIT
+        ).items
+        val candidate = Mem0MemoryAdvisor.findUpdateCandidate(incomingText, similarItems)
+            ?.takeIf { it.item.id.isNotBlank() }
+            ?: return Mem0Client.addMemory(
+                config = config,
+                payload = payload,
+                runId = runId
+            )
+
+        reportToolProgress(
+            callback,
+            Mem0ToolUtils.TOOL_ADD,
+            "检测到相似长期记忆，改为合并更新"
+        )
+
+        val mergedPayload = buildSmartMem0UpdatePayload(candidate.item, payload, incomingText)
+        if (isMem0UpdateNoop(candidate.item, mergedPayload)) {
+            return buildMem0DeduplicatedResult(
+                memoryId = candidate.item.id,
+                memoryText = candidate.item.text
+            )
+        }
+
+        return try {
+            Mem0Client.updateMemory(
+                config = config,
+                memoryId = candidate.item.id,
+                payload = mergedPayload,
+                runId = runId
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (error: Exception) {
+            OmniLog.w(tag, "Mem0 smart add fallback to add: ${error.message}")
+            Mem0Client.addMemory(
+                config = config,
+                payload = payload,
+                runId = runId
+            )
+        }
+    }
+
+    private fun buildSmartMem0UpdatePayload(
+        existing: Mem0MemoryItem,
+        incomingPayload: Map<String, Any?>,
+        incomingText: String
+    ): Map<String, Any?> {
+        val mergedCategories = mergeMem0Categories(existing, incomingPayload)
+        val mergedMetadata = mergeMem0Metadata(existing, incomingPayload, mergedCategories)
+        val result = linkedMapOf<String, Any?>(
+            "memory" to Mem0MemoryAdvisor.mergeMemoryText(existing.text, incomingText)
+        )
+        if (mergedCategories.isNotEmpty()) {
+            result["categories"] = mergedCategories
+        }
+        if (mergedMetadata.isNotEmpty()) {
+            result["metadata"] = mergedMetadata
+        }
+        return result
+    }
+
+    private fun isMem0UpdateNoop(
+        existing: Mem0MemoryItem,
+        mergedPayload: Map<String, Any?>
+    ): Boolean {
+        val mergedText = extractMem0MemoryText(mergedPayload)
+        if (normalizeMemoryText(existing.text) != normalizeMemoryText(mergedText)) {
+            return false
+        }
+        val existingCategories = extractExistingMem0Categories(existing).toSet()
+        val mergedCategories = extractMem0Categories(mergedPayload).toSet()
+        if (existingCategories != mergedCategories) {
+            return false
+        }
+        val existingMetadata = existing.metadata.filterKeys { it != "categories" }
+        val mergedMetadata = ((mergedPayload["metadata"] as? Map<*, *>)?.entries?.associate {
+            it.key.toString() to it.value
+        } ?: emptyMap()).filterKeys { it != "categories" }
+        return existingMetadata == mergedMetadata
+    }
+
+    private fun buildMem0DeduplicatedResult(
+        memoryId: String,
+        memoryText: String
+    ): Mem0ApiResult {
+        val payload = linkedMapOf<String, Any?>(
+            "mode" to "deduplicated_existing",
+            "memoryId" to memoryId,
+            "memory" to memoryText
+        )
+        val rawJson = json.encodeToString(mapToJsonElement(payload))
+        return Mem0ApiResult(
+            summaryText = "检测到相似记忆，未重复新增。",
+            previewJson = rawJson,
+            rawResultJson = rawJson,
+            success = true,
+            payload = payload
+        )
+    }
+
+    private fun extractMem0MemoryText(payload: Map<String, Any?>): String {
+        val directText = sequenceOf(
+            payload["memory"]?.toString()?.trim().orEmpty(),
+            payload["text"]?.toString()?.trim().orEmpty(),
+            extractMem0TextFromMessages(payload["messages"])
+        ).firstOrNull { it.isNotBlank() }.orEmpty()
+        return directText.trim()
+    }
+
+    private fun extractMem0TextFromMessages(raw: Any?): String {
+        val messages = raw as? List<*> ?: return ""
+        return messages.mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            map["content"]?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        }.joinToString("\n").trim()
+    }
+
+    private fun extractMem0Categories(payload: Map<String, Any?>): List<String> {
+        val directCategories = (payload["categories"] as? List<*>)?.mapNotNull { item ->
+            item?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+        } ?: emptyList()
+        val metadataCategories = ((payload["metadata"] as? Map<*, *>)?.get("categories") as? List<*>)
+            ?.mapNotNull { item -> item?.toString()?.trim()?.takeIf { it.isNotEmpty() } }
+            ?: emptyList()
+        return (directCategories + metadataCategories).distinct()
+    }
+
+    private fun extractExistingMem0Categories(item: Mem0MemoryItem): List<String> {
+        val metadataCategories = (item.metadata["categories"] as? List<*>)
+            ?.mapNotNull { category ->
+                category?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            }
+            ?: emptyList()
+        return (item.categories + metadataCategories).distinct()
+    }
+
+    private fun mergeMem0Categories(
+        existing: Mem0MemoryItem,
+        incomingPayload: Map<String, Any?>
+    ): List<String> {
+        return (extractExistingMem0Categories(existing) + extractMem0Categories(incomingPayload))
+            .distinct()
+    }
+
+    private fun mergeMem0Metadata(
+        existing: Mem0MemoryItem,
+        incomingPayload: Map<String, Any?>,
+        mergedCategories: List<String>
+    ): Map<String, Any?> {
+        val merged = linkedMapOf<String, Any?>()
+        existing.metadata.forEach { (key, value) ->
+            if (key != "categories") {
+                merged[key] = value
+            }
+        }
+        val incomingMetadata = (incomingPayload["metadata"] as? Map<*, *>)?.entries?.associate {
+            it.key.toString() to it.value
+        } ?: emptyMap()
+        incomingMetadata.forEach { (key, value) ->
+            if (key != "categories") {
+                merged[key] = value
+            }
+        }
+        if (mergedCategories.isNotEmpty()) {
+            merged["categories"] = mergedCategories
+        }
+        return merged
+    }
+
+    private fun normalizeMemoryText(text: String): String {
+        return text.trim()
+            .lowercase()
+            .filter { it.isLetterOrDigit() }
+    }
+
+    private fun sanitizeVlmExecutionArgs(
+        rawArgs: VlmExecutionArgs,
+        userMessage: String,
+        appNameToPackage: Map<String, String>,
+        currentPackageName: String?
+    ): VlmArgsSanitizeResult {
+        var startFromCurrent = rawArgs.startFromCurrent
+        var packageName = rawArgs.packageName?.trim()?.takeIf { it.isNotEmpty() }
+        val reasons = mutableListOf<String>()
+
+        val explicitCurrentIntent =
+            isExplicitCurrentPageIntent(userMessage) || isExplicitCurrentPageIntent(rawArgs.goal)
+        val openAppIntent =
+            isLikelyOpenAppIntent(userMessage) || isLikelyOpenAppIntent(rawArgs.goal)
+        val detectedTargetPackage =
+            detectTargetAppPackage(userMessage, appNameToPackage)
+                ?: detectTargetAppPackage(rawArgs.goal, appNameToPackage)
+
+        if (packageName == null && openAppIntent && detectedTargetPackage != null) {
+            packageName = detectedTargetPackage
+            reasons.add("open_app_intent_autofill_package")
+        }
+
+        val currentPackage = currentPackageName?.trim()?.takeIf { it.isNotEmpty() }
+        val assistantPackage = context.packageName
+        val targetPackage = packageName ?: detectedTargetPackage
+
+        if (startFromCurrent && !explicitCurrentIntent) {
+            startFromCurrent = false
+            reasons.add("start_from_current_without_current_intent")
+        }
+        if (startFromCurrent && openAppIntent) {
+            startFromCurrent = false
+            reasons.add("open_app_should_not_start_from_current")
+        }
+        if (startFromCurrent && targetPackage != null && currentPackage != null && targetPackage != currentPackage) {
+            startFromCurrent = false
+            reasons.add("target_package_differs_from_current_package")
+        }
+        if (startFromCurrent && currentPackage == assistantPackage &&
+            targetPackage != null && targetPackage != assistantPackage
+        ) {
+            startFromCurrent = false
+            reasons.add("assistant_page_cannot_start_external_app_from_current")
+        }
+
+        return VlmArgsSanitizeResult(
+            args = rawArgs.copy(
+                packageName = packageName,
+                startFromCurrent = startFromCurrent
+            ),
+            reasons = reasons.distinct()
+        )
+    }
+
+    private fun detectTargetAppPackage(
+        text: String,
+        appNameToPackage: Map<String, String>
+    ): String? {
+        if (text.isBlank() || appNameToPackage.isEmpty()) return null
+        val normalizedText = normalizeIntentText(text)
+        if (normalizedText.isBlank()) return null
+
+        var bestMatchLength = -1
+        var bestPackage: String? = null
+        appNameToPackage.forEach { (appName, packageName) ->
+            val normalizedName = normalizeIntentText(appName)
+            if (normalizedName.isBlank()) return@forEach
+            if (normalizedText.contains(normalizedName) && normalizedName.length > bestMatchLength) {
+                bestMatchLength = normalizedName.length
+                bestPackage = packageName
+            }
+        }
+        return bestPackage
+    }
+
+    private fun isExplicitCurrentPageIntent(text: String): Boolean {
+        if (text.isBlank()) return false
+        val normalized = normalizeIntentText(text)
+        val markers = listOf(
+            "当前页面", "当前应用", "当前界面", "这个页面", "这个界面",
+            "这里", "在这", "正在看的", "继续刚才", "继续之前", "从当前"
+        )
+        return markers.any { normalized.contains(normalizeIntentText(it)) }
+    }
+
+    private fun isLikelyOpenAppIntent(text: String): Boolean {
+        if (text.isBlank()) return false
+        val normalized = normalizeIntentText(text)
+        val openVerbs = listOf("打开", "启动", "进入", "点开")
+        val hasOpenVerb = openVerbs.any { normalized.contains(it) }
+        if (!hasOpenVerb) return false
+        val followUpActionWords = listOf(
+            "搜索", "发送", "回复", "聊天", "下单", "支付", "付款", "购买",
+            "浏览", "查看", "看看", "总结", "答题", "填写", "输入", "点击",
+            "并", "然后", "再", "之后", "顺便"
+        )
+        return followUpActionWords.none { normalized.contains(it) }
+    }
+
+    private fun normalizeIntentText(text: String): String {
+        return text.lowercase()
+            .replace(Regex("\\s+"), "")
+            .replace("“", "")
+            .replace("”", "")
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("。", "")
+            .replace("，", "")
+            .replace(",", "")
+            .replace("！", "")
+            .replace("!", "")
+            .replace("？", "")
+            .replace("?", "")
+    }
+
+    private fun parseIntegerArray(raw: JsonArray?): List<Int> {
+        if (raw == null) return emptyList()
+        return raw.mapNotNull { item ->
+            (item as? JsonPrimitive)?.intOrNull
+        }
+    }
+
+    private fun parseContextQueryLimit(rawLimit: Int?): Int {
+        return rawLimit?.coerceIn(1, 100) ?: DEFAULT_CONTEXT_QUERY_LIMIT
+    }
+
+    private suspend fun executeTerminalCommand(
+        command: String,
+        workingDirectory: String,
+        timeoutSeconds: Int
+    ): TermuxCommandResult {
+        return TermuxCommandRunner.execute(
+            context = context,
+            spec = TermuxCommandSpec(
+                command = command,
+                executionMode = TermuxCommandSpec.EXECUTION_MODE_PROOT,
+                prootDistro = TermuxCommandSpec.DEFAULT_PROOT_DISTRO,
+                workingDirectory = workingDirectory,
+                timeoutSeconds = timeoutSeconds
+            )
+        )
+    }
+
+    private suspend fun ensureTmuxAvailable(workspace: AgentWorkspaceDescriptor): String? {
+        tmuxAvailabilityCached?.let { cached ->
+            return if (cached) null else "当前 Ubuntu 环境未安装 tmux，无法使用 terminal_session_*；请优先改用 terminal_execute，或先在 Ubuntu 中安装 tmux。"
+        }
+        val probeResult = executeTerminalCommand(
+            command = "command -v tmux >/dev/null 2>&1",
+            workingDirectory = workspace.currentCwd,
+            timeoutSeconds = 20
+        )
+        val available = probeResult.success
+        tmuxAvailabilityCached = available
+        return if (available) {
+            null
+        } else {
+            "当前 Ubuntu 环境未安装 tmux，无法使用 terminal_session_*；请优先改用 terminal_execute，或先在 Ubuntu 中安装 tmux。"
+        }
+    }
+
+    private fun buildTmuxUnavailableResult(
+        toolName: String,
+        message: String,
+        workspace: AgentWorkspaceDescriptor
+    ): ToolExecutionResult.TerminalResult {
+        val payload = linkedMapOf<String, Any?>(
+            "success" to false,
+            "error" to message,
+            "workspaceId" to workspace.id,
+            "workspacePath" to workspace.androidRootPath,
+            "workspaceShellPath" to workspace.rootPath
+        )
+        val payloadJson = json.encodeToString(mapToJsonElement(payload))
+        return ToolExecutionResult.TerminalResult(
+            toolName = toolName,
+            summaryText = message,
+            previewJson = payloadJson,
+            rawResultJson = payloadJson,
+            success = false,
+            terminalOutput = message,
+            terminalStreamState = "error",
+            workspaceId = workspace.id
+        )
+    }
+
+    private fun resolveShellWorkingDirectory(
+        requestedPath: String?,
+        workspace: AgentWorkspaceDescriptor
+    ): String {
+        return if (requestedPath.isNullOrBlank()) {
+            workspace.currentCwd
+        } else {
+            workspaceManager.resolveShellPath(
+                requestedPath,
+                workspace,
+                allowRootDirectories = true
+            )
+        }
+    }
+
+    private fun resolveAndroidWorkingDirectory(
+        requestedPath: String?,
+        workspace: AgentWorkspaceDescriptor
+    ): File {
+        return if (requestedPath.isNullOrBlank()) {
+            File(workspace.androidCurrentCwd)
+        } else {
+            workspaceManager.resolvePath(requestedPath, workspace, allowRootDirectories = true)
+        }
+    }
+
+    private fun sanitizeTerminalSessionId(raw: String?): String {
+        val normalized = raw.orEmpty().trim()
+        val base = normalized
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .trim('_')
+        return if (base.isBlank()) {
+            "session_${UUID.randomUUID().toString().take(8)}"
+        } else {
+            base.take(48)
+        }
+    }
+
+    private fun terminalSessionDirectory(
+        workspace: AgentWorkspaceDescriptor,
+        sessionId: String
+    ): File {
+        return File(
+            File(workspaceManager.offloadsDirectory(workspace.id), "terminal_sessions"),
+            sessionId
+        )
+    }
+
+    private suspend fun waitForCommandLog(
+        logFile: File,
+        markerPrefix: String,
+        timeoutSeconds: Int,
+        callback: AgentCallback,
+        toolName: String
+    ): String {
+        val maxAttempts = (timeoutSeconds * 4).coerceAtLeast(4)
+        var lastContent = ""
+        repeat(maxAttempts) { index ->
+            ensureRunActive()
+            if (logFile.exists()) {
+                lastContent = runCatching { logFile.readText() }.getOrDefault(lastContent)
+                if (lastContent.contains(markerPrefix)) {
+                    return lastContent
+                }
+            }
+            if (index % 8 == 0) {
+                reportToolProgress(
+                    callback,
+                    toolName,
+                    "终端会话命令执行中",
+                    mapOf(
+                        "summary" to "终端会话命令执行中",
+                        "terminalOutputDelta" to "",
+                        "terminalStreamState" to "running"
+                    )
+                )
+            }
+            delay(250)
+        }
+        return lastContent
+    }
+
+    private fun buildTerminalArtifacts(
+        workspace: AgentWorkspaceDescriptor,
+        sourceTool: String,
+        terminalOutput: String
+    ): List<ArtifactRef> {
+        if (terminalOutput.length <= 4000) return emptyList()
+        return try {
+            listOf(
+                workspaceManager.writeOffload(
+                    agentRunId = workspace.id,
+                    extension = "log",
+                    content = terminalOutput
+                ).copy(sourceTool = sourceTool)
+            )
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private suspend fun requireWorkspaceStorageAccess(
+        callback: AgentCallback
+    ): ToolExecutionResult.PermissionRequired? {
+        if (WorkspaceStorageAccess.isGranted(context)) {
+            return null
+        }
+        val missing = WorkspaceStorageAccess.requiredPermissionNames()
+        callback.onPermissionRequired(missing)
+        return ToolExecutionResult.PermissionRequired(missing)
+    }
+
+    private suspend fun workspacePermissionResult(
+        error: Exception,
+        callback: AgentCallback
+    ): ToolExecutionResult.PermissionRequired? {
+        if (!WorkspaceStorageAccess.looksLikePermissionError(error)) {
+            return null
+        }
+        val missing = WorkspaceStorageAccess.requiredPermissionNames()
+        callback.onPermissionRequired(missing)
+        return ToolExecutionResult.PermissionRequired(missing)
+    }
+
+    private fun quoteShell(value: String): String = TermuxCommandBuilder.quoteForShell(value)
+
+    private fun parseTerminalExecuteArgs(args: JsonObject): TerminalExecuteArgs {
+        val command = args["command"]?.jsonPrimitive?.content?.trim().orEmpty()
+        require(command.isNotEmpty()) { "terminal_execute 缺少 command" }
+
+        val requestedMode = args["executionMode"]?.jsonPrimitive?.contentOrNull
+            ?.trim()
+            ?.lowercase()
+            ?.takeIf { it.isNotEmpty() }
+        if (requestedMode != null) {
+            require(
+                requestedMode == TermuxCommandSpec.EXECUTION_MODE_TERMUX ||
+                    requestedMode == TermuxCommandSpec.EXECUTION_MODE_PROOT
+            ) { "executionMode 仅支持 termux 或 proot" }
+        }
+
+        // 终端能力固定在 Ubuntu proot 运行，避免模型误传 termux 导致偏离预期环境。
+        val executionMode = TermuxCommandSpec.EXECUTION_MODE_PROOT
+        val prootDistro = TermuxCommandSpec.DEFAULT_PROOT_DISTRO
+
+        val workingDirectory = args["workingDirectory"]?.jsonPrimitive?.contentOrNull
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val timeoutSeconds = args["timeoutSeconds"]?.jsonPrimitive?.intOrNull
+            ?.coerceIn(5, 300)
+            ?: TermuxCommandSpec.DEFAULT_TIMEOUT_SECONDS
+
+        return TerminalExecuteArgs(
+            command = command,
+            executionMode = executionMode,
+            prootDistro = prootDistro,
+            workingDirectory = workingDirectory,
+            timeoutSeconds = timeoutSeconds
+        )
+    }
+
+    private fun parseTerminalSessionStartArgs(args: JsonObject): TerminalSessionStartArgs {
+        return TerminalSessionStartArgs(
+            sessionName = args["sessionName"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+            workingDirectory = args["workingDirectory"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+        )
+    }
+
+    private fun parseTerminalSessionExecArgs(args: JsonObject): TerminalSessionExecArgs {
+        val sessionId = args["sessionId"]?.jsonPrimitive?.content?.trim().orEmpty()
+        val command = args["command"]?.jsonPrimitive?.content?.trim().orEmpty()
+        require(sessionId.isNotEmpty()) { "缺少 sessionId" }
+        require(command.isNotEmpty()) { "缺少 command" }
+        return TerminalSessionExecArgs(
+            sessionId = sessionId,
+            command = command,
+            workingDirectory = args["workingDirectory"]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() },
+            timeoutSeconds = args["timeoutSeconds"]?.jsonPrimitive?.intOrNull?.coerceIn(5, 600) ?: 120
+        )
+    }
+
+    private fun parseTerminalSessionReadArgs(args: JsonObject): TerminalSessionReadArgs {
+        val sessionId = args["sessionId"]?.jsonPrimitive?.content?.trim().orEmpty()
+        require(sessionId.isNotEmpty()) { "缺少 sessionId" }
+        return TerminalSessionReadArgs(
+            sessionId = sessionId,
+            maxChars = args["maxChars"]?.jsonPrimitive?.intOrNull?.coerceIn(256, 64_000)
+                ?: DEFAULT_TERMINAL_SESSION_READ_MAX_CHARS
+        )
+    }
+
+    private fun buildTerminalToolResult(
+        toolName: String,
+        args: TerminalExecuteArgs,
+        result: TermuxCommandResult,
+        workspace: AgentWorkspaceDescriptor,
+        sourceTool: String
+    ): ToolExecutionResult.TerminalResult {
+        val previewMap = buildTerminalResultMap(args, result, outputLimit = 2000)
+        val rawResultMap = buildTerminalResultMap(args, result, outputLimit = 12000)
+        val artifacts = buildTerminalArtifacts(
+            workspace = workspace,
+            sourceTool = sourceTool,
+            terminalOutput = result.terminalOutput.ifBlank { result.stdout + result.stderr }
+        )
+        return ToolExecutionResult.TerminalResult(
+            toolName = toolName,
+            summaryText = buildTerminalSummary(result),
+            previewJson = json.encodeToString(mapToJsonElement(previewMap)),
+            rawResultJson = json.encodeToString(mapToJsonElement(rawResultMap)),
+            success = result.success,
+            terminalOutput = result.terminalOutput,
+            terminalSessionId = result.liveSessionId,
+            terminalStreamState = result.liveStreamState,
+            artifacts = artifacts,
+            workspaceId = workspace.id
+        )
+    }
+
+    internal fun buildTerminalRetryBudgetExhaustedResult(
+        args: JsonObject,
+        retryState: TerminalRetryState
+    ): ToolExecutionResult.TerminalResult {
+        val payload = linkedMapOf<String, Any?>(
+            "reason" to "terminal_retry_budget_exhausted",
+            "success" to false,
+            "timedOut" to false,
+            "retryCount" to retryState.retryCount,
+            "retryLimit" to MAX_TERMINAL_AUTO_RETRIES,
+            "remainingRetries" to retryState.remainingRetries,
+            "errorMessage" to "终端自动修正已达到上限，请基于已有结果输出诊断和建议"
+        )
+        args["command"]?.jsonPrimitive?.contentOrNull?.let { payload["command"] = it }
+        args["executionMode"]?.jsonPrimitive?.contentOrNull?.let { payload["executionMode"] = it }
+        args["prootDistro"]?.jsonPrimitive?.contentOrNull?.let { payload["prootDistro"] = it }
+        args["workingDirectory"]?.jsonPrimitive?.contentOrNull?.let { payload["workingDirectory"] = it }
+        args["timeoutSeconds"]?.jsonPrimitive?.intOrNull?.let { payload["timeoutSeconds"] = it }
+
+        val payloadJson = json.encodeToString(mapToJsonElement(payload))
+        return ToolExecutionResult.TerminalResult(
+            toolName = "terminal_execute",
+            summaryText = "终端自动修正已达到上限（$MAX_TERMINAL_AUTO_RETRIES 次），请基于现有 stderr/stdout 输出诊断和建议",
+            previewJson = payloadJson,
+            rawResultJson = payloadJson,
+            success = false,
+            terminalStreamState = "error"
+        )
+    }
+
+    private fun buildTerminalResultMap(
+        args: TerminalExecuteArgs,
+        result: TermuxCommandResult,
+        outputLimit: Int
+    ): Map<String, Any?> {
+        return linkedMapOf(
+            "executionMode" to args.executionMode,
+            "prootDistro" to args.prootDistro,
+            "workingDirectory" to args.workingDirectory,
+            "timeoutSeconds" to args.timeoutSeconds,
+            "command" to args.command,
+            "success" to result.success,
+            "timedOut" to result.timedOut,
+            "resultCode" to result.resultCode,
+            "errorCode" to result.errorCode,
+            "errorMessage" to result.errorMessage,
+            "stdout" to truncateText(result.stdout, outputLimit),
+            "stderr" to truncateText(result.stderr, outputLimit),
+            "stdoutLength" to result.stdout.length,
+            "stderrLength" to result.stderr.length,
+            "terminalOutput" to truncateText(result.terminalOutput, outputLimit),
+            "terminalOutputLength" to result.terminalOutput.length,
+            "liveSessionId" to result.liveSessionId,
+            "liveStreamState" to result.liveStreamState,
+            "liveFallbackReason" to result.liveFallbackReason,
+            "rawExtras" to sanitizeTerminalRawExtras(result.rawExtras, outputLimit)
+        )
+    }
+
+    private fun buildTerminalSummary(result: TermuxCommandResult): String {
+        val liveNote = if (result.liveFallbackReason.isNullOrBlank()) {
+            ""
+        } else {
+            "，已回退为结束后展示结果"
+        }
+        if (result.timedOut) {
+            return "终端命令等待超时，可能仍在后台继续运行$liveNote"
+        }
+
+        val headline = firstUsefulLine(
+            if (result.success) result.stdout else result.stderr.ifBlank { result.stdout }
+        )
+        val suffix = headline?.let { "：$it" }.orEmpty()
+
+        return when {
+            result.success && result.resultCode == 0 ->
+                "终端命令执行成功（exit=0）$suffix$liveNote"
+
+            result.success ->
+                "Termux 返回成功结果$suffix$liveNote"
+
+            result.resultCode != null ->
+                "终端命令执行失败（exit=${result.resultCode}）$suffix$liveNote"
+
+            !result.errorMessage.isNullOrBlank() ->
+                result.errorMessage + liveNote
+
+            else -> "终端命令执行失败$liveNote"
+        }
+    }
+
+    private fun truncateText(text: String, limit: Int): String {
+        if (text.length <= limit) return text
+        return text.take(limit) + "\n...[truncated]"
+    }
+
+    private fun firstUsefulLine(text: String): String? {
+        return text.lineSequence()
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.let { if (it.length <= 120) it else it.take(120) + "..." }
+    }
+
+    private fun sanitizeTerminalRawExtras(
+        rawExtras: Map<String, Any?>,
+        outputLimit: Int
+    ): Map<String, Any?> {
+        if (rawExtras.isEmpty()) return emptyMap()
+        return rawExtras.entries.associate { (key, value) ->
+            key to when (value) {
+                is String -> truncateText(TermuxCommandRunner.sanitizeTerminalNoise(value), outputLimit)
+                is List<*> -> value.map { item ->
+                    if (item is String) {
+                        truncateText(TermuxCommandRunner.sanitizeTerminalNoise(item), outputLimit)
+                    } else {
+                        item
+                    }
+                }
+                else -> value
+            }
+        }
+    }
+
+    private fun checkExecutionPrerequisites(): List<String> {
+        val missing = mutableListOf<String>()
+        if (!AssistsUtil.Core.isAccessibilityServiceEnabled()) {
+            missing.add("无障碍权限")
+        }
+        if (!Settings.canDrawOverlays(context)) {
+            missing.add("悬浮窗权限")
+        }
+        return missing
+    }
+
+    private fun buildMem0Payload(
+        args: JsonObject,
+        excludedKeys: Set<String> = emptySet()
+    ): Map<String, Any?> {
+        val payload = mutableMapOf<String, Any?>()
+        val nestedPayload = args["payload"] as? JsonObject
+        if (nestedPayload != null) {
+            payload.putAll(jsonObjectToMap(nestedPayload))
+        }
+        args.entries.forEach { (key, value) ->
+            if (key == "payload" || key in excludedKeys || value is JsonNull) {
+                return@forEach
+            }
+            payload[key] = jsonElementToAny(value)
+        }
+        return payload
+    }
+
+    private fun jsonObjectToMap(jsonObject: JsonObject): Map<String, Any?> {
+        return jsonObject.entries.associate { (key, value) ->
+            key to jsonElementToAny(value)
+        }
+    }
+
+    private fun jsonElementToAny(element: JsonElement): Any? {
+        return when (element) {
+            is JsonNull -> null
+            is JsonObject -> jsonObjectToMap(element)
+            is JsonArray -> element.map { jsonElementToAny(it) }
+            is JsonPrimitive -> when {
+                element.isString -> element.content
+                element.content == "true" || element.content == "false" -> element.content.toBooleanStrict()
+                element.longOrNull != null -> element.longOrNull
+                element.doubleOrNull != null -> element.doubleOrNull
+                else -> element.content
+            }
+        }
+    }
+
+    private fun mapToJsonElement(value: Any?): JsonElement {
+        return when (value) {
+            null -> JsonNull
+            is JsonElement -> value
+            is Map<*, *> -> JsonObject(
+                value.entries.associate { (key, item) ->
+                    key.toString() to mapToJsonElement(item)
+                }
+            )
+            is List<*> -> JsonArray(value.map { mapToJsonElement(it) })
+            is Boolean -> JsonPrimitive(value)
+            is Number -> JsonPrimitive(value)
+            else -> JsonPrimitive(value.toString())
+        }
+    }
+}

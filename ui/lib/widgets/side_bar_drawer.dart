@@ -1,0 +1,483 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../features/home/pages/edit_profile/edit_profile_page.dart';
+import '../features/task/pages/task_center/task_center_page.dart';
+import '../features/memory/pages/memory_center/memory_center_page.dart';
+import '../models/conversation_model.dart';
+import '../services/conversation_service.dart';
+import 'package:ui/core/router/go_router_manager.dart';
+
+class SidebarDrawer extends StatefulWidget {
+  const SidebarDrawer({super.key});
+
+  @override
+  State<SidebarDrawer> createState() => _SidebarDrawerState();
+}
+
+class _SidebarDrawerState extends State<SidebarDrawer> {
+  int avatarIndex = 0;
+  String nickname = "用户名xxxxx";
+  final List<String> presetAvatars = [
+    'assets/avatar/default_avatar1.png',
+    'assets/avatar/default_avatar2.png',
+    'assets/avatar/default_avatar3.png',
+    'assets/avatar/default_avatar4.png',
+    'assets/avatar/default_avatar5.png',
+    'assets/avatar/default_avatar6.png',
+  ];
+
+  List<ConversationModel> conversations = [];
+  bool isLoadingConversations = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+    _loadConversations();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      avatarIndex = prefs.getInt('avatarIndex') ?? 0;
+      nickname = prefs.getString('nickname') ?? "用户名xxxxx";
+    });
+  }
+
+  Future<void> _loadConversations() async {
+    setState(() {
+      isLoadingConversations = true;
+    });
+
+    final loadedConversations = await ConversationService.getAllConversations();
+
+    setState(() {
+      conversations = loadedConversations;
+      isLoadingConversations = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      child: Container(
+        color: Colors.grey[100], // 浅灰色背景
+        child: Column(
+          children: [
+            // 用户信息区域
+            _buildUserHeader(),
+            
+            // 新建任务按钮
+            _buildNewTaskButton(),
+            
+            // 功能菜单
+            _buildMenuItems(),
+            
+            // 历史记录区域
+            Expanded(
+              child: _buildHistorySection(),
+            ),
+            
+            // 底部设置按钮
+            _buildBottomSettings(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 用户头像和用户名区域
+  Widget _buildUserHeader() {
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, 60, 20, 20),
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => EditProfilePage(
+                initialAvatarIndex: avatarIndex,
+                initialNickname: nickname,
+              ),
+            ),
+          ).then((result) {
+            if (result != null && result['avatarIndex'] != null) {
+              setState(() {
+                avatarIndex = result['avatarIndex'];
+                nickname = result['nickname'] ?? nickname;
+              });
+            }
+          });
+        },
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 25,
+              backgroundColor: Colors.grey[400],
+              backgroundImage: AssetImage(presetAvatars[avatarIndex]),
+              onBackgroundImageError: (_, __) {},
+              child: null,
+            ),
+            SizedBox(width: 15),
+            Text(
+              nickname,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+                color: Colors.black87,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 新建任务按钮
+  Widget _buildNewTaskButton() {
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(vertical: 15),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.edit_outlined,
+              color: Colors.grey[600],
+              size: 20,
+            ),
+            SizedBox(width: 8),
+            Text(
+              "新建任务",
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 功能菜单项
+  Widget _buildMenuItems() {
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            _buildMenuItem(
+              icon: Icons.task_alt_outlined,
+              title: "任务中心",
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const TaskCenterPage(),
+                  ),
+                );
+              },
+            ),
+            Divider(height: 1, color: Colors.grey[100], indent: 60, endIndent: 20),
+            _buildMenuItem(
+              icon: Icons.memory_outlined,
+              title: "记忆中心",
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const MemoryCenterPage(),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      )
+    );
+  }
+
+  // 单个菜单项
+  Widget _buildMenuItem({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+  }) {
+    return ListTile(
+      contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+      leading: Icon(
+        icon,
+        color: Colors.grey[600],
+        size: 24,
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 16,
+          color: Colors.black87,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      trailing: Icon(
+        Icons.chevron_right,
+        color: Colors.grey[400],
+      ),
+      onTap: onTap,
+    );
+  }
+
+  // 历史记录区域
+  Widget _buildHistorySection() {
+    return Container(
+      margin: EdgeInsets.only(top: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              "历史记录",
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          SizedBox(height: 15),
+          Expanded(
+            child: isLoadingConversations
+                ? Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.grey[400]!),
+                    ),
+                  )
+                : conversations.isEmpty
+                    ? Center(
+                        child: Text(
+                          "暂无历史对话",
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[500],
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        itemCount: conversations.length,
+                        itemBuilder: (context, index) {
+                          final conversation = conversations[index];
+                          return _buildHistoryItem(conversation);
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // 历史记录单项
+  Widget _buildHistoryItem(ConversationModel conversation) {
+    return GestureDetector(
+      onTap: () {
+        // 点击对话，跳转到全屏聊天页面
+        Navigator.pop(context); // 关闭侧栏
+        GoRouterManager.push('/home/chat', extra: [conversation.id.toString()]);
+      },
+      onLongPressStart: (LongPressStartDetails details) {
+        final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+        final RelativeRect position = RelativeRect.fromRect(
+          Rect.fromLTWH(details.globalPosition.dx, details.globalPosition.dy, 0, 0),
+          Offset.zero & overlay.size,
+        );
+
+        showMenu(
+          context: context,
+          position: position,
+          color: Colors.white,
+          items: [
+            PopupMenuItem(
+              value: 'rename',
+              child: Row(
+                children: [
+                  Icon(Icons.edit, size: 18, color: Colors.grey[600]),
+                  SizedBox(width: 8),
+                  Text('重命名'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'delete',
+              child: Row(
+                children: [
+                  Icon(Icons.delete, size: 18, color: Colors.grey[600]),
+                  SizedBox(width: 8),
+                  Text('删除'),
+                ],
+              ),
+            ),
+          ],
+        ).then((value) {
+          if (value == 'rename') {
+            _renameConversation(conversation);
+          } else if (value == 'delete') {
+            _deleteConversation(conversation.id);
+          }
+        });
+      },
+      child: Container(
+        margin: EdgeInsets.only(bottom: 20),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                conversation.title,
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w400,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            SizedBox(width: 30),
+            Text(
+              conversation.timeDisplay,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _renameConversation(ConversationModel conversation) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        TextEditingController controller = TextEditingController(text: conversation.title);
+        return AlertDialog(
+          title: Text("重命名对话"),
+          content: TextField(
+            controller: controller,
+            decoration: InputDecoration(hintText: "输入新的名称"),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: Text("取消"),
+            ),
+            TextButton(
+              onPressed: () async {
+                final newTitle = controller.text.trim();
+                if (newTitle.isNotEmpty) {
+                  final success = await ConversationService.updateConversationTitle(
+                    conversationId: conversation.id,
+                    newTitle: newTitle,
+                  );
+
+                  if (success) {
+                    setState(() {
+                      final index = conversations.indexWhere((c) => c.id == conversation.id);
+                      if (index != -1) {
+                        conversations[index] = conversation.copyWith(title: newTitle);
+                      }
+                    });
+                  }
+                }
+                Navigator.pop(context);
+              },
+              child: Text("确定"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _deleteConversation(int conversationId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text("删除对话"),
+          content: Text("确定要删除这个对话吗？"),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+              },
+              child: Text("取消"),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, true);
+              },
+              child: Text("确定"),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      final success = await ConversationService.deleteConversation(conversationId);
+      if (success) {
+        setState(() {
+          conversations.removeWhere((c) => c.id == conversationId);
+        });
+      }
+    }
+  }
+
+  // 底部设置按钮
+  Widget _buildBottomSettings() {
+    return Container(
+      padding: EdgeInsets.all(20),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: IconButton(
+          icon: Icon(
+            Icons.settings_outlined,
+            color: Colors.grey[600],
+            size: 24,
+          ),
+          onPressed: () {
+            // 处理设置点击
+          },
+        ),
+      ),
+    );
+  }
+}

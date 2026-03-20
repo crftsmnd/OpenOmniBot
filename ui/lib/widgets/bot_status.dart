@@ -1,0 +1,107 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+
+class BotStatus extends StatelessWidget {
+  final BotStatusType status;
+  final String? hintText;
+  final String? costTime;
+
+  const BotStatus({
+    Key? key,
+    required this.status,
+    this.hintText,
+    this.costTime,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    switch (status) {
+      case BotStatusType.thinking:
+        return _buildStatusRow(
+          context,
+          svgPath: 'assets/chatbot/thinking_icon.svg',
+          text: '正在思考...',
+          timeDesc: '已用时',
+          costTime: costTime,
+        );
+      case BotStatusType.completed:
+        return _buildStatusRow(
+          context,
+          icon: Icons.check_circle,
+          text: '已完成思考',
+          timeDesc: '总用时',
+          costTime: costTime,
+        );
+      case BotStatusType.hint:
+        return _buildStatusRow(
+          context,
+          svgPath: 'assets/chatbot/thinking_icon.svg',
+          text: hintText ?? '提示',
+        );
+    }
+  }
+
+  Widget _buildStatusRow(BuildContext context, {
+    IconData? icon,
+    String? svgPath,
+    required String text,
+    String? timeDesc,
+    String? costTime,
+  }) {
+    const lightGrey = Color(0xFF999999);
+
+    Widget iconWidget;
+    if (svgPath != null) {
+      iconWidget = SvgPicture.asset(
+        svgPath,
+        width: 12,
+        height: 12,
+      );
+    } else if (icon != null) {
+      iconWidget = Icon(icon, size: 16);
+    } else {
+      iconWidget = const SizedBox.shrink();
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8.0),
+      ),
+      child: Row(
+        children: [
+          iconWidget,
+          const SizedBox(width: 8.0),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Color(0xFF999999),
+              fontSize: 12,
+              fontFamily: 'PingFang SC',
+              fontWeight: FontWeight.w400,
+              height: 1.50,
+              letterSpacing: 0.33,
+            ),
+          ),
+          const SizedBox(width: 4.0),
+          Text(
+            timeDesc != null ? '$timeDesc ${costTime ?? ''}' : '',
+            style: const TextStyle(
+              color: Color(0xFF999999),
+              fontSize: 12,
+              fontFamily: 'PingFang SC',
+              fontWeight: FontWeight.w400,
+              height: 1.50,
+              letterSpacing: 0.33,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum BotStatusType {
+  thinking,
+  completed,
+  hint,
+}

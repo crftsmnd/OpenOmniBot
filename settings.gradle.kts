@@ -1,0 +1,38 @@
+pluginManagement {
+    repositories {
+        google {
+            content {
+                includeGroupByRegex("com\\.android.*")
+                includeGroupByRegex("com\\.google.*")
+                includeGroupByRegex("androidx.*")
+            }
+        }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    // PREFER_PROJECT 避免 Flutter 等插件在 build.gradle 里添加仓库时刷屏警告
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+    val storageUrl: String = System.getenv("FLUTTER_STORAGE_BASE_URL") ?: "https://storage.googleapis.com"
+
+    repositories {
+        maven("https://maven.google.com/")
+        google()
+        mavenCentral()
+        maven("$storageUrl/download.flutter.io")
+        maven("https://repo1.maven.org/maven2/")
+
+    }
+}
+
+rootProject.name = "OmnibotApp"
+include(":app")
+include(":assists")
+val filePath = settingsDir.toString() + "/ui/.android/include_flutter.groovy"
+apply(from = File(filePath))
+
+include(":baselib")
+include(":accessibility")
+include(":omniintelligence")
+include(":uikit")

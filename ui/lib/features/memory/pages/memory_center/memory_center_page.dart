@@ -1,0 +1,1899 @@
+import 'dart:async';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:simple_gradient_text/simple_gradient_text.dart';
+import 'package:ui/core/mixins/page_lifecycle_mixin.dart';
+import 'package:ui/features/memory/models/mem0_memory_item.dart';
+import 'package:ui/features/memory/pages/memory_center/widgets/batch_delete_confirm_sheet.dart';
+import 'package:ui/features/memory/pages/memory_center/widgets/edit_task_sheet.dart';
+import 'package:ui/features/memory/pages/memory_center/widgets/mem0_memory_editor_sheet.dart';
+import 'package:ui/features/memory/pages/memory_center/widgets/mem0_memory_section.dart';
+
+import 'package:ui/features/memory/pages/memory_center/widgets/tag_section.dart';
+import 'package:ui/features/memory/pages/memory_center/widgets/memory_card.dart';
+import 'package:ui/features/memory/services/mem0_memory_service.dart';
+import 'package:ui/theme/app_colors.dart';
+import 'package:ui/utils/cache_util.dart';
+import 'package:ui/utils/image_util.dart';
+import 'package:ui/widgets/selection_bottom_bar.dart';
+import 'package:ui/services/assists_core_service.dart';
+
+import '../../models/memory_model.dart';
+import 'package:ui/utils/ui.dart';
+import 'package:ui/features/memory/pages/memory_center/widgets/memory_card_list.dart';
+import 'package:ui/features/memory/pages/memory_detail/memory_detail_page.dart';
+import 'package:ui/theme/app_text_styles.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:ui/services/storage_service.dart';
+import 'package:ui/widgets/common_app_bar.dart';
+
+/// 记忆建议的前三条记录ID存储key
+const String kMemorySuggestionTopThreeIdsKey =
+    'memory_suggestion_top_three_ids';
+
+/// 记忆建议的存储key
+const String kMemorySuggestionKey = 'memory_suggestion';
+
+/// 系统应用配置
+class SystemAppConfig {
+  final String id; // 标识符，如 'system:desktop'
+  final String displayName; // 显示名称，如 '桌面'
+  final String svgIcon; // SVG图标路径
+  final Set<String> packageNames; // 对应的包名集合
+
+  SystemAppConfig({
+    required this.id,
+    required this.displayName,
+    required this.svgIcon,
+    required this.packageNames,
+  });
+}
+
+class MemoryCenterPage extends StatefulWidget {
+  const MemoryCenterPage({super.key});
+
+  @override
+  State<MemoryCenterPage> createState() => MemoryCenterPageState();
+}
+
+class MemoryCenterPageState extends State<MemoryCenterPage>
+    with
+        SingleTickerProviderStateMixin,
+        WidgetsBindingObserver,
+        PageLifecycleMixin<MemoryCenterPage> {
+  Map<AppTag, String> favoriteTagIconPath = {};
+  Set<String> selectedTagIds = {}; // 支持多选（all/type/app）
+  Set<String> packageNames = {};
+  Map<String, ImageProvider?> appIconMap = {};
+  Map<String, String> appNameMap = {};
+
+  // 系统应用配置
+  final Map<String, SystemAppConfig> _systemAppConfigs = {
+    'desktop': SystemAppConfig(
+      id: 'system:desktop',
+      displayName: '桌面',
+      svgIcon: 'assets/memory/memory_context_icon.svg',
+      packageNames: {},
+    ),
+    // 预留短信等其他系统应用
+    // 'sms': SystemAppConfig(
+    //   id: 'system:sms',
+    //   displayName: '短信',
+    //   svgIcon: 'assets/memory/sms_icon.svg',
+    //   packageNames: {},
+    // ),
+  };
+
+  List<AppTag> favoriteTags = [
+    // AppTag(
+    //   id: 'picture',
+    //   label: '识图',
+    //   count: 2,
+    //   svgPath: 'assets/memory/memory_context_icon_dark.svg',
+    //   iconBgColor: const Color(0xFFE6F0FE),
+    // ),
+    // AppTag(
+    //   id: 'note',
+    //   label: '笔记',
+    //   count: 0,
+    //   icon: Icons.dashboard,
+    //   iconBgColor: const Color(0xFFFFF3E0),
+    // ),
+    // AppTag(
+    //   id: 'chat',
+    //   label: '聊天',
+    //   count: 0,
+    //   icon: Icons.dashboard,
+    //   iconBgColor: const Color(0xFFE6F7FF),
+    // ),
+    // AppTag(
+    //   id: 'document',
+    //   label: '文档',
+    //   count: 0,
+    //   icon: Icons.dashboard,
+    //   iconBgColor: const Color(0xFFE6F7ED),
+    // ),
+    // AppTag(
+    //   id: 'video',
+    //   label: '视频',
+    //   count: 0,
+    //   icon: Icons.dashboard,
+    //   iconBgColor: const Color(0xFFEFF8E6),
+    // ),
+  ];
+
+  List<MemoryCardModel> favoritesCards = [
+    // MemoryCardModel(
+    //   id: 2,
+    //   title: '购物优惠券学习',
+    //   description:
+    //   '书页间满是陕北的风沙气息，满是普通人在时代浪潮中挣扎、奋斗的喘息声。这部横跨十年的长篇小说，没有惊天动地的英雄史诗，没有跌宕起伏的奇幻剧情，却用孙少安、孙少平兄弟的人生轨迹，写尽了平凡人最动人的生命力 —— 那是在苦难里扎根，在挫折中抬头，在日复一日的奔波里，始终对生活抱有热望的力量。书页间满是陕北的风沙气息，满是普通人在时代浪潮中挣扎、奋斗的喘息声。这部横跨十年的长篇小说，没有惊天动地的英雄史诗，没有跌宕起伏的奇幻剧情，却用孙少安、孙少平兄弟的人生轨迹，写尽了平凡人最动人的生命力 —— 那是在苦难里扎根，在挫折中抬头，在日复一日的奔波里，始终对生活抱有热望的力量。\n书页间满是陕北的风沙气息，满是普通人在时代浪潮中挣扎、奋斗的喘息声。这部横跨十年的长篇小说，没有惊天动地的英雄史诗，没有跌宕起伏的奇幻剧情，却用孙少安、孙少平兄弟的人生轨迹，写尽了平凡人最动人的生命力 —— 那是在苦难里扎根，在挫折中抬头，在日复一日的奔波里，始终对生活抱有热望的力量。\n书页间满是陕北的风沙气息，满是普通人在时代浪潮中挣扎、奋斗的喘息声。这部横跨十年的长篇小说，没有惊天动地的英雄史诗，没有跌宕起伏的奇幻剧情，却用孙少安、孙少平兄弟的人生轨迹，写尽了平凡人最动人的生命力 —— 那是在苦难里扎根，在挫折中抬头，在日复一日的奔波里，始终对生活抱有热望的力量。\n书页间满是陕北的风沙气息，满是普通人在时代浪潮中挣扎、奋斗的喘息声。这部横跨十年的长篇小说，没有惊天动地的英雄史诗，没有跌宕起伏的奇幻剧情，却用孙少安、孙少平兄弟的人生轨迹，写尽了平凡人最动人的生命力 —— 那是在苦难里扎根，在挫折中抬头，在日复一日的奔波里，始终对生活抱有热望的力量。',
+    //   // 时间戳表示时间
+    //   createdAt: 1694857200000,
+    //   updatedAt: 1694943600000,
+    //   imagePath: 'assets/images/scene1.png',
+    //   tags: [
+    //     AppTag(
+    //       id: 'picture',
+    //       label: '识图',
+    //       count: 5,
+    //       svgPath: 'assets/memory/memory_context_icon.svg',
+    //       iconBgColor: const Color(0xFFE6F0FE),
+    //     ),
+    //   ]
+    // ),
+    // MemoryCardModel(
+    //   id: 4,
+    //   title: '音乐播放陪伴\n用户喜欢听流行音乐和轻音乐：\n1、经常使用网易云音乐；',
+    //   description: '用户喜欢听流行音乐和轻音乐：\n1、经常使用网易云音乐；\n2、喜欢创建自己的歌单；\n3、偏爱晚上听歌放松；',
+    //   createdAt: 1694684400000,
+    //   updatedAt: 1694770800000,
+    //   imagePath: 'assets/images/scene2.png',
+    //   tags: [
+    //     AppTag(
+    //       id: 'picture',
+    //       label: '识图',
+    //       count: 5,
+    //       svgPath: 'assets/memory/memory_context_icon.svg',
+    //       iconBgColor: const Color(0xFFE6F0FE),
+    //     ),
+    //   ]
+    // ),
+  ];
+
+  bool _isLoading = true;
+  bool _hasLoadedOnce = false;
+  bool _isBlurred = false;
+  MemoryCardModel? _longPressedCard;
+  Rect? _longPressedCardRect;
+  String? _longPressedCardTime;
+
+  // 选择模式状态
+  bool _isSelectionMode = false;
+  Set<int> _selectedCardIds = {};
+
+  // LLM 生成的记忆建议
+  String? _memorySuggestion;
+  bool _isSuggestionLoading = false;
+  late AnimationController _shimmerController;
+  // 用于跟踪上次生成建议时的前三条记录ID
+  List<String> _lastTopThreeIds = [];
+  Mem0MemorySnapshot _mem0Snapshot = Mem0MemorySnapshot.unconfigured();
+  bool _isMem0Loading = false;
+  bool _isMem0Mutating = false;
+  static const int _localMemoryTab = 0;
+  static const int _cloudMemoryTab = 1;
+  int _currentMemoryTab = _localMemoryTab;
+  late PageController _memoryPageController;
+
+  void _safeSetState(void Function() fn) {
+    if (!mounted) {
+      return;
+    }
+    setState(fn);
+  }
+
+  void _onTagSelectionChanged(Set<String> next, String triggerId) {
+    _safeSetState(() {
+      if (next.contains('all')) {
+        if (triggerId != 'all' && next.length > 1) {
+          next.remove('all');
+        } else if (triggerId == 'all') {
+          next = {'all'};
+        }
+      } else if (next.isEmpty) {
+        next = {'all'};
+      }
+      selectedTagIds = next;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    // 初始化shimmer动画控制器
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat();
+    _memoryPageController = PageController(initialPage: _currentMemoryTab);
+
+    _loadData();
+  }
+
+  @override
+  void dispose() {
+    _memoryPageController.dispose();
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void onPageResumed() {
+    if (_hasLoadedOnce) {
+      // 应用从后台返回前台，静默刷新
+      print('MemoryCenterPage resumed - reloading data silently');
+      _loadData(silent: true);
+    }
+  }
+
+  Future<void> refreshData() async {
+    print('Refreshing memory center data...');
+    await _loadData(forceMem0Refresh: true);
+  }
+
+  // 从数据库加载数据
+  /// [silent] 是否静默刷新（不显示loading）
+  Future<void> _loadData({
+    bool silent = false,
+    bool forceMem0Refresh = false,
+  }) async {
+    print('MemoryCenterPage loading data... (silent: $silent)');
+
+    if (!silent) {
+      _safeSetState(() {
+        _isLoading = true;
+      });
+    }
+
+    try {
+      await _loadSystemAppTags();
+      await _loadFavoriteRecords();
+      await _loadMem0Memories(forceRefresh: forceMem0Refresh);
+      await _loadAppTags();
+      await _loadMemorySuggestion();
+
+      _safeSetState(() {
+        if (!silent) {
+          _isLoading = false;
+        }
+        selectedTagIds = favoriteTags.isNotEmpty ? {favoriteTags[0].id} : {};
+      });
+      _hasLoadedOnce = true;
+    } catch (e) {
+      print('Error loading data: $e');
+      if (!silent) {
+        _safeSetState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadMem0Memories({bool forceRefresh = false}) async {
+    if (_isMem0Loading) {
+      return;
+    }
+
+    final shouldShowLoading = !_mem0Snapshot.hasData || forceRefresh;
+    if (shouldShowLoading) {
+      _safeSetState(() {
+        _isMem0Loading = true;
+      });
+    }
+
+    try {
+      final snapshot = await Mem0MemoryService.getMemories(
+        forceRefresh: forceRefresh,
+      );
+      _safeSetState(() {
+        _mem0Snapshot = snapshot;
+      });
+    } catch (e) {
+      _safeSetState(() {
+        _mem0Snapshot = Mem0MemorySnapshot(
+          configured: true,
+          errorMessage: '云端记忆加载失败: $e',
+        );
+      });
+    } finally {
+      _safeSetState(() {
+        _isMem0Loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadMemorySuggestion() async {
+    // 先加载持久化的建议
+    String? savedSuggestion;
+    try {
+      savedSuggestion = StorageService.getString(kMemorySuggestionKey);
+      print('加载持久化的记忆建议: $savedSuggestion');
+    } catch (e) {
+      print('加载记忆建议失败: $e');
+    }
+
+    // 检查本地+云端的前三条是否变化，只在变化时生成建议
+    final suggestionContext = _buildMemorySuggestionContext();
+    final currentTopThreeIds = suggestionContext.ids;
+
+    // 加载持久化的前三条记录ID
+    await _loadLastTopThreeIds();
+
+    final hasChanged = _hasTopThreeChanged(currentTopThreeIds);
+
+    if (hasChanged) {
+      _lastTopThreeIds = currentTopThreeIds;
+      // 保存到持久化存储
+      await _saveLastTopThreeIds(currentTopThreeIds);
+      if (suggestionContext.records.isEmpty) {
+        await StorageService.remove(kMemorySuggestionKey);
+        _safeSetState(() {
+          _memorySuggestion = null;
+          _isSuggestionLoading = false;
+        });
+        return;
+      }
+      // 异步生成记忆建议（不阻塞主界面）
+      unawaited(_generateMemorySuggestion(suggestionContext.records));
+    } else {
+      _safeSetState(() {
+        _memorySuggestion = savedSuggestion;
+        _isSuggestionLoading = false;
+        print('记忆建议未变化，使用持久化数据: $_memorySuggestion');
+      });
+    }
+  }
+
+  ({List<String> ids, List<Map<String, String>> records})
+  _buildMemorySuggestionContext() {
+    final candidates = <Map<String, dynamic>>[];
+
+    for (final card in favoritesCards) {
+      final sortTs = card.updatedAt > 0 ? card.updatedAt : card.createdAt;
+      candidates.add({
+        'id': 'local:${card.id}',
+        'sortTs': sortTs,
+        'title': _normalizeSuggestionText(card.title),
+        'description': _normalizeSuggestionText(card.description ?? ''),
+        'appName': _normalizeSuggestionText(card.appName ?? '本地识图记忆'),
+      });
+    }
+
+    for (final item in _mem0Snapshot.items) {
+      final memory = _normalizeSuggestionText(item.memory);
+      if (memory.isEmpty) continue;
+      candidates.add({
+        'id': 'cloud:${item.id}',
+        'sortTs': item.displayTime?.millisecondsSinceEpoch ?? 0,
+        'title': _clipSuggestionText(memory, maxLength: 24),
+        'description': memory,
+        'appName': '云端长期记忆',
+      });
+    }
+
+    candidates.sort((a, b) {
+      final lhs = (a['sortTs'] as int?) ?? 0;
+      final rhs = (b['sortTs'] as int?) ?? 0;
+      final byTime = rhs.compareTo(lhs);
+      if (byTime != 0) {
+        return byTime;
+      }
+      return (a['id'] as String).compareTo((b['id'] as String));
+    });
+
+    final topCandidates = candidates.take(3).toList();
+    return (
+      ids: topCandidates.map((item) => item['id'] as String).toList(),
+      records: topCandidates
+          .map(
+            (item) => <String, String>{
+              'title': (item['title'] as String?) ?? '',
+              'description': (item['description'] as String?) ?? '',
+              'appName': (item['appName'] as String?) ?? '',
+            },
+          )
+          .toList(),
+    );
+  }
+
+  String _normalizeSuggestionText(String text) {
+    return text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  String _clipSuggestionText(String text, {int maxLength = 24}) {
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return '${text.substring(0, maxLength)}...';
+  }
+
+  /// 从持久化存储加载上次的前三条记录ID
+  Future<void> _loadLastTopThreeIds() async {
+    try {
+      final savedIds = StorageService.getJson<List<dynamic>>(
+        kMemorySuggestionTopThreeIdsKey,
+      );
+      if (savedIds != null && savedIds.isNotEmpty) {
+        _lastTopThreeIds = savedIds
+            .map((id) => id.toString().trim())
+            .where((id) => id.isNotEmpty)
+            .toList();
+        print('加载持久化的前三条ID: $_lastTopThreeIds');
+      }
+    } catch (e) {
+      print('加载前三条记录ID失败: $e');
+    }
+  }
+
+  /// 保存前三条记录ID到持久化存储
+  Future<void> _saveLastTopThreeIds(List<String> ids) async {
+    try {
+      await StorageService.setJson(kMemorySuggestionTopThreeIdsKey, ids);
+      print('保存前三条ID到持久化存储: $ids');
+    } catch (e) {
+      print('保存前三条记录ID失败: $e');
+    }
+  }
+
+  /// 检查前三条记录是否变化
+  bool _hasTopThreeChanged(List<String> currentTopThreeIds) {
+    // 如果是第一次加载（_lastTopThreeIds为空），返回true
+    if (_lastTopThreeIds.isEmpty) {
+      return true;
+    }
+
+    // 如果数量不同，说明有变化
+    if (currentTopThreeIds.length != _lastTopThreeIds.length) {
+      return true;
+    }
+
+    // 逐个比较ID，如果有任何不同则返回true
+    for (int i = 0; i < currentTopThreeIds.length; i++) {
+      if (currentTopThreeIds[i] != _lastTopThreeIds[i]) {
+        return true;
+      }
+    }
+
+    // 完全相同，无需更新
+    return false;
+  }
+
+  /// 使用 LLM 生成记忆建议
+  Future<void> _generateMemorySuggestion(
+    List<Map<String, String>> topRecords,
+  ) async {
+    if (topRecords.isEmpty) {
+      _safeSetState(() {
+        _isSuggestionLoading = false;
+      });
+      return;
+    }
+    _safeSetState(() {
+      _isSuggestionLoading = true;
+    });
+
+    try {
+      const prompt = '''你是小万，一个温暖的AI助手。根据用户的记忆内容（包含本地记忆和云端记忆），生成一句简短、温馨的问候语。
+
+要求：
+1. 问候语要简短（不超过30个字）
+2. 结合用户记忆内容特点，体现个性化
+3. 语气温暖友好
+4. 不要使用"你好呀"开头
+5. 只输出问候语本身，不要加引号或其他说明
+
+用户的记忆内容：
+''';
+
+      final recordsJson = topRecords
+          .map(
+            (r) =>
+                '标题: ${r['title']}, 描述: ${r['description']}, 来源应用: ${r['appName']}',
+          )
+          .join('\n');
+
+      final response = await AssistsMessageService.postLLMChat(
+        text: prompt + recordsJson,
+        model: 'scene.compactor.context',
+      );
+
+      if (response != null && response.isNotEmpty && mounted) {
+        _safeSetState(() {
+          _memorySuggestion = response.trim();
+          StorageService.setString(kMemorySuggestionKey, _memorySuggestion!);
+          _isSuggestionLoading = false;
+        });
+      } else {
+        _safeSetState(() {
+          _isSuggestionLoading = false;
+        });
+      }
+    } catch (e) {
+      print('生成记忆建议失败: $e');
+      _safeSetState(() {
+        _isSuggestionLoading = false;
+      });
+    }
+  }
+
+  // 加载收藏记录
+  Future<void> _loadFavoriteRecords() async {
+    try {
+      final favoriteRecords = await CacheUtil.getAllFavoriteRecords();
+
+      // 收集所有非空的包名用于批量加载图标
+      packageNames = favoriteRecords
+          .where((r) => r.packageName.isNotEmpty)
+          .map((r) => r.packageName)
+          .toSet();
+
+      // 批量加载应用图标
+      if (packageNames.isNotEmpty && mounted) {
+        appIconMap = await ImageUtil.batchLoadAppIcons(packageNames, context);
+        for (final pkg in packageNames) {
+          final raw = await CacheUtil.getAppIconByPackageName(pkg);
+          if (raw != null) {
+            appNameMap[pkg] = raw.appName;
+          }
+        }
+      }
+
+      final cards = favoriteRecords.map((record) {
+        final systemConfig = _getSystemAppConfig(record.packageName);
+        final bool hasImage = (record.imagePath as String?)?.isNotEmpty == true;
+        final bool hasPackage =
+            (record.packageName as String?)?.isNotEmpty == true;
+
+        return MemoryCardModel(
+          id: record.id,
+          title: record.title,
+          description: record.desc,
+          createdAt: record.createdAt,
+          updatedAt: record.updatedAt,
+          imagePath: hasImage ? record.imagePath : null,
+          packageName: hasPackage ? record.packageName : null,
+          appName:
+              systemConfig?.displayName ??
+              (hasPackage ? appNameMap[record.packageName] : null),
+          appIcon: hasPackage ? appIconMap[record.packageName] : null,
+          appSvgPath: systemConfig?.svgIcon,
+          tags: [],
+        );
+      }).toList();
+
+      _safeSetState(() {
+        favoritesCards = cards;
+      });
+    } catch (e) {
+      print('Error loading favorite records: $e');
+    }
+  }
+
+  // 加载系统应用标签数据
+  Future<void> _loadSystemAppTags() async {
+    try {
+      // 获取桌面应用包名列表
+      final desktopPkgs = await AssistsMessageService.getDeskTopPackageName();
+      _systemAppConfigs['desktop']!.packageNames.addAll(desktopPkgs ?? []);
+
+      // 后续可以在这里加载其他系统应用的包名
+      // final smsPkgs = await AssistsMessageService.getSmsPackageName();
+      // _systemAppConfigs['sms']!.packageNames.addAll(smsPkgs ?? []);
+    } catch (e) {
+      print('Error loading system app tags: $e');
+    }
+  }
+
+  // 获取包名对应的系统应用配置
+  SystemAppConfig? _getSystemAppConfig(String packageName) {
+    for (final config in _systemAppConfigs.values) {
+      if (config.packageNames.contains(packageName)) {
+        return config;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _loadAppTags() async {
+    try {
+      final tagListWithApp = <AppTag>[];
+
+      // 获取收藏记录的应用统计
+      final favoriteCountMap = await CacheUtil.getFavoriteRecordCountByType();
+
+      // 构建 tagList 数据源
+      final totalCount = favoriteCountMap.fold<int>(
+        0,
+        (sum, item) => sum + item.count,
+      );
+      tagListWithApp.add(
+        AppTag(
+          id: 'all',
+          label: '全部',
+          count: totalCount,
+          svgPath: 'assets/common/all_icon.svg',
+          iconBgColor: Colors.black,
+          iconColor: Colors.white,
+        ),
+      );
+
+      // 统计 app 标签（按包名聚合，系统应用合并）
+      final Map<String, int> appCountMap = {};
+      final Map<String, String> appIdMap = {}; // 用于记录实际的 tagId
+
+      for (final record in favoritesCards) {
+        if (record.packageName == null || record.packageName!.isEmpty) continue;
+        final pkg = record.packageName!;
+
+        // 检查是否为系统应用
+        final systemConfig = _getSystemAppConfig(pkg);
+        final tagKey = systemConfig?.id ?? 'app:$pkg';
+
+        appCountMap[tagKey] = (appCountMap[tagKey] ?? 0) + 1;
+        // 保存第一个遇到的包名用于图标
+        appIdMap.putIfAbsent(tagKey, () => pkg);
+      }
+
+      // 将 app 作为标签加入
+      for (final entry in appCountMap.entries) {
+        final tagKey = entry.key;
+        final count = entry.value;
+        final originalPkg = appIdMap[tagKey]!;
+
+        String label;
+        ImageProvider? iconProvider;
+        String? svgPath;
+
+        // 检查是否为系统应用标签
+        final systemConfig = _systemAppConfigs.values.firstWhere(
+          (config) => config.id == tagKey,
+          orElse: () => SystemAppConfig(
+            id: '',
+            displayName: '',
+            svgIcon: '',
+            packageNames: {},
+          ),
+        );
+
+        if (systemConfig.id.isNotEmpty) {
+          // 系统应用使用配置的显示
+          label = systemConfig.displayName;
+          svgPath = systemConfig.svgIcon;
+          iconProvider = null;
+        } else {
+          // 普通应用
+          label = (appNameMap[originalPkg]?.isNotEmpty ?? false)
+              ? appNameMap[originalPkg]!
+              : originalPkg;
+          iconProvider = appIconMap[originalPkg];
+        }
+
+        tagListWithApp.add(
+          AppTag(
+            id: tagKey,
+            label: label,
+            count: count,
+            appIconProvider: iconProvider,
+            svgPath: svgPath,
+          ),
+        );
+      }
+
+      _safeSetState(() {
+        favoriteTags = tagListWithApp;
+      });
+    } catch (e) {
+      print('Error loading app tags: $e');
+    }
+  }
+
+  // 删除收藏卡片
+  Future<bool> _deleteFavoriteCard(int cardId) async {
+    final completer = Completer<bool>();
+
+    AppDialog.confirm(
+      context,
+      title: '确定删除吗？',
+      content: '删除后该内容将不可找回',
+      cancelText: '取消',
+      confirmText: '删除',
+      confirmButtonColor: AppColors.alertRed,
+    ).then((result) async {
+      if (result == true) {
+        final res = await _performFavoriteDelete(cardId);
+        completer.complete(res);
+      } else {
+        completer.complete(false);
+      }
+    });
+
+    return completer.future;
+  }
+
+  Future<bool> _performFavoriteDelete(int cardId) async {
+    print('delete favorite card: $cardId');
+
+    try {
+      bool success = await CacheUtil.deleteFavoriteRecordById(cardId);
+      if (!success) {
+        showToast('删除失败', type: ToastType.error);
+        return false;
+      }
+
+      // 从本地列表中删除
+      _safeSetState(() {
+        favoritesCards.removeWhere((card) => card.id == cardId);
+      });
+
+      showToast('删除成功', type: ToastType.success);
+
+      // 重新加载标签统计
+      await _loadSystemAppTags();
+
+      await _loadAppTags();
+
+      await _loadMemorySuggestion();
+      return true;
+    } catch (e) {
+      print('Error deleting card: $e');
+      showToast('删除失败', type: ToastType.error);
+      return false;
+    }
+  }
+
+  // 编辑卡片
+  void _editFavoriteCard(String cardTitle, int cardId) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => EditTaskSheet(
+        initialText: cardTitle,
+        maxLength: 18,
+        onSave: (newText) =>
+            _onEditFavoriteCardSave(newText, cardTitle, cardId),
+        onCheckNameExists: _onCheckFavoriteCardNameExists,
+      ),
+    );
+  }
+
+  Future<bool> _onCheckFavoriteCardNameExists(String name) async {
+    // 检查名称是否存在于收藏卡片中
+    final existingRecords = await CacheUtil.getFavoriteRecordsByTitle(name);
+    return existingRecords.isNotEmpty;
+  }
+
+  Future<bool> _onEditFavoriteCardSave(
+    String newText,
+    String oldText,
+    int cardId,
+  ) async {
+    final text = newText.trim();
+    if (text.isEmpty || text == oldText) {
+      // 如果没改动或为空，直接关闭
+      Navigator.of(context).pop();
+      return false;
+    }
+
+    bool success = false;
+    try {
+      success = await CacheUtil.updateFavoriteRecordTitle(
+        id: cardId,
+        title: text,
+      );
+    } catch (e) {
+      success = false;
+    }
+
+    if (!success) {
+      showToast('修改失败', type: ToastType.error);
+    } else {
+      // 更新本地状态
+      _safeSetState(() {
+        final idx = favoritesCards.indexWhere((c) => c.id == cardId);
+        if (idx != -1)
+          favoritesCards[idx] = favoritesCards[idx].copyWith(title: text);
+      });
+
+      showToast('修改成功', type: ToastType.success);
+    }
+    return success;
+  }
+
+  void _enterSelectionMode(MemoryCardModel vm) async {
+    // 进入选择模式，选中当前卡片
+    _safeSetState(() {
+      _isSelectionMode = true;
+      _selectedCardIds.add(vm.id);
+    });
+  }
+
+  // 切换卡片选中状态
+  void _toggleCardSelection(int cardId) {
+    _safeSetState(() {
+      if (_selectedCardIds.contains(cardId)) {
+        _selectedCardIds.remove(cardId);
+      } else {
+        _selectedCardIds.add(cardId);
+      }
+    });
+  }
+
+  // 退出选择模式
+  void _exitSelectionMode() {
+    _safeSetState(() {
+      _isSelectionMode = false;
+      _selectedCardIds.clear();
+    });
+  }
+
+  // 全选/全不选
+  void _toggleSelectAll(List<MemoryCardModel> cards) {
+    _safeSetState(() {
+      if (_selectedCardIds.length == cards.length) {
+        // 已全选，取消全选
+        _selectedCardIds.clear();
+      } else {
+        // 未全选，全选
+        _selectedCardIds = cards.map((c) => c.id).toSet();
+      }
+    });
+  }
+
+  // 批量删除选中的卡片
+  // TODO：批量删除优化
+  Future<void> _batchDeleteSelectedCards() async {
+    final count = _selectedCardIds.length;
+    if (count == 0) return;
+
+    // 显示底部确认弹窗
+    final result = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => BatchDeleteConfirmSheet(count: count),
+    );
+
+    if (result == true) {
+      // 执行批量删除
+      int successCount = 0;
+      for (final cardId in _selectedCardIds.toList()) {
+        final success = await _performFavoriteDelete(cardId);
+        if (success) {
+          successCount++;
+        }
+      }
+
+      // 退出选择模式
+      _exitSelectionMode();
+
+      // 重新加载标签统计
+      await _loadSystemAppTags();
+
+      await _loadAppTags();
+
+      await _loadMemorySuggestion();
+      // 显示删除结果
+      if (successCount > 0) {
+        showToast('已删除', type: ToastType.success);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 若selectedId对应tag为空，则显示全部
+    // 清理不存在的 tag 选择
+    selectedTagIds = selectedTagIds
+        .where((id) => favoriteTags.any((t) => t.id == id))
+        .toSet();
+
+    final filteredCards =
+        selectedTagIds.contains('all') || selectedTagIds.isEmpty
+        ? favoritesCards
+        : favoritesCards.where((card) {
+            final pkg = card.packageName;
+
+            // 构建卡片的应用标识
+            String? cardAppId;
+            if (pkg != null && pkg.isNotEmpty) {
+              final systemConfig = _getSystemAppConfig(pkg);
+              if (systemConfig != null) {
+                cardAppId = systemConfig.id;
+              } else {
+                cardAppId = 'app:$pkg'.toLowerCase();
+              }
+            }
+
+            // 检查是否匹配选中的应用标签
+            return cardAppId != null && selectedTagIds.contains(cardAppId);
+          }).toList();
+    final hasMem0Section = _mem0Snapshot.shouldShowSection || _isMem0Loading;
+
+    return Scaffold(
+      backgroundColor: AppColors.backgroundGrey,
+      body: Stack(
+        children: [
+          // 主内容区域
+          Positioned.fill(
+            child: ImageFiltered(
+              imageFilter: _isBlurred
+                  ? ImageFilter.blur(sigmaX: 10, sigmaY: 10)
+                  : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+              child: Stack(
+                children: [
+                  // Positioned(
+                  //   top: 0,
+                  //   left: 0,
+                  //   right: 0,
+                  //   height: 344,
+                  //   child: Image.asset(
+                  //     'assets/memory/bg.png',
+                  //     alignment: Alignment.center,
+                  //     height: 344,
+                  //     width: double.infinity,
+                  //     fit: BoxFit.cover,
+                  //   ),
+                  // ),
+                  SafeArea(
+                    child: Column(
+                      children: [
+                        // 自定义 AppBar（选择模式下显示不同内容）
+                        _isSelectionMode
+                            ? _buildSelectionAppBar(filteredCards)
+                            : const CommonAppBar(
+                                title: '记忆中心',
+                                showAiBadge: true,
+                              ),
+                        // 主内容
+                        Expanded(
+                          child: _isLoading
+                              ? _buildLoadingIndicator()
+                              : favoritesCards.isEmpty && !hasMem0Section
+                              ? _buildEmptyState()
+                              : _buildContent(filteredCards),
+                        ),
+                        // 选择模式下的底部删除按钮栏
+                        SelectionBottomBar(
+                          isActive: _isSelectionMode,
+                          onDeletePressed: _selectedCardIds.isNotEmpty
+                              ? _batchDeleteSelectedCards
+                              : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // 模糊时的半透明遮罩层
+          if (_isBlurred)
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: () {
+                  // 点击遮罩层取消模糊
+                  Navigator.of(context).pop();
+                },
+                child: Container(color: Colors.black.withOpacity(0.3)),
+              ),
+            ),
+          // 被长按的卡片（不模糊，显示在遮罩层上方）
+          if (_isBlurred &&
+              _longPressedCard != null &&
+              _longPressedCardRect != null)
+            Positioned(
+              left: _longPressedCardRect!.left,
+              top: _longPressedCardRect!.top,
+              width: _longPressedCardRect!.width,
+              child: IgnorePointer(
+                child: MemoryCard(
+                  title: _longPressedCard!.title,
+                  description: _longPressedCard!.description,
+                  time: _longPressedCardTime ?? '',
+                  isFavorite: _longPressedCard!.isFavorite,
+                  imagePath: _longPressedCard!.imagePath,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建Shimmer加载占位符
+  Widget _buildShimmerPlaceholder({
+    required double width,
+    required double height,
+    BorderRadius? borderRadius,
+  }) {
+    return AnimatedBuilder(
+      animation: _shimmerController,
+      builder: (context, child) {
+        return Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            borderRadius: borderRadius ?? BorderRadius.circular(4),
+            gradient: LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [
+                Color(0xFF2DA5F0).withOpacity(0.1),
+                Color(0xFF1930D9).withOpacity(0.25),
+                Color(0xFF2DA5F0).withOpacity(0.1),
+              ],
+              stops: [0.0, _shimmerController.value, 1.0],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMemorySuggestion() {
+    // 默认文案
+    final defaultText = '你好呀，\n小万会在这里收集你的记忆！';
+    // 使用 LLM 生成的建议或默认文案
+    final suggestionText = _memorySuggestion ?? defaultText;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_isSuggestionLoading)
+              // 背景骨架屏
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(height: 2),
+                  _buildShimmerPlaceholder(
+                    width: 150,
+                    height: 20,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  SizedBox(height: 4),
+                  _buildShimmerPlaceholder(
+                    width: 250,
+                    height: 20,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  SizedBox(height: 2),
+                ],
+              )
+            else
+              GradientText(
+                suggestionText,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  height: 1.5,
+                  color: Colors.black,
+                ),
+                colors: [Color(0xFF2DA5F0), Color(0xFF1930D9)],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 选择模式下的 AppBar
+  Widget _buildSelectionAppBar(List<MemoryCardModel> filteredCards) {
+    final isAllSelected =
+        _selectedCardIds.length == filteredCards.length &&
+        filteredCards.isNotEmpty;
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          // 取消按钮
+          GestureDetector(
+            onTap: _exitSelectionMode,
+            child: Text(
+              '取消',
+              style: TextStyle(
+                color: const Color(0xFF007AFF),
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                height: 1.57,
+              ),
+            ),
+          ),
+          // 标题居中
+          Expanded(
+            child: Center(
+              child: Text(
+                '已选择${_selectedCardIds.length}项',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  height: 1.50,
+                ),
+              ),
+            ),
+          ),
+          // 全选/全不选按钮
+          GestureDetector(
+            onTap: () => _toggleSelectAll(filteredCards),
+            child: Text(
+              isAllSelected ? '全不选' : '全选',
+              style: TextStyle(
+                color: const Color(0xFF007AFF),
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                height: 1.57,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _switchMemoryTab(int tabIndex) {
+    if (_isSelectionMode || _currentMemoryTab == tabIndex) {
+      return;
+    }
+    _safeSetState(() {
+      _currentMemoryTab = tabIndex;
+    });
+    _memoryPageController.animateToPage(
+      tabIndex,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  Widget _buildMemoryTabSwitcher() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.text10),
+        ),
+        child: Stack(
+          children: [
+            AnimatedAlign(
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              alignment: _currentMemoryTab == _localMemoryTab
+                  ? Alignment.centerLeft
+                  : Alignment.centerRight,
+              child: FractionallySizedBox(
+                widthFactor: 0.5,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 1),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF2DA5F0), Color(0xFF1930D9)],
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1F1930D9),
+                        blurRadius: 10,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                _buildMemoryTabButton(label: '本地记忆', tabIndex: _localMemoryTab),
+                _buildMemoryTabButton(label: '云端记忆', tabIndex: _cloudMemoryTab),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMemoryTabButton({required String label, required int tabIndex}) {
+    final selected = _currentMemoryTab == tabIndex;
+
+    return Expanded(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _isSelectionMode ? null : () => _switchMemoryTab(tabIndex),
+        child: Center(
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            scale: selected ? 1 : 0.97,
+            child: AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              style: TextStyle(
+                color: selected ? Colors.white : AppColors.text70,
+                fontSize: AppTextStyles.fontSizeMain,
+                fontWeight: selected
+                    ? AppTextStyles.fontWeightSemiBold
+                    : AppTextStyles.fontWeightMedium,
+              ),
+              child: Text(label),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalMemoryPage(
+    List<MemoryCardModel> filteredCards,
+    bool hasLocalMemories,
+  ) {
+    return MemoryCardList(
+      cards: filteredCards,
+      header: Column(
+        children: [
+          const SizedBox(height: 8),
+          if (hasLocalMemories)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 0, 18, 8),
+              child: Row(
+                children: [
+                  const Text(
+                    '本地识图记忆',
+                    style: TextStyle(
+                      color: AppColors.text,
+                      fontSize: AppTextStyles.fontSizeMain,
+                      fontWeight: AppTextStyles.fontWeightSemiBold,
+                      height: AppTextStyles.lineHeightH2,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${filteredCards.length}/${favoritesCards.length}',
+                    style: TextStyle(
+                      color: AppColors.text50,
+                      fontSize: AppTextStyles.fontSizeSmall,
+                      height: AppTextStyles.lineHeightH2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          if (favoriteTags.isNotEmpty && hasLocalMemories) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: TagSection(
+                items: favoriteTags,
+                selectedIds: selectedTagIds,
+                onSelectionChanged: _onTagSelectionChanged,
+                maxCollapsedRows: 1,
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+      emptyState: hasLocalMemories
+          ? _buildLocalFilterEmptyState()
+          : _buildLocalMemoryPlaceholder(),
+      onRefresh: () => _loadData(silent: true, forceMem0Refresh: true),
+      onEdit: _editFavoriteCard,
+      onDelete: _deleteFavoriteCard,
+      isSelectionMode: _isSelectionMode,
+      selectedCardIds: _selectedCardIds,
+      onToggleSelection: _toggleCardSelection,
+      onCardTap: (MemoryCardModel card) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                MemoryDetailPage(memory: card, onDelete: _deleteFavoriteCard),
+          ),
+        );
+      },
+      onLongPress: _enterSelectionMode,
+    );
+  }
+
+  Widget _buildCloudMemoryPage(bool hasMem0Section) {
+    if (!hasMem0Section) {
+      return RefreshIndicator(
+        onRefresh: () => _loadMem0Memories(forceRefresh: true),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+            child: _buildCloudMemoryPlaceholder(),
+          ),
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => _loadMem0Memories(forceRefresh: true),
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          children: [
+            const SizedBox(height: 8),
+            Mem0MemorySection(
+              isLoading: _isMem0Loading,
+              isMutating: _isMem0Mutating,
+              snapshot: _mem0Snapshot,
+              onRefresh: () => _loadMem0Memories(forceRefresh: true),
+              onAddTap: _createMem0Memory,
+              onMemoryTap: _showMem0MemoryDetail,
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent(List<MemoryCardModel> filteredCards) {
+    final hasLocalMemories = favoritesCards.isNotEmpty;
+    final hasMem0Section = _mem0Snapshot.shouldShowSection || _isMem0Loading;
+
+    return Column(
+      children: [
+        ImageFiltered(
+          imageFilter: _isSelectionMode
+              ? ImageFilter.blur(sigmaX: 10, sigmaY: 10)
+              : ImageFilter.blur(sigmaX: 0, sigmaY: 0),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              _buildMemorySuggestion(),
+              const SizedBox(height: 12),
+              _buildMemoryTabSwitcher(),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+        Expanded(
+          child: PageView(
+            controller: _memoryPageController,
+            physics: _isSelectionMode
+                ? const NeverScrollableScrollPhysics()
+                : const BouncingScrollPhysics(),
+            onPageChanged: (index) {
+              _safeSetState(() {
+                _currentMemoryTab = index;
+              });
+            },
+            children: [
+              _buildLocalMemoryPage(filteredCards, hasLocalMemories),
+              _buildCloudMemoryPage(hasMem0Section),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCloudMemoryPlaceholder() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppColors.boxShadow],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            '还没有连接云端长期记忆',
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: AppTextStyles.fontSizeMain,
+              fontWeight: AppTextStyles.fontWeightMedium,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            '连接 Mem0 后，你的跨会话长期记忆会在这里持续沉淀。',
+            style: TextStyle(
+              color: AppColors.text70,
+              fontSize: AppTextStyles.fontSizeSmall,
+              height: AppTextStyles.lineHeightH2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocalMemoryPlaceholder() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppColors.boxShadow],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            '还没有本地记忆',
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: AppTextStyles.fontSizeMain,
+              fontWeight: AppTextStyles.fontWeightMedium,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            '长按小万并点击“学习”后，手动保存的内容会继续沉淀在这里。',
+            style: TextStyle(
+              color: AppColors.text70,
+              fontSize: AppTextStyles.fontSizeSmall,
+              height: AppTextStyles.lineHeightH2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocalFilterEmptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [AppColors.boxShadow],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            '当前筛选下还没有本地记忆',
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: AppTextStyles.fontSizeMain,
+              fontWeight: AppTextStyles.fontWeightMedium,
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            '试试切换上方标签，或者继续手动保存新的内容。',
+            style: TextStyle(
+              color: AppColors.text70,
+              fontSize: AppTextStyles.fontSizeSmall,
+              height: AppTextStyles.lineHeightH2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMem0MemoryDetail(Mem0MemoryItem item) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final metadataEntries = item.metadata.entries
+            .where((entry) => entry.key != 'categories')
+            .where((entry) => entry.value != null)
+            .toList();
+
+        return Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.78,
+          ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.text10,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '云端长期记忆',
+                        style: TextStyle(
+                          color: AppColors.buttonPrimary,
+                          fontSize: AppTextStyles.fontSizeSmall,
+                          fontWeight: AppTextStyles.fontWeightMedium,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        item.memory,
+                        style: const TextStyle(
+                          color: AppColors.text,
+                          fontSize: AppTextStyles.fontSizeH3,
+                          fontWeight: AppTextStyles.fontWeightSemiBold,
+                          height: AppTextStyles.lineHeightH2,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _isMem0Mutating
+                                ? null
+                                : () async {
+                                    Navigator.of(context).pop();
+                                    await Future<void>.delayed(
+                                      const Duration(milliseconds: 120),
+                                    );
+                                    await _editMem0Memory(item);
+                                  },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.buttonPrimary,
+                              side: const BorderSide(color: Color(0x332C7FEB)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                            ),
+                            icon: const Icon(Icons.edit_outlined, size: 16),
+                            label: const Text('编辑记忆'),
+                          ),
+                          TextButton.icon(
+                            onPressed: _isMem0Mutating
+                                ? null
+                                : () async {
+                                    Navigator.of(context).pop();
+                                    await Future<void>.delayed(
+                                      const Duration(milliseconds: 120),
+                                    );
+                                    await _deleteMem0Memory(item);
+                                  },
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppColors.alertRed,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 8,
+                              ),
+                            ),
+                            icon: const Icon(Icons.delete_outline, size: 16),
+                            label: const Text('删除'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      if (item.categories.isNotEmpty)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: item.categories
+                              .map(_buildMem0DetailPill)
+                              .toList(),
+                        ),
+                      if (item.categories.isNotEmpty)
+                        const SizedBox(height: 18),
+                      _buildMem0DetailRow('记忆 ID', item.id),
+                      if (item.displayTime != null)
+                        _buildMem0DetailRow(
+                          '更新时间',
+                          DateFormat(
+                            'yyyy/MM/dd HH:mm',
+                          ).format(item.displayTime!),
+                        ),
+                      if ((item.userId ?? '').isNotEmpty)
+                        _buildMem0DetailRow('用户', item.userId!),
+                      if ((item.agentId ?? '').isNotEmpty)
+                        _buildMem0DetailRow('Agent', item.agentId!),
+                      if (item.score != null)
+                        _buildMem0DetailRow(
+                          '匹配度',
+                          '${(item.score! * 100).round()}%',
+                        ),
+                      if (metadataEntries.isNotEmpty) ...[
+                        const SizedBox(height: 18),
+                        const Text(
+                          '附加信息',
+                          style: TextStyle(
+                            color: AppColors.text,
+                            fontSize: AppTextStyles.fontSizeMain,
+                            fontWeight: AppTextStyles.fontWeightSemiBold,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ...metadataEntries.map((entry) {
+                          final value =
+                              entry.value is List || entry.value is Map
+                              ? entry.value.toString()
+                              : '${entry.value}';
+                          return _buildMem0DetailRow(entry.key, value);
+                        }),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildMem0DetailPill(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0x0F2C7FEB),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.buttonPrimary,
+          fontSize: AppTextStyles.fontSizeSmall,
+          fontWeight: AppTextStyles.fontWeightMedium,
+        ),
+      ),
+    );
+  }
+
+  Future<Mem0MemoryEditorResult?> _showMem0MemoryEditor({
+    Mem0MemoryItem? initialItem,
+  }) async {
+    return showModalBottomSheet<Mem0MemoryEditorResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Mem0MemoryEditorSheet(
+          title: initialItem == null ? '新增云端记忆' : '编辑云端记忆',
+          submitLabel: initialItem == null ? '保存到云端' : '保存修改',
+          initialMemory: initialItem?.memory,
+          initialCategories: initialItem?.categories ?? const [],
+        );
+      },
+    );
+  }
+
+  Future<void> _createMem0Memory() async {
+    if (_isMem0Mutating) {
+      return;
+    }
+    final result = await _showMem0MemoryEditor();
+    if (result == null) {
+      return;
+    }
+    await _runMem0Mutation(
+      action: () async {
+        await Mem0MemoryService.createMemory(
+          memory: result.memory,
+          categories: result.categories,
+        );
+      },
+      successMessage: '云端记忆已新增',
+    );
+  }
+
+  Future<void> _editMem0Memory(Mem0MemoryItem item) async {
+    if (_isMem0Mutating) {
+      return;
+    }
+    final result = await _showMem0MemoryEditor(initialItem: item);
+    if (result == null) {
+      return;
+    }
+    await _runMem0Mutation(
+      action: () async {
+        await Mem0MemoryService.updateMemory(
+          memoryId: item.id,
+          memory: result.memory,
+          categories: result.categories,
+        );
+      },
+      successMessage: '云端记忆已更新',
+    );
+  }
+
+  Future<void> _deleteMem0Memory(Mem0MemoryItem item) async {
+    if (_isMem0Mutating) {
+      return;
+    }
+    final confirmed = await AppDialog.confirm(
+      context,
+      title: '删除这条云端记忆？',
+      content: '删除后将无法恢复：\n${_clipMem0Memory(item.memory)}',
+      confirmText: '删除',
+      confirmButtonColor: AppColors.alertRed,
+    );
+    if (confirmed != true) {
+      return;
+    }
+    await _runMem0Mutation(
+      action: () async {
+        await Mem0MemoryService.deleteMemory(memoryId: item.id);
+      },
+      successMessage: '云端记忆已删除',
+    );
+  }
+
+  Future<void> _runMem0Mutation({
+    required Future<void> Function() action,
+    required String successMessage,
+  }) async {
+    _safeSetState(() {
+      _isMem0Mutating = true;
+    });
+    try {
+      await action();
+      await _loadMem0Memories(forceRefresh: true);
+      showToast(successMessage, type: ToastType.success);
+    } catch (e) {
+      showToast(
+        '云端记忆操作失败：${e.toString().replaceFirst('Exception: ', '')}',
+        type: ToastType.error,
+      );
+    } finally {
+      _safeSetState(() {
+        _isMem0Mutating = false;
+      });
+    }
+  }
+
+  String _clipMem0Memory(String memory, {int maxLength = 36}) {
+    final text = memory.trim();
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return '${text.substring(0, maxLength)}...';
+  }
+
+  Widget _buildMem0DetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppColors.text50,
+                fontSize: AppTextStyles.fontSizeSmall,
+                height: AppTextStyles.lineHeightH2,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: AppTextStyles.fontSizeMain,
+                height: AppTextStyles.lineHeightH2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SvgPicture.asset(
+            'assets/common/empty_record.svg',
+            fit: BoxFit.contain,
+            errorBuilder: (ctx, err, stack) => Icon(
+              Icons.favorite_border,
+              size: 72,
+              color: Colors.grey.shade400,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '暂无记忆',
+            style: TextStyle(
+              fontSize: AppTextStyles.fontSizeH3,
+              fontWeight: AppTextStyles.fontWeightMedium,
+              color: AppColors.primaryBlue,
+              height: AppTextStyles.lineHeightH1,
+              letterSpacing: AppTextStyles.letterSpacingWide,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                '快去探索，添加喜欢的内容吧',
+                style: TextStyle(
+                  fontSize: AppTextStyles.fontSizeMain,
+                  fontWeight: AppTextStyles.fontWeightRegular,
+                  color: AppColors.text20,
+                  height: AppTextStyles.lineHeightH3,
+                  letterSpacing: AppTextStyles.letterSpacingWide,
+                ),
+              ),
+              InkWell(
+                onTap: () async {
+                  await AppDialog.alert(
+                    context,
+                    title: '如何添加至记忆中心',
+                    content: '使用手机时，长按小万再点击“学习”\n就能把内容加入记忆中心啦～',
+                    confirmText: '我知道啦',
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.all(4), // 增加点击区域
+                  child: SvgPicture.asset(
+                    'assets/memory/question_icon.svg',
+                    width: 16,
+                    height: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(24.0),
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: CircularProgressIndicator(strokeWidth: 2.5),
+        ),
+      ),
+    );
+  }
+}
