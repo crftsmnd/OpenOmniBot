@@ -16,7 +16,7 @@ class TermuxSettingPage extends StatefulWidget {
 class _TermuxSettingPageState extends State<TermuxSettingPage>
     with WidgetsBindingObserver {
   static const String _termuxDownloadUrl =
-      'https://cloud.tsinghua.edu.cn/f/b44766c47a7a4e799d82/?dl=1';
+      'https://cloud.tsinghua.edu.cn/f/c219e873107645029751/?dl=1';
   static const String _termuxInitCommand =
       r'''value="true"; key="allow-external-apps"; file="/data/data/com.termux/files/home/.termux/termux.properties"; workspace_root="/storage/emulated/0/workspace"; mkdir -p "$(dirname "$file")"; chmod 700 "$(dirname "$file")"; if ! grep -E '^'"$key"'=.*' "$file" >/dev/null 2>&1; then [[ -s "$file" && -n "$(tail -c 1 "$file")" ]] && newline=$'\n' || newline=""; echo "$newline$key=$value" >> "$file"; else sed -i'' -E 's/^'"$key"'=.*/'"$key=$value"'/' "$file"; fi; termux-reload-settings; termux-setup-storage; mkdir -p "$workspace_root" "$workspace_root/.omnibot"; if ! command -v proot-distro >/dev/null 2>&1; then pkg update -y && pkg install -y proot-distro; fi; if ! proot-distro login ubuntu --bind "$workspace_root:/workspace" --shared-tmp -- bash -lc 'exit 0' >/dev/null 2>&1; then proot-distro install ubuntu; fi; alias_line="alias u='proot-distro login ubuntu --bind /storage/emulated/0/workspace:/workspace'"; touch ~/.bashrc; sed -i '/^alias u=/d' ~/.bashrc; echo "$alias_line" >> ~/.bashrc; bash -ic "u --shared-tmp -- bash -lc 'test -d /workspace && test -w /workspace'" >/dev/null 2>&1''';
 
