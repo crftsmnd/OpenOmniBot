@@ -1,10 +1,47 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:ui/services/model_provider_config_service.dart';
 import 'package:ui/theme/app_colors.dart';
 import 'package:ui/utils/ui.dart';
 import 'package:ui/widgets/common_app_bar.dart';
+
+const String _kArrowBigDownSvg = '''
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M15 11a1 1 0 0 0 1 1h2.939a1 1 0 0 1 .75 1.811l-6.835 6.836a1.207 1.207 0 0 1-1.707 0L4.31 13.81a1 1 0 0 1 .75-1.811H8a1 1 0 0 0 1-1V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1z"/>
+</svg>
+''';
+
+const String _kPlusSvg = '''
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M5 12h14"/>
+  <path d="M12 5v14"/>
+</svg>
+''';
+
+const String _kPackageSvg = '''
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/>
+  <path d="M12 22V12"/>
+  <polyline points="3.29 7 12 12 20.71 7"/>
+  <path d="m7.5 4.27 9 5.15"/>
+</svg>
+''';
+
+enum _ProviderModelSource { manual, remote }
+
+class _ProviderModelItem {
+  const _ProviderModelItem({required this.id, required this.source});
+
+  final String id;
+  final _ProviderModelSource source;
+
+  String get sourceLabel {
+    return source == _ProviderModelSource.manual ? '手动' : '自动';
+  }
+}
 
 class VlmModelSettingPage extends StatefulWidget {
   const VlmModelSettingPage({super.key});
@@ -16,9 +53,14 @@ class VlmModelSettingPage extends StatefulWidget {
 class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
   final TextEditingController _baseUrlController = TextEditingController();
   final TextEditingController _apiKeyController = TextEditingController();
-  final TextEditingController _manualModelController = TextEditingController();
 
   static const Duration _autoSaveDebounce = Duration(milliseconds: 600);
+  static const double _modelDeleteExtentRatio = 0.24;
+  static const double _modelDeleteIconSize = 18;
+  static const BorderRadius _modelDeleteActionRadius = BorderRadius.only(
+    topRight: Radius.circular(4),
+    bottomRight: Radius.circular(4),
+  );
 
   bool _isLoading = true;
   bool _isFetchingModels = false;
@@ -30,13 +72,14 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
   Timer? _autoSaveTimer;
 
   ModelProviderConfig _config = ModelProviderConfig.empty();
-  List<ProviderModelOption> _models = const [];
-  String _selectedModelId = '';
+  List<ProviderModelOption> _remoteModels = const [];
+  List<String> _manualModelIds = const [];
+  Set<String> _deletingModelIds = <String>{};
 
   @override
   void initState() {
     super.initState();
-    _loadConfig();
+    _loadData();
     _baseUrlController.addListener(_onConfigChanged);
     _apiKeyController.addListener(_onConfigChanged);
   }
@@ -47,12 +90,49 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
     if (_shouldAutoSaveDraft) {
       unawaited(_persistConfigDraft());
     }
+    unawaited(_persistManualModelIds());
     _baseUrlController.removeListener(_onConfigChanged);
     _apiKeyController.removeListener(_onConfigChanged);
     _baseUrlController.dispose();
     _apiKeyController.dispose();
-    _manualModelController.dispose();
     super.dispose();
+  }
+
+  List<_ProviderModelItem> get _modelItems {
+    final items = <_ProviderModelItem>[];
+    final seen = <String>{};
+
+    for (final modelId in _manualModelIds) {
+      final normalized = modelId.trim();
+      if (!ModelProviderConfigService.isValidModelName(normalized)) {
+        continue;
+      }
+      if (seen.add(normalized)) {
+        items.add(
+          _ProviderModelItem(
+            id: normalized,
+            source: _ProviderModelSource.manual,
+          ),
+        );
+      }
+    }
+
+    for (final model in _remoteModels) {
+      final normalized = model.id.trim();
+      if (!ModelProviderConfigService.isValidModelName(normalized)) {
+        continue;
+      }
+      if (seen.add(normalized)) {
+        items.add(
+          _ProviderModelItem(
+            id: normalized,
+            source: _ProviderModelSource.remote,
+          ),
+        );
+      }
+    }
+
+    return items;
   }
 
   void _onConfigChanged() {
@@ -82,6 +162,14 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
     }
     return normalizedBaseUrl != _config.baseUrl ||
         _apiKeyController.text.trim() != _config.apiKey;
+  }
+
+  Future<void> _persistManualModelIds() async {
+    try {
+      await ModelProviderConfigService.saveManualModelIds(_manualModelIds);
+    } catch (_) {
+      // no-op
+    }
   }
 
   Future<void> _persistConfigDraft() async {
@@ -138,12 +226,29 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
     } while (_saveQueued && mounted);
   }
 
-  Future<void> _loadConfig() async {
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
       final config = await ModelProviderConfigService.getConfig();
+      final results = await Future.wait<dynamic>([
+        ModelProviderConfigService.getManualModelIds(),
+        ModelProviderConfigService.getCachedFetchedModels(
+          apiBase: config.baseUrl,
+        ),
+      ]);
       if (!mounted) return;
-      _applyConfig(config);
+
+      final manualModelIds = results[0] as List<String>;
+      final cachedFetchedModels = results[1] as List<ProviderModelOption>;
+
+      _syncController(_baseUrlController, config.baseUrl);
+      _syncController(_apiKeyController, config.apiKey);
+
+      setState(() {
+        _config = config;
+        _manualModelIds = manualModelIds;
+        _remoteModels = cachedFetchedModels;
+      });
     } catch (_) {
       if (!mounted) return;
       showToast('加载模型提供商配置失败', type: ToastType.error);
@@ -176,49 +281,11 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
     _isSyncingControllers = false;
   }
 
-  String get _maskedApiKey {
-    final trimmed = _config.apiKey.trim();
-    if (trimmed.isEmpty) {
-      return '未配置';
-    }
-    if (trimmed.length <= 8) {
-      return '${trimmed.substring(0, 2)}****';
-    }
-    return '${trimmed.substring(0, 4)}****${trimmed.substring(trimmed.length - 4)}';
-  }
-
-  String get _sourceLabel {
-    switch (_config.source) {
-      case 'user':
-      case 'global':
-        return '本地配置';
-      default:
-        return '未配置';
-    }
-  }
-
-  Future<void> _clearConfig() async {
-    if (_isFetchingModels) return;
-    try {
-      final config = await ModelProviderConfigService.clearConfig();
-      if (!mounted) return;
-      _manualModelController.clear();
-      setState(() {
-        _models = const [];
-        _selectedModelId = '';
-      });
-      _applyConfig(config);
-      showToast('已清空模型提供商配置', type: ToastType.success);
-    } catch (_) {
-      if (!mounted) return;
-      showToast('清空配置失败', type: ToastType.error);
-    }
-  }
-
   Future<void> _fetchModels({bool silentError = false}) async {
     if (_isFetchingModels) return;
     final baseUrl = _baseUrlController.text.trim();
     final apiKey = _apiKeyController.text.trim();
+
     if (baseUrl.isEmpty) {
       if (!silentError) {
         showToast('请先填写 Base URL', type: ToastType.warning);
@@ -240,11 +307,7 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
       );
       if (!mounted) return;
       setState(() {
-        _models = models;
-        if (_selectedModelId.isNotEmpty &&
-            !models.any((item) => item.id == _selectedModelId)) {
-          _selectedModelId = '';
-        }
+        _remoteModels = models;
       });
       if (!silentError) {
         showToast(
@@ -262,33 +325,102 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
     }
   }
 
-  Future<void> _pickModel() async {
-    if (_models.isEmpty) {
-      await _fetchModels();
-      if (!mounted) return;
-      if (_models.isEmpty) return;
-    }
-    final selected = await showModalBottomSheet<String>(
+  Future<void> _promptAddModel() async {
+    final controller = TextEditingController();
+    final modelId = await showDialog<String>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      clipBehavior: Clip.antiAlias,
       builder: (context) {
-        return _ProviderModelPickerSheet(
-          items: _models,
-          currentValue: _selectedModelId,
+        return AlertDialog(
+          title: const Text('添加模型 ID'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: '输入模型 ID',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+              child: const Text('添加'),
+            ),
+          ],
         );
       },
     );
+    controller.dispose();
 
-    if (selected != null && mounted) {
+    if (modelId == null) {
+      return;
+    }
+    final normalized = modelId.trim();
+    if (!ModelProviderConfigService.isValidModelName(normalized)) {
+      showToast('模型 ID 不能为空且不能以 scene. 开头', type: ToastType.error);
+      return;
+    }
+
+    final existsInManual = _manualModelIds.any((item) => item == normalized);
+    final existsInRemote = _remoteModels.any((item) => item.id == normalized);
+    if (existsInManual || existsInRemote) {
+      showToast('模型已存在', type: ToastType.warning);
+      return;
+    }
+
+    final nextManual = [..._manualModelIds, normalized];
+    setState(() {
+      _manualModelIds = nextManual;
+    });
+
+    await _persistManualModelIds();
+    showToast('已添加模型', type: ToastType.success);
+  }
+
+  Future<void> _deleteModel(_ProviderModelItem item) async {
+    if (_deletingModelIds.contains(item.id)) {
+      return;
+    }
+
+    final prevManual = List<String>.from(_manualModelIds);
+    final prevRemote = List<ProviderModelOption>.from(_remoteModels);
+
+    setState(() {
+      _deletingModelIds = {..._deletingModelIds, item.id};
+      _manualModelIds = _manualModelIds.where((id) => id != item.id).toList();
+      _remoteModels = _remoteModels.where((m) => m.id != item.id).toList();
+    });
+
+    try {
+      final cacheBase = _config.baseUrl.isNotEmpty
+          ? _config.baseUrl
+          : (_baseUrlController.text.trim());
+
+      await Future.wait([
+        ModelProviderConfigService.saveManualModelIds(_manualModelIds),
+        ModelProviderConfigService.saveCachedFetchedModels(
+          apiBase: cacheBase,
+          models: _remoteModels,
+        ),
+      ]);
+
+      if (!mounted) return;
+      showToast('已删除模型', type: ToastType.success);
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        _selectedModelId = selected;
-        _manualModelController.text = selected;
+        _manualModelIds = prevManual;
+        _remoteModels = prevRemote;
       });
+      showToast('删除模型失败', type: ToastType.error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingModelIds = {..._deletingModelIds}..remove(item.id);
+        });
+      }
     }
   }
 
@@ -335,42 +467,168 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            color: AppColors.text70,
-            fontSize: 12,
-            fontFamily: 'PingFang SC',
+  Widget _buildModelActionButton({
+    required String svg,
+    required VoidCallback? onPressed,
+    bool highlighted = false,
+    bool loading = false,
+  }) {
+    final isEnabled = onPressed != null;
+    final useHighlightStyle = highlighted || loading;
+    final backgroundColor = !isEnabled && !loading
+        ? const Color(0xFFE8ECF3)
+        : useHighlightStyle
+        ? const Color(0xFF2C7FEB)
+        : Colors.white;
+    final iconColor = !isEnabled && !loading
+        ? AppColors.text50
+        : useHighlightStyle
+        ? Colors.white
+        : AppColors.text;
+
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onPressed,
+        child: SizedBox(
+          width: 42,
+          height: 42,
+          child: Center(
+            child: loading
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : SvgPicture.string(
+                    svg,
+                    width: 20,
+                    height: 20,
+                    colorFilter: ColorFilter.mode(iconColor, BlendMode.srcIn),
+                  ),
           ),
         ),
-        const SizedBox(height: 6),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.text,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              fontFamily: 'PingFang SC',
-            ),
+      ),
+    );
+  }
+
+  Widget _buildSwipeModelItem(_ProviderModelItem item) {
+    final isDeleting = _deletingModelIds.contains(item.id);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: IgnorePointer(
+        ignoring: isDeleting,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: isDeleting ? 0.72 : 1,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final initialActionWidth =
+                  constraints.maxWidth * _modelDeleteExtentRatio;
+              final deleteIconRightPadding =
+                  ((initialActionWidth - _modelDeleteIconSize) / 2)
+                      .clamp(0.0, double.infinity)
+                      .toDouble();
+
+              return Slidable(
+                key: ValueKey<String>('provider-model-${item.id}'),
+                groupTag: 'provider-model-items',
+                closeOnScroll: true,
+                endActionPane: ActionPane(
+                  motion: const BehindMotion(),
+                  extentRatio: _modelDeleteExtentRatio,
+                  dismissible: DismissiblePane(
+                    dismissThreshold: 0.4,
+                    closeOnCancel: true,
+                    motion: const InversedDrawerMotion(),
+                    onDismissed: () => _deleteModel(item),
+                  ),
+                  children: [
+                    CustomSlidableAction(
+                      onPressed: (_) => _deleteModel(item),
+                      backgroundColor: AppColors.alertRed,
+                      borderRadius: _modelDeleteActionRadius,
+                      padding: EdgeInsets.zero,
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: EdgeInsets.only(right: deleteIconRightPadding),
+                        child: SvgPicture.asset(
+                          'assets/memory/memory_delete.svg',
+                          width: _modelDeleteIconSize,
+                          height: _modelDeleteIconSize,
+                          colorFilter: const ColorFilter.mode(
+                            Colors.white,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                    boxShadow: [AppColors.boxShadow],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(4),
+                    child: InkWell(
+                      onTap: () {},
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 13,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.id,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppColors.text,
+                                  fontFamily: 'PingFang SC',
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              item.sourceLabel,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.text.withOpacity(0.4),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ),
-      ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final modelItems = _modelItems;
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: const CommonAppBar(title: '模型提供商', primary: true),
@@ -381,73 +639,6 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
             : ListView(
                       padding: const EdgeInsets.all(16),
                       children: [
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [Color(0xFFEAF4FF), Color(0xFFFFFFFF)],
-                            ),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0x1A2C7FEB)),
-                            boxShadow: [AppColors.boxShadow],
-                          ),
-                          child: const Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.hub_outlined,
-                                    size: 18,
-                                    color: Color(0xFF2C7FEB),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text(
-                                    'OpenAI-Compatible 模型提供商',
-                                    style: TextStyle(
-                                      color: AppColors.text,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      fontFamily: 'PingFang SC',
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              SizedBox(height: 8),
-                              Text(
-                                '在这里配置全局自定义 Provider。配置会自动保存，只有被场景页绑定了模型的 scene 才会真正走这个 Provider。',
-                                style: TextStyle(
-                                  color: AppColors.text70,
-                                  fontSize: 12,
-                                  height: 1.5,
-                                  fontFamily: 'PingFang SC',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        _buildCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildInfoRow('当前配置来源', _sourceLabel),
-                              const SizedBox(height: 10),
-                              _buildInfoRow(
-                                '当前生效 Base URL',
-                                _config.baseUrl.isEmpty
-                                    ? '未配置'
-                                    : _config.baseUrl,
-                              ),
-                              const SizedBox(height: 10),
-                              _buildInfoRow('当前 API Key', _maskedApiKey),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
                         _buildCard(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -520,258 +711,98 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
                             children: [
                               Row(
                                 children: [
-                                  const Expanded(
-                                    child: Text(
-                                      '模型列表',
-                                      style: TextStyle(
-                                        color: AppColors.text,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        fontFamily: 'PingFang SC',
-                                      ),
-                                    ),
-                                  ),
-                                  if (_isFetchingModels)
-                                    const SizedBox(
-                                      height: 14,
-                                      width: 14,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  else
-                                    Text(
-                                      _models.isEmpty
-                                          ? '点击展开拉取'
-                                          : '共 ${_models.length} 个模型',
-                                      style: const TextStyle(
-                                        color: AppColors.text70,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              GestureDetector(
-                                onTap: _pickModel,
-                                child: Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFF8FAFC),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: const Color(0x1A000000),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          _selectedModelId.isEmpty
-                                              ? '从 Provider 模型列表中选择'
-                                              : _selectedModelId,
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          '模型列表',
                                           style: TextStyle(
-                                            color: _selectedModelId.isEmpty
-                                                ? AppColors.text50
-                                                : AppColors.text,
-                                            fontSize: 13,
+                                            color: AppColors.text,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
                                             fontFamily: 'PingFang SC',
                                           ),
                                         ),
-                                      ),
-                                      const Icon(Icons.expand_more),
-                                    ],
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '共 ${modelItems.length} 个模型',
+                                          style: const TextStyle(
+                                            color: AppColors.text70,
+                                            fontSize: 12,
+                                            fontFamily: 'PingFang SC',
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
+                                  _buildModelActionButton(
+                                    svg: _kPlusSvg,
+                                    onPressed: _promptAddModel,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _buildModelActionButton(
+                                    svg: _kArrowBigDownSvg,
+                                    onPressed: _isFetchingModels
+                                        ? null
+                                        : _fetchModels,
+                                    highlighted: true,
+                                    loading: _isFetchingModels,
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 10),
-                              TextField(
-                                controller: _manualModelController,
-                                decoration: _buildInputDecoration(
-                                  hint: '也可以手动输入模型名',
+                              const SizedBox(height: 12),
+                              Container(
+                                height: 280,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF4F7FB),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0x1A000000)),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                '手动输入优先于列表选择；适用于 /v1/models 不完整或 Provider 不返回模型列表的情况。',
-                                style: TextStyle(
-                                  color: AppColors.text50,
-                                  fontSize: 12,
-                                  fontFamily: 'PingFang SC',
-                                ),
+                                child: modelItems.isEmpty
+                                    ? Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            SvgPicture.string(
+                                              _kPackageSvg,
+                                              width: 64,
+                                              height: 64,
+                                              colorFilter:
+                                                  const ColorFilter.mode(
+                                                    AppColors.text50,
+                                                    BlendMode.srcIn,
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 10),
+                                            const Text(
+                                              '请添加模型！',
+                                              style: TextStyle(
+                                                color: AppColors.text70,
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                fontFamily: 'PingFang SC',
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : ListView.builder(
+                                        itemCount: modelItems.length,
+                                        itemBuilder: (context, index) {
+                                          return _buildSwipeModelItem(
+                                            modelItems[index],
+                                          );
+                                        },
+                                      ),
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: SizedBox(
-                                height: 44,
-                                child: OutlinedButton(
-                                  onPressed: _isFetchingModels
-                                      ? null
-                                      : _clearConfig,
-                                  child: const Text('恢复默认'),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
                       ],
                     ),
-      ),
-    );
-  }
-}
-
-class _ProviderModelPickerSheet extends StatefulWidget {
-  const _ProviderModelPickerSheet({
-    required this.items,
-    required this.currentValue,
-  });
-
-  final List<ProviderModelOption> items;
-  final String currentValue;
-
-  @override
-  State<_ProviderModelPickerSheet> createState() =>
-      _ProviderModelPickerSheetState();
-}
-
-class _ProviderModelPickerSheetState extends State<_ProviderModelPickerSheet> {
-  late final TextEditingController _searchController;
-  late List<ProviderModelOption> _filteredItems;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchController = TextEditingController();
-    _filteredItems = List<ProviderModelOption>.from(widget.items);
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  void _updateFilter(String keyword) {
-    final query = keyword.trim().toLowerCase();
-    setState(() {
-      _filteredItems = widget.items.where((item) {
-        final haystack =
-            '${item.id} ${item.displayName} ${item.ownedBy ?? ''}'
-                .toLowerCase();
-        return haystack.contains(query);
-      }).toList();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final availableHeight =
-        mediaQuery.size.height - mediaQuery.viewInsets.bottom;
-    final sheetHeight = (availableHeight * 0.78)
-        .clamp(420.0, 620.0)
-        .toDouble();
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
-        child: Container(
-          color: Colors.white,
-          child: SizedBox(
-            height: sheetHeight,
-            child: Column(
-              children: [
-                const SizedBox(height: 12),
-                Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: const Color(0x22000000),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  '选择模型',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: _updateFilter,
-                    decoration: InputDecoration(
-                      hintText: '搜索模型 ID',
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      fillColor: const Color(0xFFF8FAFC),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: ListView.separated(
-                    physics: const ClampingScrollPhysics(),
-                    clipBehavior: Clip.hardEdge,
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    itemBuilder: (context, index) {
-                      final item = _filteredItems[index];
-                      final isSelected = item.id == widget.currentValue;
-                      return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
-                        tileColor: isSelected
-                            ? const Color(0xFFF0F7FF)
-                            : const Color(0xFFF8FAFC),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        title: Text(item.displayName),
-                        subtitle: Text(
-                          item.ownedBy == null
-                              ? item.id
-                              : '${item.id} · ${item.ownedBy}',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing: isSelected
-                            ? const Icon(
-                                Icons.check_circle,
-                                color: Color(0xFF2C7FEB),
-                              )
-                            : null,
-                        onTap: () => Navigator.of(context).pop(item.id),
-                      );
-                    },
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemCount: _filteredItems.length,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
