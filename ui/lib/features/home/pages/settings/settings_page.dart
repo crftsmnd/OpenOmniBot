@@ -362,7 +362,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.smart_toy_outlined,
             iconSvg: 'assets/home/vlm_model_setting_icon.svg',
             title: '模型提供商',
-            subtitle: '配置全局 OpenAI-Compatible Provider',
+            subtitle: '配置模型地址、密钥与模型列表',
             onTap: () {
               GoRouterManager.push('/home/vlm_model_setting');
             },
@@ -371,7 +371,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.tune_outlined,
             iconSvg: 'assets/home/scene_model_setting_icon.svg',
             title: '场景模型配置',
-            subtitle: '按 scene 绑定模型，未绑定场景使用当前默认模型',
+            subtitle: '按场景绑定模型，未绑定场景使用默认模型',
             onTap: () {
               GoRouterManager.push('/home/scene_model_setting');
             },

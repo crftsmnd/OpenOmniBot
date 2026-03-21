@@ -763,7 +763,7 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
               type: 1,
               user: 2,
               content: {
-                'text': '我已经完成思考，但暂时无法生成回复，请重试。',
+                'text': '暂时无法生成回复，请重试。',
                 'id': fallbackId,
               },
             ),
@@ -825,8 +825,8 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
 
     final textId = '$taskId-text';
     final message = error.trim().isEmpty
-        ? '我已经完成思考，但暂时无法生成回复，请重试。'
-        : '我已经完成思考，但暂时无法生成回复，请重试。${error.trim()}';
+        ? '暂时无法生成回复，请重试。'
+        : '暂时无法生成回复，请重试。${error.trim()}';
     final index = runtime.messages.indexWhere((msg) => msg.id == textId);
     if (index == -1) {
       runtime.messages.insert(
