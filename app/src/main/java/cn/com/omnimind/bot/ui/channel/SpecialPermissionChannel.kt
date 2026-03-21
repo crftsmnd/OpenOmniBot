@@ -67,6 +67,10 @@ class SpecialPermissionChannel {
                     )
                     "openAppDetailsSettings" -> specialPermissionManager!!
                         .openAppDetailsSettings(result)
+                    "isNotificationPermissionGranted" -> specialPermissionManager!!
+                        .isNotificationPermissionGranted(result)
+                    "requestNotificationPermission" -> specialPermissionManager!!
+                        .requestNotificationPermission(result)
                     "isWorkspaceStorageAccessGranted" -> specialPermissionManager!!
                         .isWorkspaceStorageAccessGranted(result)
                     "openWorkspaceStorageSettings" -> specialPermissionManager!!

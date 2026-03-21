@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:ui/services/storage_service.dart';
 
 class AppUpdateStatus {
   final String currentVersion;
@@ -83,6 +84,8 @@ class AppUpdateService {
   static const MethodChannel _channel = MethodChannel(
     'cn.com.omnimind.bot/app_update',
   );
+  static const String _dismissedBannerVersionKey =
+      'dismissed_app_update_banner_version';
 
   static final ValueNotifier<AppUpdateStatus?> statusNotifier =
       ValueNotifier<AppUpdateStatus?>(null);
@@ -121,6 +124,27 @@ class AppUpdateService {
       'installLatestApk',
     );
     return AppUpdateInstallResult.fromMap(result ?? const {});
+  }
+
+  static bool shouldShowBanner(AppUpdateStatus? status) {
+    if (status == null || !status.hasUpdate) {
+      return false;
+    }
+    final dismissedVersion = StorageService.getString(
+      _dismissedBannerVersionKey,
+      defaultValue: '',
+    );
+    return dismissedVersion != status.latestVersion;
+  }
+
+  static Future<void> dismissBanner(AppUpdateStatus status) async {
+    if (status.latestVersion.isEmpty) {
+      return;
+    }
+    await StorageService.setString(
+      _dismissedBannerVersionKey,
+      status.latestVersion,
+    );
   }
 
   static Future<AppUpdateStatus?> _check({required bool force}) async {

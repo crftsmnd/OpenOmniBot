@@ -104,6 +104,37 @@ Future<void> openAppDetailsSettings() async {
   await spePermission.invokeMethod('openAppDetailsSettings');
 }
 
+Future<bool> isNotificationPermissionGranted() async {
+  try {
+    return await spePermission.invokeMethod<bool>(
+          'isNotificationPermissionGranted',
+        ) ??
+        false;
+  } catch (e) {
+    debugPrint('检查通知权限失败: $e');
+    return false;
+  }
+}
+
+Future<bool> requestNotificationPermission() async {
+  try {
+    return await spePermission.invokeMethod<bool>(
+          'requestNotificationPermission',
+        ) ??
+        false;
+  } catch (e) {
+    debugPrint('请求通知权限失败: $e');
+    return false;
+  }
+}
+
+Future<bool> ensureNotificationPermission() async {
+  if (await isNotificationPermissionGranted()) {
+    return true;
+  }
+  return requestNotificationPermission();
+}
+
 Future<bool> isWorkspaceStorageAccessGranted() async {
   try {
     return await spePermission.invokeMethod<bool>(

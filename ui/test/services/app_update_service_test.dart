@@ -1,6 +1,8 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/services/app_update_service.dart';
+import 'package:ui/services/storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -37,5 +39,44 @@ void main() {
     expect(status, isNotNull);
     expect(status!.hasUpdate, isTrue);
     expect(AppUpdateService.statusNotifier.value?.latestVersion, '0.0.2');
+  });
+
+  test('dismissBanner hides the banner for the same version only', () async {
+    SharedPreferences.setMockInitialValues({});
+    await StorageService.init();
+
+    const status = AppUpdateStatus(
+      currentVersion: '0.0.1',
+      latestVersion: '0.0.3',
+      hasUpdate: true,
+      checkedAt: 1,
+      publishedAt: 2,
+      releaseUrl: 'https://example.com/release',
+      releaseNotes: 'notes',
+      apkName: 'OpenOmniBot-v0.0.3.apk',
+      apkDownloadUrl: 'https://example.com/app.apk',
+    );
+
+    expect(AppUpdateService.shouldShowBanner(status), isTrue);
+
+    await AppUpdateService.dismissBanner(status);
+
+    expect(AppUpdateService.shouldShowBanner(status), isFalse);
+    expect(
+      AppUpdateService.shouldShowBanner(
+        const AppUpdateStatus(
+          currentVersion: '0.0.1',
+          latestVersion: '0.0.4',
+          hasUpdate: true,
+          checkedAt: 1,
+          publishedAt: 2,
+          releaseUrl: 'https://example.com/release',
+          releaseNotes: 'notes',
+          apkName: 'OpenOmniBot-v0.0.4.apk',
+          apkDownloadUrl: 'https://example.com/app.apk',
+        ),
+      ),
+      isTrue,
+    );
   });
 }

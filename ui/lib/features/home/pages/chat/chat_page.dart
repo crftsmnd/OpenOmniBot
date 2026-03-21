@@ -1159,15 +1159,26 @@ class _ChatPageState extends State<ChatPage>
     await showAppUpdateDialog(context, status);
   }
 
+  Future<void> _handleAppUpdateBannerDismiss() async {
+    final status = _appUpdateStatus;
+    if (status == null || !status.hasUpdate) return;
+    await AppUpdateService.dismissBanner(status);
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Widget? _buildAppUpdateBanner() {
     final status = _appUpdateStatus;
-    if (status == null || !status.hasUpdate) {
+    if (status == null || !AppUpdateService.shouldShowBanner(status)) {
       return null;
     }
     return AppUpdateBanner(
       text: '发现新版本 ${status.latestVersionLabel}，点击更新',
       onTap: () {
         _handleAppUpdateBannerTap();
+      },
+      onClose: () {
+        _handleAppUpdateBannerDismiss();
       },
     );
   }

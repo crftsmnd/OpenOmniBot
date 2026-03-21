@@ -5,11 +5,13 @@ import 'package:ui/theme/app_text_styles.dart';
 class AppUpdateBanner extends StatefulWidget {
   final String text;
   final VoidCallback onTap;
+  final VoidCallback? onClose;
 
   const AppUpdateBanner({
     super.key,
     required this.text,
     required this.onTap,
+    this.onClose,
   });
 
   @override
@@ -37,45 +39,87 @@ class _AppUpdateBannerState extends State<AppUpdateBanner>
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Ink(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF4F8FF),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: const Color(0xFFD9E6FB)),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x152D7AF0),
-                blurRadius: 14,
-                offset: Offset(0, 6),
+            child: Ink(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF4F8FF),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0xFFD9E6FB)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x152D7AF0),
+                    blurRadius: 14,
+                    offset: Offset(0, 6),
+                  ),
+                ],
               ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.auto_awesome_rounded,
-                size: 14,
-                color: AppColors.buttonPrimary,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.auto_awesome_rounded,
+                    size: 14,
+                    color: AppColors.buttonPrimary,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: _AnimatedShinyText(
+                      controller: _controller,
+                      text: widget.text,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    size: 16,
+                    color: AppColors.text50,
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              Flexible(child: _AnimatedShinyText(controller: _controller, text: widget.text)),
-              const SizedBox(width: 4),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 16,
-                color: AppColors.text50,
-              ),
-            ],
+            ),
           ),
         ),
-      ),
+        if (widget.onClose != null)
+          Positioned(
+            top: -6,
+            right: -6,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: widget.onClose,
+                customBorder: const CircleBorder(),
+                child: Ink(
+                  width: 20,
+                  height: 20,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Color(0x12000000),
+                        blurRadius: 6,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 13,
+                    color: AppColors.text50,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

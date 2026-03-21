@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart' show LaunchMode;
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:ui/services/app_update_service.dart';
+import 'package:ui/services/special_permission.dart';
 import 'package:ui/theme/app_colors.dart';
 import 'package:ui/utils/ui.dart';
 
@@ -40,6 +41,10 @@ Future<void> showAppUpdateDialog(
   }
 
   try {
+    final notificationGranted = await ensureNotificationPermission();
+    if (!notificationGranted) {
+      showToast('未授予通知权限，下载仍会继续，但不会显示系统下载进度', type: ToastType.warning);
+    }
     final result = await AppUpdateService.installLatestApk();
     final toastType = result.success ? ToastType.success : ToastType.warning;
     final message = result.message.isEmpty ? '更新安装失败' : result.message;

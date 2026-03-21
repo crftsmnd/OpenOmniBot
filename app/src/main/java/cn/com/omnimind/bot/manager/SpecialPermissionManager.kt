@@ -1,9 +1,13 @@
 package cn.com.omnimind.bot.manager
 
+import android.Manifest
 import android.content.Intent
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import androidx.core.content.ContextCompat
 import cn.com.omnimind.baselib.permission.PermissionRequest
 import cn.com.omnimind.baselib.util.OmniLog
 import cn.com.omnimind.bot.termux.TermuxCommandRunner
@@ -230,6 +234,52 @@ class SpecialPermissionManager(private val context: Context) {
             result.error(
                 "INTENT_FAILED",
                 "无法打开应用详情页，可能没有 Activity 能处理此 Intent。",
+                e.message
+            )
+        }
+    }
+
+    fun isNotificationPermissionGranted(result: MethodChannel.Result) {
+        try {
+            val granted = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                true
+            } else {
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+            }
+            result.success(granted)
+        } catch (e: Exception) {
+            OmniLog.e(TAG, "Error checking notification permission", e)
+            result.error(
+                "CHECK_FAILED",
+                "Failed to check notification permission.",
+                e.message
+            )
+        }
+    }
+
+    fun requestNotificationPermission(result: MethodChannel.Result) {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                result.success(true)
+                return
+            }
+            CoroutineScope(Dispatchers.Default).launch {
+                AssistsUtil.UI.closeChatBotDialog()
+            }
+            PermissionRequest.requestPermissions(
+                context,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS)
+            ) {
+                result.success(it[Manifest.permission.POST_NOTIFICATIONS] == true)
+            }
+        } catch (e: Exception) {
+            OmniLog.e(TAG, "Error requesting notification permission", e)
+            result.error(
+                "REQUEST_FAILED",
+                "Failed to request notification permission.",
                 e.message
             )
         }

@@ -168,6 +168,10 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       _isInstallingTermux = true;
     });
     try {
+      final notificationGranted = await ensureNotificationPermission();
+      if (!notificationGranted) {
+        showToast('未授予通知权限，下载仍会继续，但不会显示系统下载进度', type: ToastType.warning);
+      }
       final result = await downloadAndInstallTermuxApk(_termuxDownloadUrl);
       final success = result['success'] == true;
       final status = (result['status'] as String?)?.trim();
