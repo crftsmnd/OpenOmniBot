@@ -42,12 +42,14 @@ import java.util.UUID
 object McpServerManager {
     private const val TAG = "[McpServerManager]"
     private const val PREF_ENABLE = "mcp_server_enabled"
+    private const val PREF_HOST = "mcp_server_host"
     private const val PREF_TOKEN = "mcp_server_token"
     private const val PREF_PORT = "mcp_server_port"
     private const val DEFAULT_PORT = 8899
 
     private val mmkv by lazy { MMKV.defaultMMKV() }
     private val serverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val serverLock = Any()
 
     @Volatile
     private var server: ApplicationEngine? = null
@@ -55,23 +57,27 @@ object McpServerManager {
     @Volatile
     private var isRunning: Boolean = false
 
+    @Volatile
+    private var activeHost: String? = null
+
     // ==================== 公共 API ====================
 
     fun restoreIfEnabled(context: Context) {
         if (!mmkv.decodeBool(PREF_ENABLE, false)) return
         val port = mmkv.decodeInt(PREF_PORT, DEFAULT_PORT).takeIf { it > 0 } ?: DEFAULT_PORT
-        runCatching { startServer(context, port) }
-            .onFailure { OmniLog.e(TAG, "restoreIfEnabled failed: ${it.message}") }
+        serverScope.launch {
+            runCatching { startServer(context, port) }
+                .onFailure { OmniLog.e(TAG, "restoreIfEnabled failed: ${it.message}") }
+        }
     }
 
     fun setEnabled(context: Context, enable: Boolean, port: Int? = null): McpServerState {
-        mmkv.encode(PREF_ENABLE, enable)
-        port?.let { mmkv.encode(PREF_PORT, it) }
         if (enable) {
             val targetPort = port ?: mmkv.decodeInt(PREF_PORT, DEFAULT_PORT).takeIf { it > 0 } ?: DEFAULT_PORT
-            startServer(context, targetPort)
+            return startServer(context, targetPort)
         } else {
             stopServer()
+            mmkv.encode(PREF_ENABLE, false)
         }
         return currentState()
     }
@@ -79,32 +85,26 @@ object McpServerManager {
     fun refreshToken(context: Context): McpServerState {
         val newToken = generateToken()
         mmkv.encode(PREF_TOKEN, newToken)
-        if (isRunning) {
-            restart(context)
+        if (isRunning || mmkv.decodeBool(PREF_ENABLE, false)) {
+            return restart(context)
         }
         return currentState()
     }
 
     fun currentState(): McpServerState {
+        val resolvedHost = resolveAdvertisedHost()
         return McpServerState(
-            enabled = mmkv.decodeBool(PREF_ENABLE, false),
+            enabled = mmkv.decodeBool(PREF_ENABLE, false) && isRunning,
             running = isRunning,
-            host = McpNetworkUtils.currentLanIp(),
+            host = resolvedHost,
             port = mmkv.decodeInt(PREF_PORT, DEFAULT_PORT).takeIf { it > 0 } ?: DEFAULT_PORT,
             token = ensureToken(),
         )
     }
 
     fun stopServer() {
-        serverScope.launch {
-            runCatching {
-                server?.stop(500, 1_500)
-            }.onFailure {
-                OmniLog.e(TAG, "stopServer error: ${it.message}")
-            }.also {
-                server = null
-                isRunning = false
-            }
+        synchronized(serverLock) {
+            stopServerLocked()
         }
     }
 
@@ -114,24 +114,52 @@ object McpServerManager {
 
     // ==================== 私有方法 ====================
 
-    private fun restart(context: Context) {
-        stopServer()
+    private fun restart(context: Context): McpServerState {
         val port = mmkv.decodeInt(PREF_PORT, DEFAULT_PORT).takeIf { it > 0 } ?: DEFAULT_PORT
-        startServer(context, port)
+        synchronized(serverLock) {
+            stopServerLocked()
+        }
+        return startServer(context, port)
     }
 
-    private fun startServer(context: Context, port: Int) {
-        if (isRunning) return
-        if (!McpNetworkUtils.isLanConnected(context)) {
-            throw IllegalStateException("仅在 Wi-Fi/以太网环境下允许开启 MCP 服务")
-        }
-        val token = ensureToken()
-        val lanIp = McpNetworkUtils.currentLanIp()
-        if (lanIp.isNullOrBlank()) {
-            throw IllegalStateException("未检测到可用的局域网 IP 地址")
-        }
+    private fun startServer(context: Context, port: Int): McpServerState {
+        synchronized(serverLock) {
+            try {
+                val lanIp = resolveLanIp()
+                    ?: throw IllegalStateException("未检测到可用的局域网 IPv4 地址，请确认设备已连接可访问局域网的网络")
+                if (isRunning) {
+                    val currentPort = mmkv.decodeInt(PREF_PORT, DEFAULT_PORT).takeIf { it > 0 } ?: DEFAULT_PORT
+                    if (currentPort == port) {
+                        activeHost = lanIp
+                        mmkv.encode(PREF_HOST, lanIp)
+                        return currentState()
+                    }
+                    stopServerLocked()
+                }
+                val engine = buildServer(context, port)
+                engine.start(wait = false)
 
-        val engine = embeddedServer(CIO, host = "0.0.0.0", port = port) {
+                server = engine
+                isRunning = true
+                activeHost = lanIp
+                mmkv.encode(PREF_ENABLE, true)
+                mmkv.encode(PREF_PORT, port)
+                mmkv.encode(PREF_HOST, lanIp)
+                OmniLog.i(TAG, "MCP server started at http://$lanIp:$port")
+                return currentState()
+            } catch (t: Throwable) {
+                server = null
+                isRunning = false
+                activeHost = null
+                OmniLog.e(TAG, "startServer failed: ${t.message}")
+                throw t
+            }
+        }
+    }
+
+    private fun buildServer(context: Context, port: Int): ApplicationEngine {
+        val token = ensureToken()
+        return embeddedServer(CIO, host = "0.0.0.0", port = port) {
             install(CallLogging)
             install(ContentNegotiation) { gson() }
             install(Authentication) {
@@ -188,19 +216,40 @@ object McpServerManager {
                 }
             }
         }
+    }
 
-        serverScope.launch {
-            runCatching {
-                engine.start(wait = false)
-                server = engine
-                isRunning = true
-                mmkv.encode(PREF_PORT, port)
-                OmniLog.i(TAG, "MCP server started at http://$lanIp:$port")
-            }.onFailure {
-                server = null
-                isRunning = false
-                OmniLog.e(TAG, "startServer failed: ${it.message}")
+    private fun stopServerLocked() {
+        runCatching {
+            server?.stop(500, 1_500)
+        }.onFailure {
+            OmniLog.e(TAG, "stopServer error: ${it.message}")
+        }
+        server = null
+        isRunning = false
+        activeHost = null
+    }
+
+    private fun resolveLanIp(): String? {
+        return runCatching { McpNetworkUtils.currentLanIp() }
+            .onFailure { OmniLog.e(TAG, "resolveLanIp failed: ${it.message}") }
+            .getOrNull()
+    }
+
+    private fun resolveAdvertisedHost(): String? {
+        val currentHost = resolveLanIp()
+        if (currentHost != null && isRunning) {
+            synchronized(serverLock) {
+                if (isRunning && activeHost != currentHost) {
+                    activeHost = currentHost
+                    mmkv.encode(PREF_HOST, currentHost)
+                }
             }
+        }
+        if (currentHost != null) return currentHost
+        return if (isRunning) {
+            activeHost ?: mmkv.decodeString(PREF_HOST)
+        } else {
+            null
         }
     }
 

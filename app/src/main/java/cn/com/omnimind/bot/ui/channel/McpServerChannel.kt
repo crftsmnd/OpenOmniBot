@@ -5,9 +5,14 @@ import cn.com.omnimind.baselib.util.OmniLog
 import cn.com.omnimind.bot.mcp.McpServerManager
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class McpServerChannel {
     private val EVENT_CHANNEL = "cn.com.omnimind.bot/McpServer"
+    private val scope = CoroutineScope(Dispatchers.IO)
     private var channel: MethodChannel? = null
     private var appContext: Context? = null
 
@@ -23,26 +28,30 @@ class McpServerChannel {
                 result.error("MCP_INIT_ERROR", "Context not initialized", null)
                 return@setMethodCallHandler
             }
-            try {
-                when (call.method) {
-                    "state" -> {
-                        result.success(McpServerManager.currentState().toMap())
+            scope.launch {
+                try {
+                    when (call.method) {
+                        "state" -> {
+                            respondSuccess(result, McpServerManager.currentState().toMap())
+                        }
+                        "setEnabled" -> {
+                            val enable = call.argument<Boolean>("enable") ?: false
+                            val port = call.argument<Int>("port")
+                            val state = McpServerManager.setEnabled(context, enable, port)
+                            respondSuccess(result, state.toMap())
+                        }
+                        "refreshToken" -> {
+                            val state = McpServerManager.refreshToken(context)
+                            respondSuccess(result, state.toMap())
+                        }
+                        else -> withContext(Dispatchers.Main) { result.notImplemented() }
                     }
-                    "setEnabled" -> {
-                        val enable = call.argument<Boolean>("enable") ?: false
-                        val port = call.argument<Int>("port")
-                        val state = McpServerManager.setEnabled(context, enable, port)
-                        result.success(state.toMap())
+                } catch (t: Throwable) {
+                    OmniLog.e("[McpServerChannel]", "channel error: ${t.message}")
+                    withContext(Dispatchers.Main) {
+                        result.error("MCP_ERROR", t.message ?: t.javaClass.simpleName, null)
                     }
-                    "refreshToken" -> {
-                        val state = McpServerManager.refreshToken(context)
-                        result.success(state.toMap())
-                    }
-                    else -> result.notImplemented()
                 }
-            } catch (e: Exception) {
-                OmniLog.e("[McpServerChannel]", "channel error: ${e.message}")
-                result.error("MCP_ERROR", e.message, null)
             }
         }
     }
@@ -50,5 +59,11 @@ class McpServerChannel {
     fun clear() {
         channel?.setMethodCallHandler(null)
         channel = null
+    }
+
+    private suspend fun respondSuccess(result: MethodChannel.Result, value: Any?) {
+        withContext(Dispatchers.Main) {
+            result.success(value)
+        }
     }
 }

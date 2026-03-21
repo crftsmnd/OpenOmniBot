@@ -337,50 +337,6 @@ class _SettingsPageState extends State<SettingsPage> {
               _loadMem0Config();
             },
           ),
-          _SettingItem(
-            icon: Icons.psychology_alt_outlined,
-            iconSvg: 'assets/home/unified_agent_setting_icon.svg',
-            title: '统一 Agent',
-            subtitle:
-                '已默认启用，任务分发统一走 Agent 单请求流程',
-          ),
-        ],
-      ),
-      _SettingSection(
-        items: [
-          _SettingItem(
-            icon: Icons.alarm_outlined,
-            title: '闹钟设置',
-            subtitle: '配置默认铃声、本地 mp3 或 mp3 直链',
-            onTap: () {
-              GoRouterManager.push('/home/alarm_setting');
-            },
-          ),
-          _SettingItem(
-            icon: Icons.vibration,
-            iconSvg: 'assets/home/vibration_icon.svg',
-            title: '振动反馈',
-            subtitle: '执行任务时，通过振动进行操作提醒',
-            trailing: _buildSwitchTrailing(
-              value: vibrationEnabled,
-              onToggle: (val) async {
-                await CacheUtil.cacheBool('app_vibrate', val);
-                setState(() {
-                  vibrationEnabled = val;
-                });
-              },
-            ),
-          ),
-          _SettingItem(
-            icon: Icons.chat_outlined,
-            iconSvg: 'assets/home/auto_back_chat_setting_icon.svg',
-            title: '任务完成后自动回聊天',
-            subtitle: '关闭后，任务结束将停留在当前完成页面',
-            trailing: _buildSwitchTrailing(
-              value: _autoBackToChatAfterTaskEnabled,
-              onToggle: _onAutoBackToChatAfterTaskChanged,
-            ),
-          ),
         ],
       ),
       _SettingSection(
@@ -427,6 +383,43 @@ class _SettingsPageState extends State<SettingsPage> {
             trailing: _buildSwitchTrailing(
               value: hideFromRecentsEnabled,
               onToggle: _onHideFromRecentsChanged,
+            ),
+          ),
+        ],
+      ),
+      _SettingSection(
+        items: [
+          _SettingItem(
+            icon: Icons.alarm_outlined,
+            title: '闹钟设置',
+            subtitle: '配置默认铃声、本地 mp3 或 mp3 直链',
+            onTap: () {
+              GoRouterManager.push('/home/alarm_setting');
+            },
+          ),
+          _SettingItem(
+            icon: Icons.vibration,
+            iconSvg: 'assets/home/vibration_icon.svg',
+            title: '振动反馈',
+            subtitle: '执行任务时，通过振动进行操作提醒',
+            trailing: _buildSwitchTrailing(
+              value: vibrationEnabled,
+              onToggle: (val) async {
+                await CacheUtil.cacheBool('app_vibrate', val);
+                setState(() {
+                  vibrationEnabled = val;
+                });
+              },
+            ),
+          ),
+          _SettingItem(
+            icon: Icons.chat_outlined,
+            iconSvg: 'assets/home/auto_back_chat_setting_icon.svg',
+            title: '任务完成后自动回聊天',
+            subtitle: '关闭后，任务结束将停留在当前完成页面',
+            trailing: _buildSwitchTrailing(
+              value: _autoBackToChatAfterTaskEnabled,
+              onToggle: _onAutoBackToChatAfterTaskChanged,
             ),
           ),
         ],

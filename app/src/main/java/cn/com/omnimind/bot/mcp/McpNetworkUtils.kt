@@ -11,30 +11,52 @@ import java.util.Collections
  * MCP 网络工具类
  */
 object McpNetworkUtils {
-    
+
     /**
-     * 检查是否连接到局域网（Wi-Fi或以太网）
+     * 检查设备当前是否处于可访问局域网的网络环境。
      */
     fun isLanConnected(context: Context): Boolean {
-        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val active = connectivity.activeNetwork ?: return false
-        val capabilities = connectivity.getNetworkCapabilities(active) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        val active = connectivity?.activeNetwork
+        val capabilities = active?.let { connectivity.getNetworkCapabilities(it) }
+        if (capabilities != null) {
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return true
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) return true
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) && currentLanIp() != null) {
+                return true
+            }
+        }
+        return currentLanIp() != null
     }
 
     /**
      * 获取当前局域网 IP 地址
      */
     fun currentLanIp(): String? {
-        val interfaces = runCatching { Collections.list(NetworkInterface.getNetworkInterfaces()) }.getOrNull()
-            ?: return null
-        return interfaces
-            .flatMap { netIf -> Collections.list(netIf.inetAddresses) }
-            .firstOrNull { address ->
-                !address.isLoopbackAddress && address is Inet4Address && isLanAddress(address.hostAddress)
+        val interfaces = runCatching {
+            NetworkInterface.getNetworkInterfaces()
+                ?.let { Collections.list(it) }
+                .orEmpty()
+        }.getOrDefault(emptyList())
+
+        for (netIf in interfaces) {
+            val interfaceUsable = runCatching {
+                netIf.isUp && !netIf.isLoopback && !netIf.isVirtual
+            }.getOrDefault(true)
+            if (!interfaceUsable) continue
+
+            val addresses = runCatching { Collections.list(netIf.inetAddresses) }
+                .getOrDefault(emptyList())
+            val lanAddress = addresses.firstOrNull { address ->
+                !address.isLoopbackAddress &&
+                    address is Inet4Address &&
+                    isLanAddress(address.hostAddress)
+            } as? Inet4Address
+            if (lanAddress != null) {
+                return lanAddress.hostAddress
             }
-            ?.hostAddress
+        }
+        return null
     }
 
     /**

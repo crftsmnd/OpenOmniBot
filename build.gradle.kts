@@ -5,3 +5,14 @@ plugins {
     alias(libs.plugins.kotlin.compose) apply false
     alias(libs.plugins.android.library) apply false
 }
+
+val forcedCoroutinesVersion = libs.versions.kotlinxCoroutines.get()
+
+subprojects {
+    configurations.configureEach {
+        resolutionStrategy.force(
+            "org.jetbrains.kotlinx:kotlinx-coroutines-core:$forcedCoroutinesVersion",
+            "org.jetbrains.kotlinx:kotlinx-coroutines-android:$forcedCoroutinesVersion",
+        )
+    }
+}

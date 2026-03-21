@@ -371,7 +371,7 @@ object McpToolExecutors {
         val state = McpServerManager.currentState()
         val host = state.host ?: McpNetworkUtils.currentLanIp()
         if (host.isNullOrBlank()) {
-            return McpResponseBuilder.buildErrorText("LAN IP not available. Please ensure the device is on Wi-Fi.")
+            return McpResponseBuilder.buildErrorText("LAN IP not available. Please ensure the device is on a LAN-accessible network.")
         }
         val url = "http://$host:${state.port}/mcp/file/${issued.id}?token=${issued.downloadToken}"
         val text = buildString {
