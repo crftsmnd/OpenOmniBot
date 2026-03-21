@@ -100,6 +100,26 @@ Future<bool> requestTermuxRunCommandPermission() async {
   }
 }
 
+Future<bool> ensureInstalledAppsPermission() async {
+  try {
+    final hasPermission = await spePermission.invokeMethod<bool>(
+          'isInstalledAppsPermissionGranted',
+        ) ??
+        false;
+    if (hasPermission) {
+      return true;
+    }
+    await openInstalledAppsSettings();
+  } catch (e) {
+    debugPrint('检查应用列表读取权限失败: $e');
+  }
+  return false;
+}
+
+Future<void> openInstalledAppsSettings() async {
+  await spePermission.invokeMethod('openInstalledAppsSettings');
+}
+
 Future<void> openAppDetailsSettings() async {
   await spePermission.invokeMethod('openAppDetailsSettings');
 }

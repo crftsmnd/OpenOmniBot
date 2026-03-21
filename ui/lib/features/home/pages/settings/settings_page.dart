@@ -434,13 +434,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 '仅访问您授权的 App，隐私安全更有保障',
             onTap: () async {
               try {
-                final granted = await spePermission.invokeMethod(
-                  'isInstalledAppsPermissionGranted',
-                );
+                final granted = await ensureInstalledAppsPermission();
                 if (granted == true) {
                   GoRouterManager.push('/home/companion_setting');
-                } else {
-                  showToast('未授予应用列表权限');
                 }
               } catch (e) {
                 debugPrint('请求读取应用列表权限失败: $e');
