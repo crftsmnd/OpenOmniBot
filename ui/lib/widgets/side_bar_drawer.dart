@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ui/utils/popup_menu_anchor_position.dart';
 import '../features/home/pages/edit_profile/edit_profile_page.dart';
 import '../features/task/pages/task_center/task_center_page.dart';
 import '../features/memory/pages/memory_center/memory_center_page.dart';
@@ -311,15 +312,13 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
         GoRouterManager.push('/home/chat', extra: [conversation.id.toString()]);
       },
       onLongPressStart: (LongPressStartDetails details) {
-        final RenderBox overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-        final RelativeRect position = RelativeRect.fromRect(
-          Rect.fromLTWH(details.globalPosition.dx, details.globalPosition.dy, 0, 0),
-          Offset.zero & overlay.size,
-        );
-
         showMenu(
           context: context,
-          position: position,
+          position: PopupMenuAnchorPosition.fromGlobalOffset(
+            context: context,
+            globalOffset: details.globalPosition,
+            estimatedMenuHeight: 120,
+          ),
           color: Colors.white,
           items: [
             PopupMenuItem(
