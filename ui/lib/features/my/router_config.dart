@@ -1,4 +1,5 @@
 import 'package:go_router/go_router.dart';
+import 'package:ui/core/router/go_router_manager.dart';
 import 'package:ui/features/my/pages/my/my_page.dart';
 import 'package:ui/features/my/pages/theme_color/theme_color_page.dart';
 import 'package:ui/features/my/pages/about/about_page.dart';
@@ -23,6 +24,10 @@ List<GoRoute> myRoutes = [
   GoRoute(
     path: '/my/about',
     name: 'my/about',
-    builder: (context, state) => const AboutPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'my/about',
+      child: const AboutPage(),
+    ),
   ),
 ];

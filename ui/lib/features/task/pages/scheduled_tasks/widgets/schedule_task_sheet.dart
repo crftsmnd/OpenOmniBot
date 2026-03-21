@@ -466,51 +466,17 @@ class _ScheduleTaskSheetState extends State<ScheduleTaskSheet> {
   }
 
   /// 显示倒计时输入对话框
-  void _showCountdownInputDialog() {
-    final TextEditingController controller = TextEditingController(
-      text: _countdownMinutes.toString(),
+  Future<void> _showCountdownInputDialog() async {
+    final minutes = await showDialog<int>(
+      context: context,
+      useRootNavigator: false,
+      builder: (_) => _CountdownInputDialog(initialMinutes: _countdownMinutes),
     );
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('设置倒计时'),
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  suffixText: '分钟',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () {
-              final int? minutes = int.tryParse(controller.text);
-              if (minutes != null && minutes > 0 && minutes <= 1440) {
-                setState(() {
-                  _countdownMinutes = minutes;
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
+    if (!mounted || minutes == null) return;
+    setState(() {
+      _countdownMinutes = minutes;
+    });
   }
 
   /// 格式化倒计时显示
@@ -598,5 +564,103 @@ class _ScheduleTaskSheetState extends State<ScheduleTaskSheet> {
     );
 
     Navigator.pop(context, taskWithNextTime);
+  }
+}
+
+class _CountdownInputDialog extends StatefulWidget {
+  const _CountdownInputDialog({required this.initialMinutes});
+
+  final int initialMinutes;
+
+  @override
+  State<_CountdownInputDialog> createState() => _CountdownInputDialogState();
+}
+
+class _CountdownInputDialogState extends State<_CountdownInputDialog> {
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
+  String? _errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialMinutes.toString());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _close([int? value]) {
+    _focusNode.unfocus();
+    Navigator.of(context).pop(value);
+  }
+
+  void _submit() {
+    final minutes = int.tryParse(_controller.text.trim());
+    if (minutes == null || minutes <= 0 || minutes > 1440) {
+      setState(() {
+        _errorText = '请输入 1-1440 之间的分钟数';
+      });
+      return;
+    }
+    _close(minutes);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _close();
+      },
+      child: AlertDialog(
+        title: const Text('设置倒计时'),
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  suffixText: '分钟',
+                  border: const OutlineInputBorder(),
+                  errorText: _errorText,
+                ),
+                onChanged: (_) {
+                  if (_errorText != null) {
+                    setState(() {
+                      _errorText = null;
+                    });
+                  }
+                },
+                onSubmitted: (_) => _submit(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _close(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: _submit,
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
   }
 }

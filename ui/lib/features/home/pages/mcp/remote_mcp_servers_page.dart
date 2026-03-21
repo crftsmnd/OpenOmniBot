@@ -120,15 +120,6 @@ class _RemoteMcpServersPageState extends State<RemoteMcpServersPage> {
   }
 
   Future<void> _showServerEditor({RemoteMcpServer? server}) async {
-    final nameController = TextEditingController(text: server?.name ?? '');
-    final endpointController = TextEditingController(
-      text: server?.endpointUrl ?? '',
-    );
-    final tokenController = TextEditingController(
-      text: server?.bearerToken ?? '',
-    );
-    bool enabled = server?.enabled ?? true;
-
     final saved = await showModalBottomSheet<RemoteMcpServer>(
       context: context,
       isScrollControlled: true,
@@ -136,86 +127,7 @@ class _RemoteMcpServersPageState extends State<RemoteMcpServersPage> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 20,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-          ),
-          child: StatefulBuilder(
-            builder: (context, setModalState) {
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    server == null ? '添加 MCP 服务' : '编辑 MCP 服务',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  _InputField(controller: nameController, label: '名称'),
-                  const SizedBox(height: 12),
-                  _InputField(
-                    controller: endpointController,
-                    label: 'Endpoint URL',
-                    hint: 'https://example.com/mcp',
-                  ),
-                  const SizedBox(height: 12),
-                  _InputField(
-                    controller: tokenController,
-                    label: 'Bearer Token（可选）',
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: enabled,
-                    onChanged: (value) => setModalState(() => enabled = value),
-                    title: const Text('启用'),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        final name = nameController.text.trim();
-                        final endpoint = endpointController.text.trim();
-                        if (name.isEmpty || endpoint.isEmpty) {
-                          showToast('请填写名称和地址', type: ToastType.error);
-                          return;
-                        }
-                        Navigator.of(context).pop(
-                          (server ??
-                                  const RemoteMcpServer(
-                                    id: '',
-                                    name: '',
-                                    endpointUrl: '',
-                                    bearerToken: '',
-                                    enabled: true,
-                                    lastHealth: 'unknown',
-                                    toolCount: 0,
-                                  ))
-                              .copyWith(
-                                name: name,
-                                endpointUrl: endpoint,
-                                bearerToken: tokenController.text.trim(),
-                                enabled: enabled,
-                              ),
-                        );
-                      },
-                      child: const Text('保存'),
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        );
-      },
+      builder: (_) => _RemoteMcpServerEditorSheet(server: server),
     );
 
     if (saved == null) return;
@@ -389,19 +301,161 @@ class _RemoteMcpServersPageState extends State<RemoteMcpServersPage> {
 
 class _InputField extends StatelessWidget {
   final TextEditingController controller;
+  final FocusNode? focusNode;
   final String label;
   final String? hint;
 
-  const _InputField({required this.controller, required this.label, this.hint});
+  const _InputField({
+    required this.controller,
+    this.focusNode,
+    required this.label,
+    this.hint,
+  });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+}
+
+class _RemoteMcpServerEditorSheet extends StatefulWidget {
+  const _RemoteMcpServerEditorSheet({this.server});
+
+  final RemoteMcpServer? server;
+
+  @override
+  State<_RemoteMcpServerEditorSheet> createState() =>
+      _RemoteMcpServerEditorSheetState();
+}
+
+class _RemoteMcpServerEditorSheetState
+    extends State<_RemoteMcpServerEditorSheet> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _endpointController;
+  late final TextEditingController _tokenController;
+  final FocusNode _nameFocusNode = FocusNode();
+  late bool _enabled;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.server?.name ?? '');
+    _endpointController = TextEditingController(
+      text: widget.server?.endpointUrl ?? '',
+    );
+    _tokenController = TextEditingController(
+      text: widget.server?.bearerToken ?? '',
+    );
+    _enabled = widget.server?.enabled ?? true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _nameFocusNode.requestFocus();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameFocusNode.dispose();
+    _nameController.dispose();
+    _endpointController.dispose();
+    _tokenController.dispose();
+    super.dispose();
+  }
+
+  void _close([RemoteMcpServer? value]) {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(value);
+  }
+
+  void _submit() {
+    final name = _nameController.text.trim();
+    final endpoint = _endpointController.text.trim();
+    if (name.isEmpty || endpoint.isEmpty) {
+      showToast('请填写名称和地址', type: ToastType.error);
+      return;
+    }
+    _close(
+      (widget.server ??
+              const RemoteMcpServer(
+                id: '',
+                name: '',
+                endpointUrl: '',
+                bearerToken: '',
+                enabled: true,
+                lastHealth: 'unknown',
+                toolCount: 0,
+              ))
+          .copyWith(
+            name: name,
+            endpointUrl: endpoint,
+            bearerToken: _tokenController.text.trim(),
+            enabled: _enabled,
+          ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            widget.server == null ? '添加 MCP 服务' : '编辑 MCP 服务',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          _InputField(
+            controller: _nameController,
+            focusNode: _nameFocusNode,
+            label: '名称',
+          ),
+          const SizedBox(height: 12),
+          _InputField(
+            controller: _endpointController,
+            label: 'Endpoint URL',
+            hint: 'https://example.com/mcp',
+          ),
+          const SizedBox(height: 12),
+          _InputField(
+            controller: _tokenController,
+            label: 'Bearer Token（可选）',
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: _enabled,
+            onChanged: (value) => setState(() => _enabled = value),
+            title: const Text('启用'),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _submit,
+              child: const Text('保存'),
+            ),
+          ),
+        ],
       ),
     );
   }

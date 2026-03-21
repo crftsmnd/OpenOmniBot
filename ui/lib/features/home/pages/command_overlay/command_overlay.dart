@@ -131,53 +131,19 @@ class _CommandOverlayState extends State<CommandOverlay> {
   }
 
   Future<void> _showOpenClawConfigDialog() async {
-    final baseUrlController = TextEditingController(text: _openClawBaseUrl);
-    final tokenController = TextEditingController(text: _openClawToken);
-    final userIdController = TextEditingController(text: _openClawUserId);
-    final result = await showDialog<bool>(
+    final result = await showDialog<_OpenClawConfigDraft>(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('OpenClaw 配置'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: baseUrlController,
-                decoration: const InputDecoration(
-                  labelText: 'Base URL',
-                  hintText: 'http://192.168.1.10:18789',
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: tokenController,
-                decoration: const InputDecoration(labelText: 'Token（可选）'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: userIdController,
-                decoration: const InputDecoration(labelText: 'User ID（可选）'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('保存'),
-            ),
-          ],
-        );
-      },
+      useRootNavigator: false,
+      builder: (_) => _OpenClawConfigDialog(
+        initialBaseUrl: _openClawBaseUrl,
+        initialToken: _openClawToken,
+        initialUserId: _openClawUserId,
+      ),
     );
-    if (result != true) return;
-    final baseUrl = baseUrlController.text.trim();
-    final token = tokenController.text.trim();
-    final userId = userIdController.text.trim();
+    if (!mounted || result == null) return;
+    final baseUrl = result.baseUrl.trim();
+    final token = result.token.trim();
+    final userId = result.userId.trim();
     await StorageService.setString(kOpenClawBaseUrlKey, baseUrl);
     await StorageService.setString(kOpenClawTokenKey, token);
     if (userId.isNotEmpty) {
@@ -840,5 +806,119 @@ class _CommandOverlayState extends State<CommandOverlay> {
       case RecordingState.idle:
         return "";
     }
+  }
+}
+
+class _OpenClawConfigDraft {
+  const _OpenClawConfigDraft({
+    required this.baseUrl,
+    required this.token,
+    required this.userId,
+  });
+
+  final String baseUrl;
+  final String token;
+  final String userId;
+}
+
+class _OpenClawConfigDialog extends StatefulWidget {
+  const _OpenClawConfigDialog({
+    required this.initialBaseUrl,
+    required this.initialToken,
+    required this.initialUserId,
+  });
+
+  final String initialBaseUrl;
+  final String initialToken;
+  final String initialUserId;
+
+  @override
+  State<_OpenClawConfigDialog> createState() => _OpenClawConfigDialogState();
+}
+
+class _OpenClawConfigDialogState extends State<_OpenClawConfigDialog> {
+  late final TextEditingController _baseUrlController;
+  late final TextEditingController _tokenController;
+  late final TextEditingController _userIdController;
+  final FocusNode _baseUrlFocusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _baseUrlController = TextEditingController(text: widget.initialBaseUrl);
+    _tokenController = TextEditingController(text: widget.initialToken);
+    _userIdController = TextEditingController(text: widget.initialUserId);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _baseUrlFocusNode.requestFocus();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _baseUrlFocusNode.dispose();
+    _baseUrlController.dispose();
+    _tokenController.dispose();
+    _userIdController.dispose();
+    super.dispose();
+  }
+
+  void _close([_OpenClawConfigDraft? value]) {
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _close();
+      },
+      child: AlertDialog(
+        title: const Text('OpenClaw 配置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _baseUrlController,
+              focusNode: _baseUrlFocusNode,
+              decoration: const InputDecoration(
+                labelText: 'Base URL',
+                hintText: 'http://192.168.1.10:18789',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _tokenController,
+              decoration: const InputDecoration(labelText: 'Token（可选）'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _userIdController,
+              decoration: const InputDecoration(labelText: 'User ID（可选）'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _close(),
+            child: const Text('取消'),
+          ),
+          ElevatedButton(
+            onPressed: () => _close(
+              _OpenClawConfigDraft(
+                baseUrl: _baseUrlController.text,
+                token: _tokenController.text,
+                userId: _userIdController.text,
+              ),
+            ),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
   }
 }

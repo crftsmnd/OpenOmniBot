@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
+import 'package:ui/core/router/go_router_manager.dart';
 import 'package:ui/features/home/pages/alarm_setting/alarm_setting_page.dart';
 import 'package:ui/features/home/pages/authorize_setting/authorize_setting_page.dart';
 import 'package:ui/features/home/pages/companion_setting/companion_setting_page.dart';
@@ -153,7 +154,11 @@ List<GoRoute> homeRoutes = [
   GoRoute(
     path: '/home/settings',
     name: 'home/settings',
-    builder: (context, state) => const SettingsPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/settings',
+      child: const SettingsPage(),
+    ),
   ),
 
   GoRoute(
@@ -177,38 +182,62 @@ List<GoRoute> homeRoutes = [
   GoRoute(
     path: '/home/alarm_setting',
     name: 'home/alarm_setting',
-    builder: (context, state) => const AlarmSettingPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/alarm_setting',
+      child: const AlarmSettingPage(),
+    ),
   ),
 
   GoRoute(
     path: '/home/mcp_tools',
     name: 'home/mcp_tools',
-    builder: (context, state) => const RemoteMcpServersPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/mcp_tools',
+      child: const RemoteMcpServersPage(),
+    ),
   ),
 
   GoRoute(
     path: '/home/mem0_setting',
     name: 'home/mem0_setting',
-    builder: (context, state) => const Mem0SettingPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/mem0_setting',
+      child: const Mem0SettingPage(),
+    ),
   ),
 
   // VLM 模型配置页
   GoRoute(
     path: '/home/vlm_model_setting',
     name: 'home/vlm_model_setting',
-    builder: (context, state) => const VlmModelSettingPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/vlm_model_setting',
+      child: const VlmModelSettingPage(),
+    ),
   ),
 
   GoRoute(
     path: '/home/scene_model_setting',
     name: 'home/scene_model_setting',
-    builder: (context, state) => const SceneModelSettingPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/scene_model_setting',
+      child: const SceneModelSettingPage(),
+    ),
   ),
 
   GoRoute(
     path: '/home/termux_setting',
     name: 'home/termux_setting',
-    builder: (context, state) => const TermuxSettingPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/termux_setting',
+      child: const TermuxSettingPage(),
+    ),
   ),
 
   // 应用权限授权页
@@ -222,6 +251,10 @@ List<GoRoute> homeRoutes = [
   GoRoute(
     path: '/home/companion_setting',
     name: 'home/companion_setting',
-    builder: (context, state) => const CompanionSettingPage(),
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/companion_setting',
+      child: const CompanionSettingPage(),
+    ),
   ),
 ];

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -115,6 +116,34 @@ class GoRouterManager {
         },
       );
     }
+  }
+
+  /// Overlay-style stack transition:
+  /// the incoming page stays above the previous page and covers it while
+  /// sliding in, and slides out above it on pop.
+  static Page<dynamic> buildActivitySlidePage({
+    required LocalKey key,
+    required Widget child,
+    String? name,
+  }) {
+    const duration = Duration(milliseconds: 300);
+
+    return CustomTransitionPage(
+      key: key,
+      child: child,
+      name: name,
+      maintainState: true,
+      transitionDuration: duration,
+      reverseTransitionDuration: duration,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        return CupertinoPageTransition(
+          primaryRouteAnimation: animation,
+          secondaryRouteAnimation: secondaryAnimation,
+          linearTransition: false,
+          child: child,
+        );
+      },
+    );
   }
 
   static GoRoute _wrapRoute(GoRoute route) {

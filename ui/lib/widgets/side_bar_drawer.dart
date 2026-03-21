@@ -380,50 +380,31 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
     );
   }
 
-  void _renameConversation(ConversationModel conversation) {
-    showDialog(
+  Future<void> _renameConversation(ConversationModel conversation) async {
+    final newTitle = await showDialog<String>(
       context: context,
-      builder: (BuildContext context) {
-        TextEditingController controller = TextEditingController(text: conversation.title);
-        return AlertDialog(
-          title: Text("重命名对话"),
-          content: TextField(
-            controller: controller,
-            decoration: InputDecoration(hintText: "输入新的名称"),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: Text("取消"),
-            ),
-            TextButton(
-              onPressed: () async {
-                final newTitle = controller.text.trim();
-                if (newTitle.isNotEmpty) {
-                  final success = await ConversationService.updateConversationTitle(
-                    conversationId: conversation.id,
-                    newTitle: newTitle,
-                  );
-
-                  if (success) {
-                    setState(() {
-                      final index = conversations.indexWhere((c) => c.id == conversation.id);
-                      if (index != -1) {
-                        conversations[index] = conversation.copyWith(title: newTitle);
-                      }
-                    });
-                  }
-                }
-                Navigator.pop(context);
-              },
-              child: Text("确定"),
-            ),
-          ],
-        );
-      },
+      useRootNavigator: false,
+      builder: (_) => _RenameConversationDialog(initialTitle: conversation.title),
     );
+
+    if (!mounted) return;
+    final normalizedTitle = newTitle?.trim();
+    if (normalizedTitle == null || normalizedTitle.isEmpty) {
+      return;
+    }
+
+    final success = await ConversationService.updateConversationTitle(
+      conversationId: conversation.id,
+      newTitle: normalizedTitle,
+    );
+    if (!mounted || !success) return;
+
+    setState(() {
+      final index = conversations.indexWhere((c) => c.id == conversation.id);
+      if (index != -1) {
+        conversations[index] = conversation.copyWith(title: normalizedTitle);
+      }
+    });
   }
 
   void _deleteConversation(int conversationId) async {
@@ -477,6 +458,74 @@ class _SidebarDrawerState extends State<SidebarDrawer> {
             // 处理设置点击
           },
         ),
+      ),
+    );
+  }
+}
+
+class _RenameConversationDialog extends StatefulWidget {
+  const _RenameConversationDialog({required this.initialTitle});
+
+  final String initialTitle;
+
+  @override
+  State<_RenameConversationDialog> createState() =>
+      _RenameConversationDialogState();
+}
+
+class _RenameConversationDialogState extends State<_RenameConversationDialog> {
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialTitle);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _close([String? value]) {
+    _focusNode.unfocus();
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _close();
+      },
+      child: AlertDialog(
+        title: const Text("重命名对话"),
+        content: TextField(
+          controller: _controller,
+          focusNode: _focusNode,
+          decoration: const InputDecoration(hintText: "输入新的名称"),
+          onSubmitted: (_) => _close(_controller.text.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => _close(),
+            child: const Text("取消"),
+          ),
+          TextButton(
+            onPressed: () => _close(_controller.text.trim()),
+            child: const Text("确定"),
+          ),
+        ],
       ),
     );
   }
