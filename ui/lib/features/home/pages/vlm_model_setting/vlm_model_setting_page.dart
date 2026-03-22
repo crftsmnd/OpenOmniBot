@@ -959,7 +959,7 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          '支持直接输入根地址、/v1、/v1/models 或 /v1/chat/completions，保存时会自动归一化。',
+                          '支持直接输入根地址、/v1、/v1/chat/completions，会自动归一化。',
                           style: TextStyle(
                             color: AppColors.text50,
                             fontSize: 12,
