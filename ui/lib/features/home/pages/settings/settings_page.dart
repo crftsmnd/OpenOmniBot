@@ -368,9 +368,10 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingItem(
             icon: Icons.code,
             iconSvg: 'assets/home/termux.svg',
-            title: 'Termux',
+            iconColor: AppColors.buttonPrimary,
+            title: '内嵌终端',
             subtitle:
-                '管理安装、RUN_COMMAND 权限',
+                '管理应用内 Ubuntu 终端与 workspace 映射',
             onTap: () {
               GoRouterManager.push('/home/termux_setting');
             },

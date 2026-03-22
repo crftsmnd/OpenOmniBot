@@ -17,9 +17,10 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.0.6"
+        manifestPlaceholders["operitDocumentsAuthority"] = "${applicationId}.documents.ubuntu"
 
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            abiFilters.addAll(listOf("arm64-v8a"))
         }
 
     }
@@ -85,6 +86,21 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/LICENSE.txt",
+                "META-INF/NOTICE",
+                "META-INF/NOTICE.txt"
+            )
+        }
+    }
+
     sourceSets {
         getByName("main") {
             assets.srcDirs("src/main/assets", "../skills")
@@ -102,6 +118,7 @@ dependencies {
     implementation(project(":flutter"))
     implementation(project(":uikit"))
     implementation(project(":baselib"))
+    implementation(project(":operitTerminalCore"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar","*.jar"))))
     implementation(project(":assists"))
 //    implementation(project(":lib"))

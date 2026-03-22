@@ -1,10 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ui/services/special_permission.dart';
 import 'package:ui/theme/app_colors.dart';
 import 'package:ui/utils/ui.dart';
 import 'package:ui/widgets/common_app_bar.dart';
-import 'package:ui/widgets/gradient_button.dart';
 
 class TermuxSettingPage extends StatefulWidget {
   const TermuxSettingPage({super.key});
@@ -15,35 +16,48 @@ class TermuxSettingPage extends StatefulWidget {
 
 class _TermuxSettingPageState extends State<TermuxSettingPage>
     with WidgetsBindingObserver {
-  static const String _termuxDownloadUrl =
-      'https://cloud.tsinghua.edu.cn/f/c219e873107645029751/?dl=1';
-  static const String _termuxInitCommand =
-      r'''value="true"; key="allow-external-apps"; file="/data/data/com.termux/files/home/.termux/termux.properties"; workspace_root="/storage/emulated/0/workspace"; mkdir -p "$(dirname "$file")"; chmod 700 "$(dirname "$file")"; if ! grep -E '^'"$key"'=.*' "$file" >/dev/null 2>&1; then [[ -s "$file" && -n "$(tail -c 1 "$file")" ]] && newline=$'\n' || newline=""; echo "$newline$key=$value" >> "$file"; else sed -i'' -E 's/^'"$key"'=.*/'"$key=$value"'/' "$file"; fi; termux-reload-settings; termux-setup-storage; mkdir -p "$workspace_root" "$workspace_root/.omnibot"; if ! command -v proot-distro >/dev/null 2>&1; then pkg update -y && pkg install -y proot-distro; fi; if ! proot-distro login ubuntu --bind "$workspace_root:/workspace" --shared-tmp -- bash -lc 'exit 0' >/dev/null 2>&1; then proot-distro install ubuntu; fi; alias_line="alias u='proot-distro login ubuntu --bind /storage/emulated/0/workspace:/workspace'"; touch ~/.bashrc; sed -i '/^alias u=/d' ~/.bashrc; echo "$alias_line" >> ~/.bashrc; bash -ic "u --shared-tmp -- bash -lc 'test -d /workspace && test -w /workspace'" >/dev/null 2>&1''';
+  static const int _maxPrepareLogLines = 160;
 
   bool _isLoadingStatus = true;
-  bool _isTermuxInstalled = false;
-  bool _isRunCommandGranted = false;
-  bool _isUnknownAppInstallAllowed = false;
+  bool _isDeviceSupported = false;
+  bool _isRuntimeReady = false;
+  bool _isBasePackagesReady = false;
   bool _isWorkspaceStorageGranted = false;
+  List<String> _missingCommands = const <String>[];
+  String _runtimeStatusMessage = '';
 
-  bool _isRequestingPermission = false;
-  bool _isInstallingTermux = false;
-  bool _isOpeningAppSettings = false;
   bool _isPreparingWrapper = false;
   bool _isOpeningWorkspaceStorageSettings = false;
 
   String? _wrapperMessage;
   bool? _wrapperReady;
+  String? _prepareStage;
+  double _prepareProgress = 0.0;
+  final List<String> _prepareLogLines = <String>[];
+  late final ScrollController _prepareLogScrollController;
+  Timer? _prepareSnapshotPoller;
+
+  bool get _isFullyReady {
+    return _isDeviceSupported && _isRuntimeReady && _isBasePackagesReady;
+  }
+
+  bool get _shouldShowPrepareConsole {
+    return _isPreparingWrapper ||
+        (_wrapperReady == false && _prepareLogLines.isNotEmpty);
+  }
 
   @override
   void initState() {
     super.initState();
+    _prepareLogScrollController = ScrollController();
     WidgetsBinding.instance.addObserver(this);
     _refreshStatus();
   }
 
   @override
   void dispose() {
+    _prepareSnapshotPoller?.cancel();
+    _prepareLogScrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -56,85 +70,61 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   }
 
   Future<void> _refreshStatus() async {
+    if (!mounted) {
+      return;
+    }
+
     setState(() {
       _isLoadingStatus = true;
     });
 
-    final installed = await isTermuxInstalled();
-    final granted = installed
-        ? await isTermuxRunCommandPermissionGranted()
-        : false;
-    final unknownAppInstallAllowed = await isUnknownAppInstallAllowed();
-    final workspaceStorageGranted = await isWorkspaceStorageAccessGranted();
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _isTermuxInstalled = installed;
-      _isRunCommandGranted = granted;
-      _isUnknownAppInstallAllowed = unknownAppInstallAllowed;
-      _isWorkspaceStorageGranted = workspaceStorageGranted;
-      _isLoadingStatus = false;
-    });
-  }
-
-  Future<void> _handleRequestPermission() async {
-    if (_isRequestingPermission) {
-      return;
-    }
-    if (!_isTermuxInstalled) {
-      showToast('请先安装 Termux', type: ToastType.warning);
-      return;
-    }
-
-    setState(() {
-      _isRequestingPermission = true;
-    });
-
     try {
-      final granted = await requestTermuxRunCommandPermission();
-      await _refreshStatus();
+      final status = await getEmbeddedTerminalRuntimeStatus();
       if (!mounted) {
         return;
       }
-      if (granted || _isRunCommandGranted) {
-        showToast('RUN_COMMAND 权限已授权', type: ToastType.success);
-      } else {
-        showToast('未完成授权，请尝试打开系统权限页手动开启', type: ToastType.warning);
+      setState(() {
+        _isDeviceSupported = status.supported;
+        _isRuntimeReady = status.runtimeReady;
+        _isBasePackagesReady = status.basePackagesReady;
+        _isWorkspaceStorageGranted = status.workspaceAccessGranted;
+        _missingCommands = status.missingCommands;
+        _runtimeStatusMessage = status.message;
+        _wrapperReady = status.allReady;
+        _isLoadingStatus = false;
+      });
+    } on PlatformException {
+      final supported = await isTermuxInstalled();
+      final workspaceStorageGranted = await isWorkspaceStorageAccessGranted();
+      if (!mounted) {
+        return;
       }
-    } on PlatformException catch (e) {
-      showToast(e.message ?? '请求权限失败', type: ToastType.error);
-    } catch (e) {
-      showToast('请求权限失败', type: ToastType.error);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isRequestingPermission = false;
-        });
+      setState(() {
+        _isDeviceSupported = supported;
+        _isRuntimeReady = false;
+        _isBasePackagesReady = false;
+        _isWorkspaceStorageGranted = workspaceStorageGranted;
+        _missingCommands = const <String>[];
+        _runtimeStatusMessage = '状态探测失败，请尝试初始化。';
+        _wrapperReady = false;
+        _isLoadingStatus = false;
+      });
+    } catch (_) {
+      final supported = await isTermuxInstalled();
+      final workspaceStorageGranted = await isWorkspaceStorageAccessGranted();
+      if (!mounted) {
+        return;
       }
-    }
-  }
-
-  Future<void> _handleOpenAppDetails() async {
-    if (_isOpeningAppSettings) {
-      return;
-    }
-    setState(() {
-      _isOpeningAppSettings = true;
-    });
-    try {
-      await openAppDetailsSettings();
-    } on PlatformException catch (e) {
-      showToast(e.message ?? '打开系统权限页失败', type: ToastType.error);
-    } catch (e) {
-      showToast('打开系统权限页失败', type: ToastType.error);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isOpeningAppSettings = false;
-        });
-      }
+      setState(() {
+        _isDeviceSupported = supported;
+        _isRuntimeReady = false;
+        _isBasePackagesReady = false;
+        _isWorkspaceStorageGranted = workspaceStorageGranted;
+        _missingCommands = const <String>[];
+        _runtimeStatusMessage = '状态探测失败，请尝试初始化。';
+        _wrapperReady = false;
+        _isLoadingStatus = false;
+      });
     }
   }
 
@@ -149,7 +139,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       await openWorkspaceStorageSettings();
     } on PlatformException catch (e) {
       showToast(e.message ?? '打开公共 workspace 权限页失败', type: ToastType.error);
-    } catch (e) {
+    } catch (_) {
       showToast('打开公共 workspace 权限页失败', type: ToastType.error);
     } finally {
       if (mounted) {
@@ -160,66 +150,32 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     }
   }
 
-  Future<void> _handleInstallTermux() async {
-    if (_isInstallingTermux) {
-      return;
-    }
-    setState(() {
-      _isInstallingTermux = true;
-    });
-    try {
-      final notificationGranted = await ensureNotificationPermission();
-      if (!notificationGranted) {
-        showToast('未授予通知权限，下载仍会继续，但不会显示系统下载进度', type: ToastType.warning);
-      }
-      final result = await downloadAndInstallTermuxApk(_termuxDownloadUrl);
-      final success = result['success'] == true;
-      final status = (result['status'] as String?)?.trim();
-      final message = (result['message'] as String?)?.trim();
-
-      if (message?.isNotEmpty == true) {
-        showToast(
-          message!,
-          type: success ? ToastType.success : ToastType.warning,
-        );
-      }
-
-      if (status == 'install_permission_required') {
-        await _refreshStatus();
-      }
-    } on PlatformException catch (e) {
-      showToast(e.message ?? '下载安装 Termux 失败', type: ToastType.error);
-    } catch (e) {
-      showToast('下载安装 Termux 失败', type: ToastType.error);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isInstallingTermux = false;
-        });
-      }
-    }
-  }
-
   Future<void> _handlePrepareWrapper() async {
     if (_isPreparingWrapper) {
       return;
     }
-    if (!_isTermuxInstalled) {
-      showToast('请先安装 Termux', type: ToastType.warning);
-      return;
-    }
-    if (!_isRunCommandGranted) {
-      showToast('请先完成 RUN_COMMAND 权限授权', type: ToastType.warning);
+    if (!_isDeviceSupported) {
+      showToast('当前设备暂不支持内嵌终端，仅支持 arm64-v8a', type: ToastType.warning);
       return;
     }
 
     setState(() {
       _isPreparingWrapper = true;
+      _wrapperMessage = null;
+      _wrapperReady = null;
+      _prepareStage = '准备开始';
+      _prepareProgress = 0.02;
+      _prepareLogLines
+        ..clear()
+        ..add('[系统] 正在启动内嵌 Ubuntu 环境初始化...');
     });
+    _startPrepareSnapshotPolling();
+    _schedulePrepareLogAutoScroll();
     try {
       final result = await prepareTermuxLiveWrapper();
       final success = result['success'] == true;
       final message = (result['message'] as String?)?.trim();
+      await _pollPrepareSnapshot();
       if (!mounted) {
         return;
       }
@@ -228,241 +184,227 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _wrapperMessage = message;
       });
       showToast(
-        message?.isNotEmpty == true ? message! : '已完成检查',
+        message?.isNotEmpty == true ? message! : '内嵌终端环境已完成检查',
         type: success ? ToastType.success : ToastType.warning,
       );
     } on PlatformException catch (e) {
-      showToast(e.message ?? '检查 Wrapper 失败', type: ToastType.error);
-    } catch (e) {
-      showToast('检查 Wrapper 失败', type: ToastType.error);
+      await _pollPrepareSnapshot();
+      if (mounted) {
+        setState(() {
+          _prepareStage = '初始化失败';
+          _prepareLogLines.add('[错误] ${e.message ?? '检查内嵌终端环境失败'}');
+        });
+        _schedulePrepareLogAutoScroll();
+      }
+      showToast(e.message ?? '检查内嵌终端环境失败', type: ToastType.error);
+    } catch (_) {
+      await _pollPrepareSnapshot();
+      if (mounted) {
+        setState(() {
+          _prepareStage = '初始化失败';
+          _prepareLogLines.add('[错误] 检查内嵌终端环境失败');
+        });
+        _schedulePrepareLogAutoScroll();
+      }
+      showToast('检查内嵌终端环境失败', type: ToastType.error);
     } finally {
+      await _pollPrepareSnapshot();
+      _stopPrepareSnapshotPolling();
       if (mounted) {
         setState(() {
           _isPreparingWrapper = false;
         });
+        await _refreshStatus();
       }
     }
+  }
+
+  void _startPrepareSnapshotPolling() {
+    _stopPrepareSnapshotPolling();
+    _pollPrepareSnapshot();
+    _prepareSnapshotPoller = Timer.periodic(const Duration(milliseconds: 250), (
+      _,
+    ) {
+      _pollPrepareSnapshot();
+    });
+  }
+
+  void _stopPrepareSnapshotPolling() {
+    _prepareSnapshotPoller?.cancel();
+    _prepareSnapshotPoller = null;
+  }
+
+  Future<void> _pollPrepareSnapshot() async {
+    try {
+      final snapshot = await getEmbeddedTerminalInitSnapshot();
+      if (!mounted) {
+        return;
+      }
+
+      final nextLogLines = snapshot.logLines.length > _maxPrepareLogLines
+          ? snapshot.logLines.sublist(
+              snapshot.logLines.length - _maxPrepareLogLines,
+            )
+          : snapshot.logLines;
+      final shouldScroll =
+          nextLogLines.isNotEmpty &&
+          nextLogLines.join('\n') != _prepareLogLines.join('\n');
+
+      setState(() {
+        if (snapshot.stage.isNotEmpty) {
+          _prepareStage = snapshot.stage;
+        }
+        _prepareProgress = snapshot.progress;
+        if (nextLogLines.isNotEmpty) {
+          _prepareLogLines
+            ..clear()
+            ..addAll(nextLogLines);
+        }
+        if (snapshot.success != null) {
+          _wrapperReady = snapshot.success;
+        }
+      });
+
+      if (shouldScroll) {
+        _schedulePrepareLogAutoScroll();
+      }
+
+      if (snapshot.completed) {
+        _stopPrepareSnapshotPolling();
+      }
+    } catch (_) {
+      return;
+    }
+  }
+
+  void _schedulePrepareLogAutoScroll() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_prepareLogScrollController.hasClients) {
+        return;
+      }
+      _prepareLogScrollController.jumpTo(
+        _prepareLogScrollController.position.maxScrollExtent,
+      );
+    });
+  }
+
+  String _buildRuntimeSubtitle() {
+    if (_isLoadingStatus) {
+      return '正在进行运行时功能检查';
+    }
+    if (!_isDeviceSupported) {
+      return '当前设备 ABI 不受支持，仅支持 arm64-v8a';
+    }
+    if (!_isRuntimeReady) {
+      return _runtimeStatusMessage.isNotEmpty
+          ? _runtimeStatusMessage
+          : '内嵌 Ubuntu 运行时未就绪，请先初始化。';
+    }
+    if (!_isBasePackagesReady) {
+      if (_missingCommands.isNotEmpty) {
+        return '缺失基础 CLI：${_missingCommands.join(", ")}';
+      }
+      return _runtimeStatusMessage.isNotEmpty
+          ? _runtimeStatusMessage
+          : '基础 Agent CLI 包未就绪，请执行初始化。';
+    }
+    return 'Ubuntu 运行时与基础 CLI 包已就绪。';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
-      appBar: const CommonAppBar(title: 'Termux 设置', primary: true),
+      appBar: const CommonAppBar(title: '内嵌终端设置', primary: true),
       body: SafeArea(
         top: false,
         child: RefreshIndicator(
-                onRefresh: _refreshStatus,
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeroCard(),
-                      const SizedBox(height: 12),
-                      _buildStatusCard(),
-                      const SizedBox(height: 12),
-                      _buildActionsCard(),
-                      const SizedBox(height: 12),
-                      _buildGuideCard(),
-                      const SizedBox(height: 12),
-                      _buildWrapperCard(),
-                    ],
-                  ),
-                ),
-              ),
+          onRefresh: _refreshStatus,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [_buildStatusAndActionsCard()],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildHeroCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [AppColors.boxShadow],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEFF6FF),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.terminal_rounded,
-              color: AppColors.buttonPrimary,
-              size: 22,
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            '这里集中管理 Termux 相关能力，包括安装入口、RUN_COMMAND 权限授权，以及实时终端输出所需的基础准备。',
-            style: TextStyle(
-              color: AppColors.text,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              height: 1.6,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Termux 是统一 Agent 的可选增强能力，不影响基础无障碍自动化；安装完成后，回到本页会自动刷新状态。',
-            style: TextStyle(
-              color: AppColors.text.withValues(alpha: 0.68),
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              height: 1.55,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget _buildStatusAndActionsCard() {
+    final runtimeActionText = _isLoadingStatus
+        ? '检测中'
+        : (!_isDeviceSupported
+              ? '不支持'
+              : (_isPreparingWrapper
+                    ? '初始化中...'
+                    : (_isFullyReady ? '已就绪' : '初始化')));
+    final runtimeActionColor = _isLoadingStatus
+        ? AppColors.text50
+        : (!_isDeviceSupported
+              ? const Color(0xFFB34A40)
+              : (_isPreparingWrapper
+                    ? const Color(0xFFD08A00)
+                    : (_isFullyReady
+                          ? const Color(0xFF1E9E63)
+                          : const Color(0xFFE58A00))));
+    final runtimeActionEnabled =
+        !_isLoadingStatus &&
+        _isDeviceSupported &&
+        !_isPreparingWrapper &&
+        !_isFullyReady;
 
-  Widget _buildStatusCard() {
+    final workspaceActionText = _isLoadingStatus
+        ? '检测中'
+        : (_isWorkspaceStorageGranted
+              ? '已就绪'
+              : (_isOpeningWorkspaceStorageSettings ? '打开中...' : '去授权'));
+    final workspaceActionColor = _isLoadingStatus
+        ? AppColors.text50
+        : (_isWorkspaceStorageGranted
+              ? const Color(0xFF1E9E63)
+              : AppColors.buttonPrimary);
+    final workspaceActionEnabled =
+        !_isLoadingStatus &&
+        !_isWorkspaceStorageGranted &&
+        !_isOpeningWorkspaceStorageSettings;
+
     return _buildSectionCard(
-      title: '当前状态',
+      title: '当前状态与操作',
       child: Column(
         children: [
-          _StatusRow(
-            title: 'Termux App',
-            subtitle: _isLoadingStatus
-                ? '正在检测安装状态'
-                : (_isTermuxInstalled ? '已检测到 com.termux' : '尚未安装'),
-            isEnabled: _isTermuxInstalled,
+          _StatusActionRow(
+            title: '内嵌 Ubuntu 运行时',
+            subtitle: _buildRuntimeSubtitle(),
+            actionText: runtimeActionText,
+            actionColor: runtimeActionColor,
+            onTap: runtimeActionEnabled ? _handlePrepareWrapper : null,
           ),
           const SizedBox(height: 12),
-          _StatusRow(
-            title: 'RUN_COMMAND 权限',
-            subtitle: _isLoadingStatus
-                ? '正在检测权限状态'
-                : (_isRunCommandGranted ? '已授权' : '未授权'),
-            isEnabled: _isRunCommandGranted,
-          ),
-          const SizedBox(height: 12),
-          _StatusRow(
-            title: '安装未知应用',
-            subtitle: _isLoadingStatus
-                ? '正在检测安装权限'
-                : (_isUnknownAppInstallAllowed ? '已允许本应用拉起安装器' : '尚未允许'),
-            isEnabled: _isUnknownAppInstallAllowed,
-          ),
-          const SizedBox(height: 12),
-          _StatusRow(
+          _StatusActionRow(
             title: '公共 workspace 访问',
             subtitle: _isLoadingStatus
                 ? '正在检测共享工作区访问能力'
                 : (_isWorkspaceStorageGranted
                       ? '已允许访问 /storage/emulated/0/workspace'
                       : '未授权，文件工具和工作区预览会受限'),
-            isEnabled: _isWorkspaceStorageGranted,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionsCard() {
-    return _buildSectionCard(
-      title: '快速操作',
-      child: Column(
-        children: [
-          GradientButton(
-            text: _isRequestingPermission ? '请求中...' : '请求 RUN_COMMAND 权限',
-            width: double.infinity,
-            height: 46,
-            borderRadius: 12,
-            enabled: !_isRequestingPermission,
-            onTap: _handleRequestPermission,
-            textStyle: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '如果系统没有弹出授权对话框，或者授权后状态仍未刷新，可以继续使用下面的系统权限页入口。',
-            style: TextStyle(
-              color: AppColors.text.withValues(alpha: 0.64),
-              fontSize: 12,
-              height: 1.5,
-            ),
+            actionText: workspaceActionText,
+            actionColor: workspaceActionColor,
+            onTap: workspaceActionEnabled
+                ? _handleOpenWorkspaceStorageSettings
+                : null,
           ),
           const SizedBox(height: 14),
-          _ActionTile(
-            title: '打开本应用权限页',
-            description: '进入系统的应用详情/权限页，手动开启 Termux 的自定义权限。',
-            buttonText: _isOpeningAppSettings ? '打开中...' : '去设置',
-            onTap: _handleOpenAppDetails,
-            enabled: !_isOpeningAppSettings,
-          ),
-          const SizedBox(height: 12),
-          _ActionTile(
-            title: '打开公共 workspace 权限页',
-            description: '允许 Omnibot 访问 /storage/emulated/0/workspace，文件工具、skills 和工作区预览都依赖它。',
-            buttonText: _isOpeningWorkspaceStorageSettings ? '打开中...' : '去授权',
-            onTap: _handleOpenWorkspaceStorageSettings,
-            enabled: !_isOpeningWorkspaceStorageSettings,
-          ),
-          const SizedBox(height: 12),
-          _ActionTile(
-            title: '一键下载安装 Termux',
-            description: '直接在 App 内下载 APK，完成后自动拉起系统安装器。',
-            buttonText: _isInstallingTermux
-                ? '处理中...'
-                : (_isTermuxInstalled ? '重新下载安装' : '立即安装'),
-            onTap: _handleInstallTermux,
-            enabled: !_isInstallingTermux,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWrapperCard() {
-    final hasMessage = _wrapperMessage != null && _wrapperMessage!.isNotEmpty;
-
-    return _buildSectionCard(
-      title: 'Wrapper 与实时输出',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'live_exec wrapper 不是一个需要常驻后台保持运行的进程。当前实现会在每次终端工具执行前自动校验并按需重新部署，所以通常不需要你手动“先跑起来”。',
-            style: TextStyle(
-              color: AppColors.text,
-              fontSize: 13,
-              fontWeight: FontWeight.w500,
-              height: 1.65,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            '如果你怀疑 Termux 环境被重置、wrapper 丢失，或者实时输出始终没有刷出来，可以手动执行一次检查与重新部署。',
-            style: TextStyle(
-              color: AppColors.text.withValues(alpha: 0.68),
-              fontSize: 12,
-              height: 1.55,
-            ),
-          ),
-          const SizedBox(height: 14),
-          _ActionTile(
-            title: '检查并重新部署 Wrapper',
-            description: '会校验 allow-external-apps、wrapper 脚本和共享存储写入能力。',
-            buttonText: _isPreparingWrapper ? '检查中...' : '立即检查',
-            onTap: _handlePrepareWrapper,
-            enabled: !_isPreparingWrapper,
-          ),
-          if (hasMessage) ...[
+          _buildPrepareActionButton(),
+          if (_shouldShowPrepareConsole) ...[
+            const SizedBox(height: 14),
+            _buildPrepareConsolePanel(),
+          ],
+          if (_wrapperMessage != null &&
+              _wrapperMessage!.isNotEmpty &&
+              !_shouldShowPrepareConsole) ...[
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -491,99 +433,161 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     );
   }
 
-  Widget _buildGuideCard() {
-    return _buildSectionCard(
-      title: '配置说明',
+  Widget _buildPrepareConsolePanel() {
+    final stageText =
+        _prepareStage ?? (_isPreparingWrapper ? '初始化进行中' : '最近一次初始化日志');
+    final consoleText = _prepareLogLines.isEmpty
+        ? '[系统] 初始化已启动，等待终端输出...'
+        : _prepareLogLines.join('\n');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0B1220),
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _GuideText(
-            index: '1',
-            text:
-                '先使用上方的一键安装完成 Termux，再打开一次 Termux，确保基础环境已经初始化；然后在 Termux 里执行下方这条一键初始化指令即可。',
-          ),
-          const SizedBox(height: 8),
-          const _GuideText(
-            index: '2',
-            text:
-                '回到本页授权 com.termux.permission.RUN_COMMAND，并同时开启公共 workspace 访问；如果系统不弹窗，请打开对应的系统设置页手动开启。',
-          ),
-          const SizedBox(height: 8),
-          const _GuideText(
-            index: '3',
-            text:
-                '执行完成后会自动安装 Ubuntu、写入 alias u 并做登录验证；后续终端工具会直接在 Ubuntu 内执行，并通过 /workspace 与安卓公共目录共享文件。',
-          ),
-          const SizedBox(height: 14),
           Row(
             children: [
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: _isPreparingWrapper
+                      ? const Color(0xFFF6C94C)
+                      : (_wrapperReady == true
+                            ? const Color(0xFF1E9E63)
+                            : const Color(0xFF8091A7)),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Termux 一键初始化指令',
-                  style: TextStyle(
-                    color: AppColors.text.withValues(alpha: 0.78),
+                  stageText,
+                  style: const TextStyle(
+                    color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-              TextButton.icon(
-                onPressed: () async {
-                  await Clipboard.setData(
-                    const ClipboardData(text: _termuxInitCommand),
-                  );
-                  showToast(
-                    '已复制一键初始化指令，正在打开 Termux',
-                    type: ToastType.success,
-                  );
-                  try {
-                    final opened = await openTermuxApp();
-                    if (!opened) {
-                      showToast('未检测到 Termux，请先安装', type: ToastType.warning);
-                    }
-                  } on PlatformException catch (e) {
-                    showToast(e.message ?? '打开 Termux 失败', type: ToastType.error);
-                  } catch (e) {
-                    showToast('打开 Termux 失败', type: ToastType.error);
-                  }
-                },
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                icon: const Icon(Icons.open_in_new, size: 14),
-                label: const Text('复制并打开 Termux'),
-              ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(14),
+            constraints: const BoxConstraints(maxHeight: 220, minHeight: 120),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
-              borderRadius: BorderRadius.circular(14),
+              color: const Color(0xFF111B2E),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0x1FFFFFFF)),
             ),
-            child: const SelectableText(
-              _termuxInitCommand,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontFamily: 'monospace',
-                height: 1.55,
+            child: SingleChildScrollView(
+              controller: _prepareLogScrollController,
+              child: SelectableText(
+                consoleText,
+                style: const TextStyle(
+                  color: Color(0xFFE2E8F0),
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  height: 1.55,
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '将该指令整行复制到 Termux 执行一次即可（已包含 allow-external-apps、reload、storage、proot-distro、Ubuntu 安装和 alias u 配置）。',
-            style: const TextStyle(
-              color: AppColors.text70,
-              fontSize: 12,
-              height: 1.5,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPrepareActionButton() {
+    final progress = _isPreparingWrapper
+        ? _prepareProgress.clamp(0.0, 1.0).toDouble()
+        : 0.0;
+    final progressPercent = (progress * 100).round();
+
+    final bool disabled =
+        _isPreparingWrapper || !_isDeviceSupported || _isFullyReady;
+    final bool showInitState =
+        _isDeviceSupported && !_isPreparingWrapper && !_isFullyReady;
+    final buttonText = _isPreparingWrapper
+        ? '初始化中... $progressPercent%'
+        : (!_isDeviceSupported
+              ? '当前设备不支持（仅 arm64-v8a）'
+              : (_isFullyReady ? '内嵌 Ubuntu 已就绪' : '初始化内嵌 Ubuntu 环境'));
+    final gradientColors = _isPreparingWrapper
+        ? const [Color(0xFF1930D9), Color(0xFF2DA5F0)]
+        : (!_isDeviceSupported
+              ? const [Color(0xFFBFC7D5), Color(0xFFA6AFBE)]
+              : (showInitState
+                    ? const [Color(0xFFE58A00), Color(0xFFFFB84D)]
+                    : const [Color(0xFF1E9E63), Color(0xFF45C07B)]));
+
+    return Material(
+      color: Colors.transparent,
+      child: Ink(
+        decoration: ShapeDecoration(
+          gradient: LinearGradient(
+            begin: const Alignment(0.14, -1.09),
+            end: const Alignment(1.10, 1.26),
+            colors: gradientColors,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: disabled ? null : _handlePrepareWrapper,
+          child: SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return Stack(
+                  children: [
+                    if (_isPreparingWrapper)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 220),
+                            curve: Curves.easeOutCubic,
+                            width: constraints.maxWidth * progress,
+                            height: double.infinity,
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.centerLeft,
+                                end: Alignment.centerRight,
+                                colors: [Color(0x4DFFFFFF), Color(0x2AFFFFFF)],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Center(
+                      child: Text(
+                        buttonText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -616,84 +620,27 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   }
 }
 
-class _StatusRow extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final bool isEnabled;
+class _StatusActionRow extends StatelessWidget {
+  static const double _subtitleSlotHeight = 36;
+  static const double _actionButtonMinWidth = 72;
 
-  const _StatusRow({
+  const _StatusActionRow({
     required this.title,
     required this.subtitle,
-    required this.isEnabled,
+    required this.actionText,
+    required this.actionColor,
+    this.onTap,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final color = isEnabled ? const Color(0xFF1E9E63) : const Color(0xFFB34A40);
-
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: AppColors.text,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: TextStyle(
-                  color: AppColors.text.withValues(alpha: 0.66),
-                  fontSize: 12,
-                  height: 1.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Text(
-            isEnabled ? '已就绪' : '未就绪',
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ActionTile extends StatelessWidget {
   final String title;
-  final String description;
-  final String buttonText;
-  final VoidCallback onTap;
-  final bool enabled;
-
-  const _ActionTile({
-    required this.title,
-    required this.description,
-    required this.buttonText,
-    required this.onTap,
-    this.enabled = true,
-  });
+  final String subtitle;
+  final String actionText;
+  final Color actionColor;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final enabled = onTap != null;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -717,12 +664,20 @@ class _ActionTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: TextStyle(
-                    color: AppColors.text.withValues(alpha: 0.65),
-                    fontSize: 12,
-                    height: 1.55,
+                SizedBox(
+                  height: _subtitleSlotHeight,
+                  child: Align(
+                    alignment: Alignment.topLeft,
+                    child: Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: AppColors.text.withValues(alpha: 0.66),
+                        fontSize: 12,
+                        height: 1.5,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -730,74 +685,30 @@ class _ActionTile extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           GestureDetector(
-            onTap: enabled ? onTap : null,
+            onTap: onTap,
             child: Container(
               height: 36,
+              constraints: const BoxConstraints(minWidth: _actionButtonMinWidth),
               padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: enabled
-                    ? const Color(0xFFEDF4FF)
-                    : const Color(0xFFF1F1F1),
+                color: actionColor.withValues(alpha: enabled ? 0.14 : 0.10),
                 borderRadius: BorderRadius.circular(10),
               ),
               alignment: Alignment.center,
               child: Text(
-                buttonText,
+                actionText,
                 style: TextStyle(
-                  color: enabled ? AppColors.buttonPrimary : AppColors.text50,
+                  color: enabled
+                      ? actionColor
+                      : actionColor.withValues(alpha: 0.88),
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _GuideText extends StatelessWidget {
-  final String index;
-  final String text;
-
-  const _GuideText({required this.index, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 20,
-          height: 20,
-          decoration: const BoxDecoration(
-            color: Color(0xFFECF5FF),
-            shape: BoxShape.circle,
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            index,
-            style: const TextStyle(
-              color: AppColors.buttonPrimary,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              color: AppColors.text.withValues(alpha: 0.76),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-              height: 1.55,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
