@@ -88,12 +88,14 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
     try {
       final opened = await widget.openTermuxApp();
       if (!opened) {
-        showToast('未检测到 Termux，请先完成安装后再开启', type: ToastType.warning);
+        showToast('当前设备暂不支持内嵌终端，仅支持 arm64-v8a', type: ToastType.warning);
+      } else {
+        showToast('内嵌终端环境已可用', type: ToastType.success);
       }
     } on PlatformException catch (e) {
-      showToast(e.message ?? '打开 Termux 失败', type: ToastType.error);
+      showToast(e.message ?? '检查内嵌终端失败', type: ToastType.error);
     } catch (e) {
-      showToast('打开 Termux 失败', type: ToastType.error);
+      showToast('检查内嵌终端失败', type: ToastType.error);
     } finally {
       if (mounted) {
         setState(() {
@@ -108,7 +110,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
       return;
     }
     if (!_isInstalled) {
-      showToast('当前设备未检测到 Termux，暂时无法完成开启', type: ToastType.warning);
+      showToast('当前设备暂不支持内嵌终端，仅支持 arm64-v8a', type: ToastType.warning);
       return;
     }
 
@@ -148,7 +150,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
       children: [
         const Expanded(
           child: Text(
-            'Termux 终端能力',
+            '内嵌终端能力',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -173,10 +175,10 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
 
   Widget _buildHeroCard() {
     final statusText = _isLoading
-        ? '正在检测 Termux'
+        ? '正在检测内嵌终端'
         : _isInstalled
-        ? '已检测到 Termux App'
-        : '未检测到 Termux App';
+        ? '已检测到内嵌终端能力'
+        : '当前设备暂不支持内嵌终端';
     final statusColor = _isInstalled
         ? const Color(0xFF1E9E63)
         : const Color(0xFFEF6B5F);
@@ -212,7 +214,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
           ),
           const SizedBox(height: 12),
           const Text(
-            '开启后，小万可以通过 Termux 执行一次性终端命令，并在工具卡片里实时显示终端输出；如需 Linux 容器环境，也可以继续配合 proot-distro 使用。',
+            '开启后，小万会直接在应用内的 Ubuntu（proot）环境执行终端命令，不需要再单独安装 Termux；/workspace 也会继续映射到安卓公共工作区。',
             style: TextStyle(
               color: AppColors.text,
               fontSize: 14,
@@ -240,29 +242,29 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
       children: const [
         _GuideItem(
           index: '1',
-          title: '打开 Termux',
-          description: '进入 Termux 后，确保已经完成基础初始化并可以正常执行命令。',
+          title: '无需独立 App',
+          description: '终端能力已经集成在应用内部，不需要再下载、安装或打开额外的终端应用。',
         ),
         SizedBox(height: 12),
         _GuideItem(
           index: '2',
-          title: '允许外部应用调用',
+          title: '首次会自动初始化',
           description:
-              '在 ~/.termux/termux.properties 中加入 allow-external-apps=true，然后重新加载设置。',
+              '首次使用时，应用会在后台解压 Ubuntu rootfs，并按需准备 git、python、node 等基础 CLI 依赖。',
         ),
         SizedBox(height: 12),
         _GuideItem(
           index: '3',
-          title: '准备共享存储',
+          title: '共享工作区保持不变',
           description:
-              '执行 termux-setup-storage，让 Termux 可以写入实时日志；否则终端工具会自动回退为结束后展示结果。',
+              '安卓公共目录 /storage/emulated/0/workspace 会映射到 Ubuntu 内的 /workspace，现有 agent 与 skills 可以继续沿用。',
         ),
         SizedBox(height: 12),
         _GuideItem(
           index: '4',
-          title: 'Ubuntu 环境初始化',
+          title: '异常时重新检查',
           description:
-              '在 Termux 中执行设置页提供的一键初始化指令，完成 Ubuntu 安装，并把安卓公共目录 /storage/emulated/0/workspace 绑定到 Ubuntu 内的 /workspace；live_exec wrapper 由 App 自动部署。',
+              '如果终端输出异常或基础包缺失，可以在设置页重新执行环境检查，并确认网络与 workspace 权限正常。',
         ),
       ],
     );
@@ -280,7 +282,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '如需命令方式开启，可在 Termux 中执行：',
+            '可用这些命令快速验证环境：',
             style: TextStyle(
               color: Color(0xFFDDE7FF),
               fontSize: 12,
@@ -289,10 +291,11 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
           ),
           SizedBox(height: 10),
           SelectableText(
-            "mkdir -p ~/.termux\n"
-            "grep -qxF 'allow-external-apps=true' ~/.termux/termux.properties || echo 'allow-external-apps=true' >> ~/.termux/termux.properties\n"
-            "termux-reload-settings\n"
-            'termux-setup-storage',
+            'pwd\n'
+            'ls /workspace\n'
+            'git --version\n'
+            'python3 --version\n'
+            'node --version',
             style: TextStyle(
               color: Colors.white,
               fontSize: 12,
@@ -320,7 +323,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
               ),
               alignment: Alignment.center,
               child: Text(
-                _isOpening ? '打开中...' : '打开 Termux',
+                _isOpening ? '检查中...' : '检查环境',
                 style: const TextStyle(
                   color: AppColors.buttonPrimary,
                   fontSize: 14,

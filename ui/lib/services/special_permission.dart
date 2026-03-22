@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ui/utils/ui.dart';
@@ -6,6 +8,123 @@ import 'package:ui/utils/ui.dart';
 const spePermission = MethodChannel(
   'cn.com.omnimind.bot/SpecialPermissionEvent',
 );
+const _specialPermissionEvents = EventChannel(
+  'cn.com.omnimind.bot/SpecialPermissionEvents',
+);
+
+class EmbeddedTerminalInitProgress {
+  const EmbeddedTerminalInitProgress({
+    required this.kind,
+    required this.message,
+    required this.timestamp,
+  });
+
+  final String kind;
+  final String message;
+  final DateTime timestamp;
+
+  factory EmbeddedTerminalInitProgress.fromMap(Map<dynamic, dynamic> map) {
+    final timestampValue = map['timestamp'];
+    final millis = timestampValue is num
+        ? timestampValue.toInt()
+        : DateTime.now().millisecondsSinceEpoch;
+    return EmbeddedTerminalInitProgress(
+      kind: (map['kind'] as String? ?? 'status').trim(),
+      message: (map['message'] as String? ?? '').trimRight(),
+      timestamp: DateTime.fromMillisecondsSinceEpoch(millis),
+    );
+  }
+}
+
+class EmbeddedTerminalInitSnapshot {
+  const EmbeddedTerminalInitSnapshot({
+    required this.running,
+    required this.completed,
+    required this.success,
+    required this.progress,
+    required this.stage,
+    required this.logLines,
+  });
+
+  final bool running;
+  final bool completed;
+  final bool? success;
+  final double progress;
+  final String stage;
+  final List<String> logLines;
+
+  factory EmbeddedTerminalInitSnapshot.fromMap(Map<dynamic, dynamic> map) {
+    final rawLogLines = map['logLines'];
+    return EmbeddedTerminalInitSnapshot(
+      running: map['running'] == true,
+      completed: map['completed'] == true,
+      success: map['success'] as bool?,
+      progress: ((map['progress'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0),
+      stage: (map['stage'] as String? ?? '').trim(),
+      logLines: rawLogLines is List
+          ? rawLogLines.map((line) => line.toString()).toList(growable: false)
+          : const <String>[],
+    );
+  }
+}
+
+class EmbeddedTerminalRuntimeStatus {
+  const EmbeddedTerminalRuntimeStatus({
+    required this.supported,
+    required this.runtimeReady,
+    required this.basePackagesReady,
+    required this.allReady,
+    required this.missingCommands,
+    required this.message,
+    required this.workspaceAccessGranted,
+  });
+
+  final bool supported;
+  final bool runtimeReady;
+  final bool basePackagesReady;
+  final bool allReady;
+  final List<String> missingCommands;
+  final String message;
+  final bool workspaceAccessGranted;
+
+  factory EmbeddedTerminalRuntimeStatus.fromMap(Map<dynamic, dynamic> map) {
+    final rawMissing = map['missingCommands'];
+    return EmbeddedTerminalRuntimeStatus(
+      supported: map['supported'] == true,
+      runtimeReady: map['runtimeReady'] == true,
+      basePackagesReady: map['basePackagesReady'] == true,
+      allReady: map['allReady'] == true,
+      missingCommands: rawMissing is List
+          ? rawMissing.map((it) => it.toString()).toList(growable: false)
+          : const <String>[],
+      message: (map['message'] as String? ?? '').trim(),
+      workspaceAccessGranted: map['workspaceAccessGranted'] == true,
+    );
+  }
+}
+
+Stream<EmbeddedTerminalInitProgress> get embeddedTerminalInitProgressStream {
+  return _specialPermissionEvents.receiveBroadcastStream().map((event) {
+    final payload = event is Map
+        ? Map<dynamic, dynamic>.from(event)
+        : const <dynamic, dynamic>{};
+    return EmbeddedTerminalInitProgress.fromMap(payload);
+  });
+}
+
+Future<EmbeddedTerminalInitSnapshot> getEmbeddedTerminalInitSnapshot() async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'getEmbeddedTerminalInitSnapshot',
+  );
+  return EmbeddedTerminalInitSnapshot.fromMap(result ?? const {});
+}
+
+Future<EmbeddedTerminalRuntimeStatus> getEmbeddedTerminalRuntimeStatus() async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'getEmbeddedTerminalRuntimeStatus',
+  );
+  return EmbeddedTerminalRuntimeStatus.fromMap(result ?? const {});
+}
 
 /// 检查无障碍权限，如果没有权限则弹出授权对话框
 /// 返回 true 表示有权限，false 表示没有权限
@@ -102,7 +221,8 @@ Future<bool> requestTermuxRunCommandPermission() async {
 
 Future<bool> ensureInstalledAppsPermission() async {
   try {
-    final hasPermission = await spePermission.invokeMethod<bool>(
+    final hasPermission =
+        await spePermission.invokeMethod<bool>(
           'isInstalledAppsPermissionGranted',
         ) ??
         false;

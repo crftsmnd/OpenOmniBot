@@ -4,6 +4,7 @@ import BaseApplication
 import cn.com.omnimind.baselib.database.DatabaseHelper
 import cn.com.omnimind.baselib.util.OmniLog
 import cn.com.omnimind.bot.mcp.McpServerManager
+import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
 import cn.com.omnimind.bot.update.AppUpdateManager
 import cn.com.omnimind.bot.util.NestedBackgroundStateUtil
 import com.tencent.mmkv.MMKV
@@ -12,6 +13,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineGroup
 import io.flutter.embedding.engine.dart.DartExecutor
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 
 class App : BaseApplication() {
@@ -119,6 +123,11 @@ class App : BaseApplication() {
         initSDKsAfterPrivacyConsent()
         // 恢复 MCP 服务（如果之前已启用）
         McpServerManager.restoreIfEnabled(this)
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching {
+                EmbeddedTerminalRuntime.warmup(this@App)
+            }
+        }
         OmniLog.d(
             "AppStartup",
             "App onCreate total cost: ${System.currentTimeMillis() - appStartTime}ms"

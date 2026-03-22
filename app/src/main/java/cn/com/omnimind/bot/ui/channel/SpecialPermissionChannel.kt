@@ -3,7 +3,10 @@ package cn.com.omnimind.bot.ui.channel
 import cn.com.omnimind.bot.manager.SpecialPermissionManager
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class SpecialPermissionChannel {
@@ -11,7 +14,10 @@ class SpecialPermissionChannel {
     var specialPermissionManager: SpecialPermissionManager? = null
     private  val TAG = "[PlatformChannel]"
     private  val CHANNEL = "cn.com.omnimind.bot/SpecialPermissionEvent"
+    private  val EVENT_CHANNEL = "cn.com.omnimind.bot/SpecialPermissionEvents"
     private var methodChannel: MethodChannel? = null
+    private var eventChannel: EventChannel? = null
+    private var eventSink: EventChannel.EventSink? = null
 
     fun onCreate(context: Context) {
         specialPermissionManager = SpecialPermissionManager(context)
@@ -20,6 +26,23 @@ class SpecialPermissionChannel {
     fun setChannel(flutterEngine: FlutterEngine) {
 
         methodChannel= MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        eventChannel = EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
+        eventChannel?.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                eventSink = events
+            }
+
+            override fun onCancel(arguments: Any?) {
+                eventSink = null
+            }
+        })
+        specialPermissionManager?.onEmbeddedTerminalInitProgress = { payload ->
+            Handler(Looper.getMainLooper()).post {
+                runCatching {
+                    eventSink?.success(payload)
+                }
+            }
+        }
         methodChannel?.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "isAccessibilityServiceEnabled" -> specialPermissionManager!!.isAccessibilityServiceEnabled(
@@ -75,8 +98,12 @@ class SpecialPermissionChannel {
                         .isWorkspaceStorageAccessGranted(result)
                     "openWorkspaceStorageSettings" -> specialPermissionManager!!
                         .openWorkspaceStorageSettings(result)
+                    "getEmbeddedTerminalRuntimeStatus" -> specialPermissionManager!!
+                        .getEmbeddedTerminalRuntimeStatus(result)
                     "prepareTermuxLiveWrapper" -> specialPermissionManager!!
                         .prepareTermuxLiveWrapper(result)
+                    "getEmbeddedTerminalInitSnapshot" -> specialPermissionManager!!
+                        .getEmbeddedTerminalInitSnapshot(result)
                     "isUnknownAppInstallAllowed" -> specialPermissionManager!!
                         .isUnknownAppInstallAllowed(result)
                     "openUnknownAppInstallSettings" -> specialPermissionManager!!
@@ -95,6 +122,10 @@ class SpecialPermissionChannel {
     }
 
     fun clear() {
+        specialPermissionManager?.onEmbeddedTerminalInitProgress = null
+        eventSink = null
+        eventChannel?.setStreamHandler(null)
+        eventChannel = null
         methodChannel?.setMethodCallHandler(null)
         methodChannel = null
     }

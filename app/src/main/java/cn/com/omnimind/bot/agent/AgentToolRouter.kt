@@ -14,6 +14,7 @@ import cn.com.omnimind.bot.mem0.Mem0ToolUtils
 import cn.com.omnimind.bot.mcp.RemoteMcpClient
 import cn.com.omnimind.bot.mcp.RemoteMcpConfigStore
 import cn.com.omnimind.bot.mcp.RemoteMcpToolDescriptor
+import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
 import cn.com.omnimind.bot.termux.TermuxCommandResult
 import cn.com.omnimind.bot.termux.TermuxCommandRunner
 import cn.com.omnimind.bot.termux.TermuxCommandSpec
@@ -76,8 +77,6 @@ class AgentToolRouter(
     private val calendarToolService = AgentCalendarToolService(context)
     private val skillIndexService = SkillIndexService(context, workspaceManager)
     private val skillLoader = SkillLoader(workspaceManager)
-    @Volatile
-    private var tmuxAvailabilityCached: Boolean? = null
     @Volatile
     private var browserUseEngine: BrowserUseEngine? = null
 
@@ -497,9 +496,9 @@ class AgentToolRouter(
             reportToolProgress(
                 callback,
                 toolName,
-                "正在调用 Termux 执行命令",
+                "正在调用内嵌 Ubuntu 终端执行命令",
                 mapOf(
-                    "summary" to "正在调用 Termux 执行命令",
+                    "summary" to "正在调用内嵌 Ubuntu 终端执行命令",
                     "terminalStreamState" to "starting"
                 )
             )
@@ -571,40 +570,36 @@ class AgentToolRouter(
         val toolName = "terminal_session_start"
         return try {
             requireWorkspaceStorageAccess(callback)?.let { return it }
-            ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
-            reportToolProgress(callback, toolName, "正在启动终端会话")
+            reportToolProgress(callback, toolName, "正在启动内嵌终端会话")
             val parsedArgs = parseTerminalSessionStartArgs(args)
             val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionName)
             val workingDirectory = resolveShellWorkingDirectory(parsedArgs.workingDirectory, workspace)
             terminalSessionDirectory(workspace, sessionId).mkdirs()
-            val result = executeTerminalCommand(
-                command = """
-                    tmux has-session -t ${quoteShell(sessionId)} 2>/dev/null || tmux new-session -d -s ${quoteShell(sessionId)} -c ${quoteShell(workingDirectory)}
-                    echo "session_started:$sessionId"
-                """.trimIndent(),
-                workingDirectory = workingDirectory,
-                timeoutSeconds = 60
+            val result = EmbeddedTerminalRuntime.startSession(
+                context = context,
+                requestedSessionId = sessionId,
+                workingDirectory = workingDirectory
             )
+            val logArtifact = persistTerminalSessionTranscript(workspace, sessionId, result.transcript, toolName)
             val payload = linkedMapOf<String, Any?>(
                 "sessionId" to sessionId,
                 "workingDirectory" to workingDirectory,
-                "success" to result.success,
-                "stdout" to truncateText(result.stdout, 2000),
-                "stderr" to truncateText(result.stderr, 2000)
+                "currentDirectory" to result.currentDirectory,
+                "success" to true,
+                "terminalOutput" to truncateText(result.transcript, 2000),
+                "logPath" to logArtifact.androidPath,
+                "logUri" to logArtifact.uri
             )
             ToolExecutionResult.TerminalResult(
                 toolName = toolName,
-                summaryText = if (result.success) {
-                    "终端会话已启动：$sessionId"
-                } else {
-                    buildTerminalSummary(result)
-                },
+                summaryText = "终端会话已启动：$sessionId",
                 previewJson = json.encodeToString(mapToJsonElement(payload)),
                 rawResultJson = json.encodeToString(mapToJsonElement(payload)),
-                success = result.success,
-                terminalOutput = result.terminalOutput.ifBlank { result.stdout + result.stderr },
+                success = true,
+                terminalOutput = result.transcript,
                 terminalSessionId = sessionId,
-                terminalStreamState = if (result.success) "ready" else "error",
+                terminalStreamState = "ready",
+                artifacts = listOf(logArtifact),
                 workspaceId = workspace.id,
                 actions = listOf(
                     ArtifactAction(
@@ -635,114 +630,61 @@ class AgentToolRouter(
         val toolName = "terminal_session_exec"
         return try {
             requireWorkspaceStorageAccess(callback)?.let { return it }
-            ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
             val parsedArgs = parseTerminalSessionExecArgs(args)
             val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionId)
-            val sessionDir = terminalSessionDirectory(workspace, sessionId).apply { mkdirs() }
-            val shellWorkingDirectory = resolveShellWorkingDirectory(parsedArgs.workingDirectory, workspace)
-            val androidWorkingDirectory = resolveAndroidWorkingDirectory(parsedArgs.workingDirectory, workspace)
-            val commandId = UUID.randomUUID().toString().take(8)
-            val commandScript = File(sessionDir, "command_$commandId.sh")
-            val runnerScript = File(sessionDir, "run_$commandId.sh")
-            val logFile = File(sessionDir, "latest.log")
-            val shellSessionDir = workspaceManager.shellPathForAndroid(sessionDir)
-                ?: throw IllegalStateException("无法映射终端会话目录")
-            val shellCommandScriptPath = workspaceManager.shellPathForAndroid(commandScript)
-                ?: throw IllegalStateException("无法映射终端会话脚本")
-            val shellRunnerScriptPath = workspaceManager.shellPathForAndroid(runnerScript)
-                ?: throw IllegalStateException("无法映射终端会话运行器")
-            val shellLogPath = workspaceManager.shellPathForAndroid(logFile)
-                ?: throw IllegalStateException("无法映射终端会话日志")
-            val marker = "__OMNIBOT_DONE__:$commandId:"
-            commandScript.writeText(parsedArgs.command)
-            commandScript.setExecutable(true)
-            runnerScript.writeText(
-                """
-                #!/usr/bin/env bash
-                set -o pipefail
-                mkdir -p ${quoteShell(shellSessionDir)}
-                : > ${quoteShell(shellLogPath)}
-                cd ${quoteShell(shellWorkingDirectory)}
-                {
-                  bash ${quoteShell(shellCommandScriptPath)}
-                } > >(tee -a ${quoteShell(shellLogPath)}) 2> >(tee -a ${quoteShell(shellLogPath)} >&2)
-                status=$?
-                printf '\n$marker%s\n' "${'$'}status" | tee -a ${quoteShell(shellLogPath)}
-                exit "${'$'}status"
-                """.trimIndent()
-            )
-            runnerScript.setExecutable(true)
-
-            reportToolProgress(callback, toolName, "正在向终端会话发送命令")
-            val sendResult = executeTerminalCommand(
-                command = """
-                    tmux has-session -t ${quoteShell(sessionId)} 2>/dev/null || tmux new-session -d -s ${quoteShell(sessionId)} -c ${quoteShell(shellWorkingDirectory)}
-                    tmux send-keys -t ${quoteShell(sessionId)} ${quoteShell("bash $shellRunnerScriptPath")} C-m
-                    echo "command_dispatched:$commandId"
-                """.trimIndent(),
-                workingDirectory = shellWorkingDirectory,
-                timeoutSeconds = 60
-            )
-            if (!sendResult.success) {
-                return buildTerminalToolResult(
-                    toolName = toolName,
-                    args = TerminalExecuteArgs(
-                        command = parsedArgs.command,
-                        executionMode = TermuxCommandSpec.EXECUTION_MODE_PROOT,
-                        prootDistro = TermuxCommandSpec.DEFAULT_PROOT_DISTRO,
-                        workingDirectory = shellWorkingDirectory,
-                        timeoutSeconds = parsedArgs.timeoutSeconds
-                    ),
-                    result = sendResult,
-                    workspace = workspace,
-                    sourceTool = toolName
-                )
+            val shellWorkingDirectory = parsedArgs.workingDirectory?.let {
+                resolveShellWorkingDirectory(it, workspace)
             }
-
-            val completedLog = waitForCommandLog(
-                logFile = logFile,
-                markerPrefix = marker,
-                timeoutSeconds = parsedArgs.timeoutSeconds,
-                callback = callback,
-                toolName = toolName
+            reportToolProgress(callback, toolName, "正在向终端会话发送命令")
+            val result = EmbeddedTerminalRuntime.executeSessionCommand(
+                context = context,
+                sessionId = sessionId,
+                command = parsedArgs.command,
+                workingDirectory = shellWorkingDirectory,
+                timeoutSeconds = parsedArgs.timeoutSeconds
             )
-            val completed = completedLog.contains(marker)
-            val exitCode = Regex("${Regex.escape(marker)}(-?\\d+)").find(completedLog)?.groupValues?.getOrNull(1)?.toIntOrNull()
-            val cleanedOutput = TermuxCommandRunner.sanitizeTerminalNoise(
-                completedLog.replace(Regex("\n?${Regex.escape(marker)}-?\\d+\n?"), "\n").trim()
-            )
-            val artifact = workspaceManager.buildArtifactForFile(logFile, toolName)
+            val terminalStreamState = if (result.completed) {
+                "completed"
+            } else {
+                val commandRunning = EmbeddedTerminalRuntime.readSession(context, sessionId).commandRunning
+                if (commandRunning) "running" else "error"
+            }
+            val logArtifact = persistTerminalSessionTranscript(workspace, sessionId, result.transcript, toolName)
             val rawResult = linkedMapOf<String, Any?>(
                 "sessionId" to sessionId,
-                "commandId" to commandId,
                 "workingDirectory" to shellWorkingDirectory,
-                "androidWorkingDirectory" to androidWorkingDirectory.absolutePath,
+                "currentDirectory" to result.currentDirectory,
                 "command" to parsedArgs.command,
-                "exitCode" to exitCode,
-                "completed" to completed,
-                "logPath" to shellLogPath,
-                "androidLogPath" to logFile.absolutePath,
-                "logUri" to artifact.uri,
-                "stdout" to truncateText(cleanedOutput, 12000),
-                "terminalOutput" to truncateText(cleanedOutput, 12000),
-                "success" to (completed && exitCode == 0)
+                "exitCode" to result.exitCode,
+                "completed" to result.completed,
+                "logPath" to logArtifact.workspacePath,
+                "androidLogPath" to logArtifact.androidPath,
+                "logUri" to logArtifact.uri,
+                "stdout" to truncateText(result.output, 12000),
+                "terminalOutput" to truncateText(
+                    if (result.completed) result.output else result.transcript,
+                    12000
+                ),
+                "success" to (result.completed && result.success),
+                "errorMessage" to result.errorMessage,
+                "terminalStreamState" to terminalStreamState
             )
             ToolExecutionResult.TerminalResult(
                 toolName = toolName,
-                summaryText = if (!completed) {
-                    "会话命令仍在运行或等待超时，请先读取日志确认状态"
-                } else if (exitCode == 0) {
+                summaryText = if (!result.completed) {
+                    result.errorMessage ?: "会话命令仍在运行，请先读取输出确认状态"
+                } else if (result.success) {
                     "会话命令执行完成"
                 } else {
-                    "会话命令执行失败（exit=$exitCode）"
+                    result.errorMessage ?: "会话命令执行失败（exit=${result.exitCode}）"
                 },
                 previewJson = json.encodeToString(mapToJsonElement(rawResult)),
                 rawResultJson = json.encodeToString(mapToJsonElement(rawResult)),
-                success = completed && exitCode == 0,
-                terminalOutput = cleanedOutput,
+                success = result.completed && result.success,
+                terminalOutput = if (result.completed) result.output else result.transcript,
                 terminalSessionId = sessionId,
-                terminalStreamState = if (completed) "completed" else "running",
-                artifacts = listOf(artifact),
+                terminalStreamState = terminalStreamState,
+                artifacts = listOf(logArtifact),
                 workspaceId = workspace.id
             )
         } catch (e: CancellationException) {
@@ -763,37 +705,21 @@ class AgentToolRouter(
             requireWorkspaceStorageAccess(callback)?.let { return it }
             val parsedArgs = parseTerminalSessionReadArgs(args)
             val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionId)
-            val logFile = File(terminalSessionDirectory(workspace, sessionId), "latest.log")
-            val content = if (logFile.exists()) {
-                truncateText(
-                    TermuxCommandRunner.sanitizeTerminalNoise(logFile.readText()),
-                    parsedArgs.maxChars
-                )
-            } else {
-                ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
-                val capture = executeTerminalCommand(
-                    command = """
-                        tmux capture-pane -p -t ${quoteShell(sessionId)} -S -120
-                    """.trimIndent(),
-                    workingDirectory = workspace.currentCwd,
-                    timeoutSeconds = 30
-                )
-                truncateText(
-                    TermuxCommandRunner.sanitizeTerminalNoise(
-                        capture.stdout.ifBlank { capture.stderr }
-                    ),
-                    parsedArgs.maxChars
-                )
-            }
-            val artifacts = if (logFile.exists()) {
-                listOf(workspaceManager.buildArtifactForFile(logFile, toolName))
-            } else {
-                emptyList()
-            }
+            val readResult = EmbeddedTerminalRuntime.readSession(context, sessionId)
+            val artifact = persistTerminalSessionTranscript(workspace, sessionId, readResult.transcript, toolName)
+            val content = truncateText(
+                TermuxCommandRunner.sanitizeTerminalNoise(readResult.transcript),
+                parsedArgs.maxChars
+            )
             val payload = linkedMapOf<String, Any?>(
                 "sessionId" to sessionId,
                 "content" to content,
-                "contentLength" to content.length
+                "contentLength" to content.length,
+                "currentDirectory" to readResult.currentDirectory,
+                "commandRunning" to readResult.commandRunning,
+                "logPath" to artifact.workspacePath,
+                "androidLogPath" to artifact.androidPath,
+                "logUri" to artifact.uri
             )
             ToolExecutionResult.TerminalResult(
                 toolName = toolName,
@@ -803,8 +729,8 @@ class AgentToolRouter(
                 success = true,
                 terminalOutput = content,
                 terminalSessionId = sessionId,
-                terminalStreamState = "completed",
-                artifacts = artifacts,
+                terminalStreamState = if (readResult.commandRunning) "running" else "completed",
+                artifacts = listOf(artifact),
                 workspaceId = workspace.id
             )
         } catch (e: CancellationException) {
@@ -823,32 +749,24 @@ class AgentToolRouter(
         val toolName = "terminal_session_stop"
         return try {
             requireWorkspaceStorageAccess(callback)?.let { return it }
-            ensureTmuxAvailable(workspace)?.let { return buildTmuxUnavailableResult(toolName, it, workspace) }
             reportToolProgress(callback, toolName, "正在结束终端会话")
             val sessionId = sanitizeTerminalSessionId(
                 args["sessionId"]?.jsonPrimitive?.content?.trim().orEmpty()
             )
-            val result = executeTerminalCommand(
-                command = """
-                    tmux has-session -t ${quoteShell(sessionId)} 2>/dev/null && tmux kill-session -t ${quoteShell(sessionId)} || true
-                    echo "session_stopped:$sessionId"
-                """.trimIndent(),
-                workingDirectory = workspace.currentCwd,
-                timeoutSeconds = 30
-            )
+            val result = EmbeddedTerminalRuntime.stopSession(context, sessionId)
             val payload = linkedMapOf<String, Any?>(
                 "sessionId" to sessionId,
-                "success" to result.success
+                "success" to result
             )
             ToolExecutionResult.TerminalResult(
                 toolName = toolName,
-                summaryText = if (result.success) "终端会话已结束：$sessionId" else buildTerminalSummary(result),
+                summaryText = if (result) "终端会话已结束：$sessionId" else "终端会话不存在或已结束：$sessionId",
                 previewJson = json.encodeToString(mapToJsonElement(payload)),
                 rawResultJson = json.encodeToString(mapToJsonElement(payload)),
-                success = result.success,
-                terminalOutput = result.stdout.ifBlank { result.stderr },
+                success = result,
+                terminalOutput = if (result) "session_stopped:$sessionId" else "session_not_found:$sessionId",
                 terminalSessionId = sessionId,
-                terminalStreamState = if (result.success) "stopped" else "error",
+                terminalStreamState = if (result) "stopped" else "error",
                 workspaceId = workspace.id
             )
         } catch (e: CancellationException) {
@@ -2231,49 +2149,6 @@ class AgentToolRouter(
         )
     }
 
-    private suspend fun ensureTmuxAvailable(workspace: AgentWorkspaceDescriptor): String? {
-        tmuxAvailabilityCached?.let { cached ->
-            return if (cached) null else "当前 Ubuntu 环境未安装 tmux，无法使用 terminal_session_*；请优先改用 terminal_execute，或先在 Ubuntu 中安装 tmux。"
-        }
-        val probeResult = executeTerminalCommand(
-            command = "command -v tmux >/dev/null 2>&1",
-            workingDirectory = workspace.currentCwd,
-            timeoutSeconds = 20
-        )
-        val available = probeResult.success
-        tmuxAvailabilityCached = available
-        return if (available) {
-            null
-        } else {
-            "当前 Ubuntu 环境未安装 tmux，无法使用 terminal_session_*；请优先改用 terminal_execute，或先在 Ubuntu 中安装 tmux。"
-        }
-    }
-
-    private fun buildTmuxUnavailableResult(
-        toolName: String,
-        message: String,
-        workspace: AgentWorkspaceDescriptor
-    ): ToolExecutionResult.TerminalResult {
-        val payload = linkedMapOf<String, Any?>(
-            "success" to false,
-            "error" to message,
-            "workspaceId" to workspace.id,
-            "workspacePath" to workspace.androidRootPath,
-            "workspaceShellPath" to workspace.rootPath
-        )
-        val payloadJson = json.encodeToString(mapToJsonElement(payload))
-        return ToolExecutionResult.TerminalResult(
-            toolName = toolName,
-            summaryText = message,
-            previewJson = payloadJson,
-            rawResultJson = payloadJson,
-            success = false,
-            terminalOutput = message,
-            terminalStreamState = "error",
-            workspaceId = workspace.id
-        )
-    }
-
     private fun resolveShellWorkingDirectory(
         requestedPath: String?,
         workspace: AgentWorkspaceDescriptor
@@ -2354,6 +2229,18 @@ class AgentToolRouter(
             delay(250)
         }
         return lastContent
+    }
+
+    private fun persistTerminalSessionTranscript(
+        workspace: AgentWorkspaceDescriptor,
+        sessionId: String,
+        transcript: String,
+        sourceTool: String
+    ): ArtifactRef {
+        val logFile = File(terminalSessionDirectory(workspace, sessionId), "latest.log")
+        logFile.parentFile?.mkdirs()
+        logFile.writeText(transcript)
+        return workspaceManager.buildArtifactForFile(logFile, sourceTool)
     }
 
     private fun buildTerminalArtifacts(
@@ -2572,7 +2459,7 @@ class AgentToolRouter(
                 "终端命令执行成功（exit=0）$suffix$liveNote"
 
             result.success ->
-                "Termux 返回成功结果$suffix$liveNote"
+                "内嵌终端返回成功结果$suffix$liveNote"
 
             result.resultCode != null ->
                 "终端命令执行失败（exit=${result.resultCode}）$suffix$liveNote"

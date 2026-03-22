@@ -94,7 +94,7 @@ object AgentToolDefinitions {
             put("toolType", "terminal")
             put(
                 "description",
-                "通过 Termux 在 Ubuntu（proot-distro）中执行一次性的非交互终端命令。这是默认首选的终端工具，适合文件处理、脚本、网络诊断、git、python、包管理等绝大多数 CLI 任务；不用于手机界面操作，也不用于交互式 TUI。只有明确需要跨多轮保留 cwd、环境或后台进程时，才改用 terminal_session_*。"
+                "通过应用内置的 Ubuntu（proot）环境执行一次性的非交互终端命令。这是默认首选的终端工具，适合文件处理、脚本、网络诊断、git、python、包管理等绝大多数 CLI 任务；不用于手机界面操作，也不用于交互式 TUI。只有明确需要跨多轮保留 cwd、环境或后台进程时，才改用 terminal_session_*。"
             )
             put(
                 "postToolRule",
@@ -141,7 +141,7 @@ object AgentToolDefinitions {
             put("name", "terminal_session_start")
             put("displayName", "启动终端会话")
             put("toolType", "terminal")
-            put("description", "启动一个可复用的 Ubuntu tmux 终端会话，仅用于确实需要在后续多轮中保留 cwd、shell 环境、中间文件状态或后台进程的任务。不要为了运行单条命令、检查工具是否存在、读取单个文件或执行一次性脚本而使用它，这些场景应优先用 terminal_execute。")
+            put("description", "启动一个可复用的 Ubuntu 终端会话，仅用于确实需要在后续多轮中保留 cwd、shell 环境、中间文件状态或后台进程的任务。不要为了运行单条命令、检查工具是否存在、读取单个文件或执行一次性脚本而使用它，这些场景应优先用 terminal_execute。")
             put("postToolRule", "启动后等待工具结果，再决定是否继续向该 session 发送命令。")
             putJsonObject("parameters") {
                 put("type", "object")
