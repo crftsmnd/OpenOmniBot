@@ -51,8 +51,12 @@ jobs:
           echo "${{ secrets.RELEASE_KEYSTORE }}" | base64 -d > ${{ runner.temp }}/release.jks
 
       - name: Build production release APK
+        env:
+          # Reduce OOM risk for R8/lint on GitHub-hosted runners.
+          GRADLE_OPTS: >-
+            -Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 --enable-native-access=ALL-UNNAMED
         run: |
-          ./gradlew assembleProductionRelease \
+          ./gradlew --no-daemon --max-workers=2 assembleProductionRelease \
             -POMNI_RELEASE_STORE_FILE=${{ runner.temp }}/release.jks \
             -POMNI_RELEASE_STORE_PWD=${{ secrets.RELEASE_PASSWORD }} \
             -POMNI_RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }} \
