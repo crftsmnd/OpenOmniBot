@@ -1051,7 +1051,6 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
                         const SizedBox(height: 12),
                         Container(
                           height: 280,
-                          padding: const EdgeInsets.all(10),
                           clipBehavior: Clip.antiAlias,
                           decoration: BoxDecoration(
                             color: const Color(0xFFF4F7FB),
@@ -1059,33 +1058,37 @@ class _VlmModelSettingPageState extends State<VlmModelSettingPage> {
                             border: Border.all(color: const Color(0x1A000000)),
                           ),
                           child: modelItems.isEmpty
-                              ? Center(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      SvgPicture.string(
-                                        _kPackageSvg,
-                                        width: 64,
-                                        height: 64,
-                                        colorFilter: const ColorFilter.mode(
-                                          AppColors.text50,
-                                          BlendMode.srcIn,
+                              ? Padding(
+                                  padding: const EdgeInsets.all(10),
+                                  child: Center(
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        SvgPicture.string(
+                                          _kPackageSvg,
+                                          width: 64,
+                                          height: 64,
+                                          colorFilter: const ColorFilter.mode(
+                                            AppColors.text50,
+                                            BlendMode.srcIn,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 10),
-                                      const Text(
-                                        '请添加模型！',
-                                        style: TextStyle(
-                                          color: AppColors.text70,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          fontFamily: 'PingFang SC',
+                                        const SizedBox(height: 10),
+                                        const Text(
+                                          '请添加模型！',
+                                          style: TextStyle(
+                                            color: AppColors.text70,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                            fontFamily: 'PingFang SC',
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
                                 )
                               : ListView.builder(
+                                  padding: const EdgeInsets.all(10),
                                   itemCount: modelItems.length,
                                   itemBuilder: (context, index) {
                                     return _buildSwipeModelItem(
