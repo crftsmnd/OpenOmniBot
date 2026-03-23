@@ -10,6 +10,7 @@ import android.provider.Settings
 import androidx.core.content.ContextCompat
 import cn.com.omnimind.baselib.permission.PermissionRequest
 import cn.com.omnimind.baselib.util.OmniLog
+import cn.com.omnimind.bot.openclaw.OpenClawDeployManager
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
 import cn.com.omnimind.bot.termux.TermuxCommandRunner
 import cn.com.omnimind.bot.util.AssistsUtil
@@ -58,6 +59,7 @@ class SpecialPermissionManager(private val context: Context) {
     private val mainScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val embeddedTerminalInitLock = Any()
     private var embeddedTerminalInitState = EmbeddedTerminalInitState()
+    private val openClawDeployManager = OpenClawDeployManager(context)
     var onEmbeddedTerminalInitProgress: ((Map<String, Any?>) -> Unit)? = null
 
     fun isAccessibilityServiceEnabled(result: MethodChannel.Result) {
@@ -359,6 +361,47 @@ class SpecialPermissionManager(private val context: Context) {
                     )
                 }
             }
+        }
+    }
+
+    fun startOpenClawDeploy(call: MethodCall, result: MethodChannel.Result) {
+        try {
+            val providerBaseUrl = call.argument<String>("providerBaseUrl")?.trim().orEmpty()
+            val providerApiKey = call.argument<String>("providerApiKey")?.trim().orEmpty()
+            val modelId = call.argument<String>("modelId")?.trim().orEmpty()
+            val configJson = call.argument<String>("configJson")?.trim().orEmpty()
+            val deployResult = openClawDeployManager.startDeploy(
+                OpenClawDeployManager.DeployRequest(
+                    providerBaseUrl = providerBaseUrl,
+                    providerApiKey = providerApiKey,
+                    modelId = modelId,
+                    configJson = configJson
+                )
+            )
+            result.success(deployResult.toMap())
+        } catch (e: IllegalArgumentException) {
+            OmniLog.e(TAG, "Invalid OpenClaw deploy request", e)
+            result.error("INVALID_ARGS", e.message, null)
+        } catch (e: Exception) {
+            OmniLog.e(TAG, "Error starting OpenClaw deploy", e)
+            result.error(
+                "START_DEPLOY_FAILED",
+                "Failed to start OpenClaw deploy.",
+                e.message
+            )
+        }
+    }
+
+    fun getOpenClawDeploySnapshot(result: MethodChannel.Result) {
+        try {
+            result.success(openClawDeployManager.getSnapshot().toMap())
+        } catch (e: Exception) {
+            OmniLog.e(TAG, "Error reading OpenClaw deploy snapshot", e)
+            result.error(
+                "READ_DEPLOY_SNAPSHOT_FAILED",
+                "Failed to read OpenClaw deploy snapshot.",
+                e.message
+            )
         }
     }
 

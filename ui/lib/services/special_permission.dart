@@ -103,6 +103,90 @@ class EmbeddedTerminalRuntimeStatus {
   }
 }
 
+class OpenClawDeployRequest {
+  const OpenClawDeployRequest({
+    required this.providerBaseUrl,
+    required this.providerApiKey,
+    required this.modelId,
+    required this.configJson,
+  });
+
+  final String providerBaseUrl;
+  final String providerApiKey;
+  final String modelId;
+  final String configJson;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'providerBaseUrl': providerBaseUrl,
+      'providerApiKey': providerApiKey,
+      'modelId': modelId,
+      'configJson': configJson,
+    };
+  }
+}
+
+class OpenClawDeployResult {
+  const OpenClawDeployResult({
+    required this.accepted,
+    required this.alreadyRunning,
+    required this.message,
+  });
+
+  final bool accepted;
+  final bool alreadyRunning;
+  final String message;
+
+  factory OpenClawDeployResult.fromMap(Map<dynamic, dynamic>? map) {
+    return OpenClawDeployResult(
+      accepted: map?['accepted'] == true,
+      alreadyRunning: map?['alreadyRunning'] == true,
+      message: (map?['message'] as String? ?? '').trim(),
+    );
+  }
+}
+
+class OpenClawDeploySnapshot {
+  const OpenClawDeploySnapshot({
+    required this.running,
+    required this.completed,
+    required this.success,
+    required this.progress,
+    required this.stage,
+    required this.logLines,
+    required this.gatewayBaseUrl,
+    required this.gatewayToken,
+    required this.errorMessage,
+  });
+
+  final bool running;
+  final bool completed;
+  final bool? success;
+  final double progress;
+  final String stage;
+  final List<String> logLines;
+  final String? gatewayBaseUrl;
+  final String? gatewayToken;
+  final String? errorMessage;
+
+  factory OpenClawDeploySnapshot.fromMap(Map<dynamic, dynamic>? map) {
+    final rawLogLines = map?['logLines'];
+    return OpenClawDeploySnapshot(
+      running: map?['running'] == true,
+      completed: map?['completed'] == true,
+      success: map?['success'] as bool?,
+      progress: ((map?['progress'] as num?)?.toDouble() ?? 0.0).clamp(0.0, 1.0),
+      stage: (map?['stage'] as String? ?? '').trim(),
+      logLines: rawLogLines is List
+          ? rawLogLines.map((item) => item.toString()).toList(growable: false)
+          : const <String>[],
+      gatewayBaseUrl: (map?['gatewayBaseUrl'] as String?)?.trim(),
+      gatewayToken: (map?['gatewayToken'] as String?)?.trim(),
+      errorMessage: (map?['errorMessage'] as String?)?.trim(),
+    );
+  }
+}
+
 Stream<EmbeddedTerminalInitProgress> get embeddedTerminalInitProgressStream {
   return _specialPermissionEvents.receiveBroadcastStream().map((event) {
     final payload = event is Map
@@ -124,6 +208,23 @@ Future<EmbeddedTerminalRuntimeStatus> getEmbeddedTerminalRuntimeStatus() async {
     'getEmbeddedTerminalRuntimeStatus',
   );
   return EmbeddedTerminalRuntimeStatus.fromMap(result ?? const {});
+}
+
+Future<OpenClawDeployResult> startOpenClawDeploy(
+  OpenClawDeployRequest request,
+) async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'startOpenClawDeploy',
+    request.toMap(),
+  );
+  return OpenClawDeployResult.fromMap(result ?? const {});
+}
+
+Future<OpenClawDeploySnapshot> getOpenClawDeploySnapshot() async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'getOpenClawDeploySnapshot',
+  );
+  return OpenClawDeploySnapshot.fromMap(result ?? const {});
 }
 
 /// 检查无障碍权限，如果没有权限则弹出授权对话框
