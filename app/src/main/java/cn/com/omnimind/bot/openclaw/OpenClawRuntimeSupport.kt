@@ -141,8 +141,12 @@ object OpenClawRuntimeSupport {
         return File(ubuntuRootfsDir(context), "usr/local/bin/openclaw")
     }
 
+    fun nodeTarballGuestPath(): String {
+        return "/tmp/node-v$TARGET_NODE_VERSION-linux-arm64.tar.xz"
+    }
+
     fun nodeTarballHostFile(context: Context): File {
-        return File(context.filesDir, "tmp/node-v$TARGET_NODE_VERSION-linux-arm64.tar.xz")
+        return mapLinuxPathToHostFile(context, nodeTarballGuestPath())
     }
 
     fun nodeTarballUrl(): String {
@@ -442,7 +446,14 @@ object OpenClawRuntimeSupport {
         if (targetFile.exists()) {
             targetFile.delete()
         }
-        tempFile.renameTo(targetFile)
+        val renamed = tempFile.renameTo(targetFile)
+        if (!renamed) {
+            tempFile.copyTo(targetFile, overwrite = true)
+            tempFile.delete()
+        }
+        if (!targetFile.exists() || targetFile.length() <= 0L) {
+            throw IllegalStateException("Node.js tarball 下载完成但文件不可用：${targetFile.absolutePath}")
+        }
         return targetFile
     }
 

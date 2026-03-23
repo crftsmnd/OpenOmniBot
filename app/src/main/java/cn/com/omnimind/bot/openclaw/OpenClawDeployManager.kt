@@ -200,9 +200,12 @@ class OpenClawDeployManager(
                     )
                 )
                 val tarball = OpenClawRuntimeSupport.downloadNodeTarball(context)
-                nodeTarballPath = tarball.absolutePath
+                nodeTarballPath = OpenClawRuntimeSupport.nodeTarballGuestPath()
                 updateState(
-                    appendLines = listOf("[完成] Node.js tarball 已就绪：${tarball.name}")
+                    appendLines = listOf(
+                        "[完成] Node.js tarball 已就绪：${tarball.name}",
+                        "[系统] tarball guest 路径：$nodeTarballPath"
+                    )
                 )
             } else {
                 updateState(
