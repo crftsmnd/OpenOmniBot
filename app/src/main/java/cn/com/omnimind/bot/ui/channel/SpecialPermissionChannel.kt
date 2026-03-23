@@ -100,6 +100,20 @@ class SpecialPermissionChannel {
                         .openWorkspaceStorageSettings(result)
                     "getEmbeddedTerminalRuntimeStatus" -> specialPermissionManager!!
                         .getEmbeddedTerminalRuntimeStatus(result)
+                    "startOpenClawDeploy" -> specialPermissionManager!!
+                        .startOpenClawDeploy(call, result)
+                    "getOpenClawDeploySnapshot" -> specialPermissionManager!!
+                        .getOpenClawDeploySnapshot(result)
+                    "getOpenClawGatewayStatus" -> specialPermissionManager!!
+                        .getOpenClawGatewayStatus(result)
+                    "setOpenClawGatewayAutoStart" -> specialPermissionManager!!
+                        .setOpenClawGatewayAutoStart(call, result)
+                    "startOpenClawGateway" -> specialPermissionManager!!
+                        .startOpenClawGateway(call, result)
+                    "stopOpenClawGateway" -> specialPermissionManager!!
+                        .stopOpenClawGateway(result)
+                    "openNativeTerminal" -> specialPermissionManager!!
+                        .openNativeTerminal(result)
                     "prepareTermuxLiveWrapper" -> specialPermissionManager!!
                         .prepareTermuxLiveWrapper(result)
                     "getEmbeddedTerminalInitSnapshot" -> specialPermissionManager!!

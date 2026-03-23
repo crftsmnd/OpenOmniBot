@@ -1,0 +1,1049 @@
+part of 'chat_page.dart';
+
+mixin _ChatPageModelContextMixin on _ChatPageStateBase {
+  @override
+  Future<void> _loadNormalChatModelContext() async {
+    try {
+      final results = await Future.wait<dynamic>([
+        ModelProviderConfigService.loadModelGroups(),
+        SceneModelConfigService.getSceneCatalog(),
+      ]);
+      if (!mounted) return;
+
+      final groups = results[0] as List<ProviderModelGroup>;
+      final catalog = results[1] as List<SceneCatalogItem>;
+      final profiles = groups.map((group) => group.profile).toList();
+      final modelOptionsByProfileId = <String, List<ProviderModelOption>>{
+        for (final group in groups)
+          group.profile.id: List<ProviderModelOption>.from(group.models),
+      };
+
+      setState(() {
+        _sceneCatalog = catalog;
+        _modelProviderProfiles = profiles;
+        _modelOptionsByProfileId = _mergeChatModelOptions(
+          profiles: profiles,
+          source: modelOptionsByProfileId,
+          sceneCatalog: catalog,
+          overrideSelection: _activeConversationModelOverrideSelection,
+        );
+      });
+      await _syncInvalidNormalConversationOverrideIfNeeded();
+    } catch (e) {
+      debugPrint('加载聊天模型上下文失败: $e');
+    }
+  }
+
+  @override
+  Future<void> _syncInvalidNormalConversationOverrideIfNeeded() async {
+    if (_modelProviderProfiles.isEmpty) {
+      return;
+    }
+    final configuredProfileIds = _modelProviderProfiles
+        .where((item) => item.configured)
+        .map((item) => item.id)
+        .toSet();
+    final persisted = _conversationModelOverride;
+    final pending = _pendingConversationModelOverride;
+    final shouldClearPersisted =
+        persisted != null &&
+        !configuredProfileIds.contains(persisted.providerProfileId);
+    final shouldClearPending =
+        pending != null &&
+        !configuredProfileIds.contains(pending.providerProfileId);
+
+    if (!shouldClearPersisted && !shouldClearPending) {
+      return;
+    }
+
+    final normalConversationId =
+        _currentConversationIdByMode[ChatPageMode.normal];
+    if (shouldClearPersisted && normalConversationId != null) {
+      await ConversationModelOverrideService.clearOverride(
+        normalConversationId,
+      );
+    }
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      if (shouldClearPersisted) {
+        _conversationModelOverride = null;
+      }
+      if (shouldClearPending) {
+        _pendingConversationModelOverride = null;
+      }
+      if (_conversationModelOverride == null &&
+          _pendingConversationModelOverride == null) {
+        _showConversationModelMentionChip = false;
+      }
+      _modelOptionsByProfileId = _mergeChatModelOptions(
+        profiles: _modelProviderProfiles,
+        source: _modelOptionsByProfileId,
+        sceneCatalog: _sceneCatalog,
+        overrideSelection: _activeConversationModelOverrideSelection,
+      );
+    });
+  }
+
+  @override
+  Future<void> _loadConversationModelOverrideForNormalConversation(
+    int? conversationId,
+  ) async {
+    if (conversationId == null) {
+      if (!mounted) return;
+      setState(() {
+        _conversationModelOverride = null;
+        if (_pendingConversationModelOverride == null) {
+          _showConversationModelMentionChip = false;
+        }
+      });
+      return;
+    }
+    final override = await ConversationModelOverrideService.getOverride(
+      conversationId,
+    );
+    if (!mounted) return;
+    final nextSelection = override == null
+        ? _pendingConversationModelOverride
+        : _ChatModelOverrideSelection(
+            providerProfileId: override.providerProfileId,
+            modelId: override.modelId,
+          );
+    setState(() {
+      _conversationModelOverride = override;
+      _pendingConversationModelOverride = null;
+      _showConversationModelMentionChip = override != null;
+      _modelOptionsByProfileId = _mergeChatModelOptions(
+        profiles: _modelProviderProfiles,
+        source: _modelOptionsByProfileId,
+        sceneCatalog: _sceneCatalog,
+        overrideSelection: nextSelection,
+      );
+    });
+    await _syncInvalidNormalConversationOverrideIfNeeded();
+  }
+
+  @override
+  Future<void> _persistPendingConversationModelOverrideIfNeeded(
+    int conversationId,
+  ) async {
+    final pending = _pendingConversationModelOverride;
+    if (pending == null) {
+      if (_conversationModelOverride?.conversationId == conversationId) {
+        return;
+      }
+      await _loadConversationModelOverrideForNormalConversation(conversationId);
+      return;
+    }
+
+    final value = ConversationModelOverride(
+      conversationId: conversationId,
+      providerProfileId: pending.providerProfileId,
+      modelId: pending.modelId,
+    );
+    await ConversationModelOverrideService.saveOverride(value);
+    if (!mounted) return;
+    setState(() {
+      _conversationModelOverride = value;
+      _pendingConversationModelOverride = null;
+      _modelOptionsByProfileId = _mergeChatModelOptions(
+        profiles: _modelProviderProfiles,
+        source: _modelOptionsByProfileId,
+        sceneCatalog: _sceneCatalog,
+        overrideSelection: _ChatModelOverrideSelection(
+          providerProfileId: value.providerProfileId,
+          modelId: value.modelId,
+        ),
+      );
+    });
+  }
+
+  @override
+  void _removeActiveModelMentionTokenFromInput() {
+    final token = _activeModelMentionToken;
+    if (token == null) {
+      return;
+    }
+    final value = _messageController.value;
+    final text = value.text;
+    final start = token.start.clamp(0, text.length);
+    final end = token.end.clamp(start, text.length);
+    final before = text.substring(0, start);
+    final after = text.substring(end);
+    var nextText = '$before$after';
+    if (before.endsWith(' ') && after.startsWith(' ')) {
+      nextText = '$before${after.substring(1)}';
+    }
+    if (nextText.startsWith(' ')) {
+      nextText = nextText.substring(1);
+    }
+    final nextOffset = start > nextText.length ? nextText.length : start;
+    _messageController.value = TextEditingValue(
+      text: nextText,
+      selection: TextSelection.collapsed(offset: nextOffset),
+    );
+  }
+
+  @override
+  Future<void> _applyConversationModelOverride({
+    required String providerProfileId,
+    required String modelId,
+    bool displayAsMentionChip = false,
+  }) async {
+    _removeActiveModelMentionTokenFromInput();
+    final selection = _ChatModelOverrideSelection(
+      providerProfileId: providerProfileId,
+      modelId: modelId,
+    );
+    final normalConversationId =
+        _currentConversationIdByMode[ChatPageMode.normal];
+
+    if (normalConversationId == null) {
+      if (!mounted) return;
+      setState(() {
+        _pendingConversationModelOverride = selection;
+        _conversationModelOverride = null;
+        _showConversationModelMentionChip = displayAsMentionChip;
+        _showModelMentionPanel = false;
+        _activeModelMentionToken = null;
+        _modelOptionsByProfileId = _mergeChatModelOptions(
+          profiles: _modelProviderProfiles,
+          source: _modelOptionsByProfileId,
+          sceneCatalog: _sceneCatalog,
+          overrideSelection: selection,
+        );
+      });
+    } else {
+      final value = ConversationModelOverride(
+        conversationId: normalConversationId,
+        providerProfileId: providerProfileId,
+        modelId: modelId,
+      );
+      await ConversationModelOverrideService.saveOverride(value);
+      if (!mounted) return;
+      setState(() {
+        _conversationModelOverride = value;
+        _pendingConversationModelOverride = null;
+        _showConversationModelMentionChip = displayAsMentionChip;
+        _showModelMentionPanel = false;
+        _activeModelMentionToken = null;
+        _modelOptionsByProfileId = _mergeChatModelOptions(
+          profiles: _modelProviderProfiles,
+          source: _modelOptionsByProfileId,
+          sceneCatalog: _sceneCatalog,
+          overrideSelection: selection,
+        );
+      });
+    }
+
+    final switchedLabel = displayAsMentionChip ? '@$modelId' : modelId;
+    showToast('已切换到 $switchedLabel', type: ToastType.success);
+  }
+
+  @override
+  Future<void> _clearConversationModelOverride() async {
+    final hasOverride = _activeConversationModelOverrideSelection != null;
+    if (!hasOverride) {
+      return;
+    }
+    final normalConversationId =
+        _currentConversationIdByMode[ChatPageMode.normal];
+    if (normalConversationId != null) {
+      await ConversationModelOverrideService.clearOverride(
+        normalConversationId,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _conversationModelOverride = null;
+      _pendingConversationModelOverride = null;
+      _showConversationModelMentionChip = false;
+      _modelOptionsByProfileId = _mergeChatModelOptions(
+        profiles: _modelProviderProfiles,
+        source: _modelOptionsByProfileId,
+        sceneCatalog: _sceneCatalog,
+        overrideSelection: null,
+      );
+    });
+    showToast('已恢复场景默认模型', type: ToastType.success);
+  }
+
+  @override
+  Map<String, dynamic>? _buildAgentModelOverridePayload() {
+    if (_activeConversationMode != ChatPageMode.normal) {
+      return null;
+    }
+    if (!_showConversationModelMentionChip) {
+      return null;
+    }
+    final override = _activeConversationModelOverrideSelection;
+    if (override == null) {
+      return null;
+    }
+    return {
+      'providerProfileId': override.providerProfileId,
+      'modelId': override.modelId,
+    };
+  }
+
+  @override
+  _ActiveModelMentionToken? _parseActiveModelMentionToken(
+    TextEditingValue value,
+  ) {
+    if (_activeConversationMode != ChatPageMode.normal || _isOpenClawSurface) {
+      return null;
+    }
+    final selectionEnd = value.selection.baseOffset;
+    final text = value.text;
+    if (selectionEnd < 0 || selectionEnd > text.length) {
+      return null;
+    }
+
+    var tokenStart = selectionEnd;
+    while (tokenStart > 0) {
+      final char = text.substring(tokenStart - 1, tokenStart);
+      if (RegExp(r'\s').hasMatch(char)) {
+        break;
+      }
+      tokenStart -= 1;
+    }
+
+    if (tokenStart >= text.length ||
+        text.substring(tokenStart, tokenStart + 1) != '@') {
+      return null;
+    }
+    if (tokenStart > 0) {
+      final previousChar = text.substring(tokenStart - 1, tokenStart);
+      if (!RegExp(r'\s').hasMatch(previousChar)) {
+        return null;
+      }
+    }
+
+    final query = text.substring(tokenStart + 1, selectionEnd);
+    if (query.contains(RegExp(r'\s'))) {
+      return null;
+    }
+    return _ActiveModelMentionToken(
+      query: query,
+      start: tokenStart,
+      end: selectionEnd,
+    );
+  }
+
+  @override
+  ModelProviderProfileSummary? _findProviderProfile(String profileId) {
+    for (final profile in _modelProviderProfiles) {
+      if (profile.id == profileId) {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<void> _openConversationModelSelector(
+    BuildContext anchorContext,
+  ) async {
+    if (_activeMode != ChatPageMode.normal) {
+      return;
+    }
+    if (_showSlashCommandPanel ||
+        _showModelMentionPanel ||
+        _openClawPanelExpanded) {
+      setState(() {
+        _showSlashCommandPanel = false;
+        _showModelMentionPanel = false;
+        _openClawPanelExpanded = false;
+      });
+    }
+    final hasSelectableModels = _modelProviderProfiles.any((profile) {
+      if (!profile.configured) {
+        return false;
+      }
+      final models =
+          _modelOptionsByProfileId[profile.id] ?? const <ProviderModelOption>[];
+      return models.isNotEmpty;
+    });
+    if (!hasSelectableModels) {
+      return;
+    }
+    _inputFocusNode.unfocus();
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final anchorBox = anchorContext.findRenderObject() as RenderBox?;
+    if (overlay == null || anchorBox == null || !anchorBox.hasSize) {
+      return;
+    }
+    final topLeft = anchorBox.localToGlobal(Offset.zero, ancestor: overlay);
+    final bottomRight = anchorBox.localToGlobal(
+      anchorBox.size.bottomRight(Offset.zero),
+      ancestor: overlay,
+    );
+    final anchorRect = Rect.fromPoints(topLeft, bottomRight);
+    final popupWidth = anchorBox.size.width.clamp(160.0, 320.0).toDouble();
+    const popupMaxHeight = 360.0;
+    final position = PopupMenuAnchorPosition.fromAnchorRect(
+      anchorRect: anchorRect,
+      overlaySize: overlay.size,
+      estimatedMenuHeight: popupMaxHeight,
+      reservedBottom: MediaQuery.of(context).viewInsets.bottom,
+    );
+    final selected = await showMenu<_ChatModelOverrideSelection>(
+      context: context,
+      color: Colors.white,
+      elevation: 8,
+      constraints: BoxConstraints(minWidth: popupWidth, maxWidth: popupWidth),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      position: position,
+      items: [
+        _ConversationModelSelectorPopupEntry(
+          width: popupWidth,
+          estimatedHeight: popupMaxHeight,
+          profiles: _modelProviderProfiles,
+          providerModelsByProfileId: _modelOptionsByProfileId,
+          currentSelection: _activeDispatchSceneSelection,
+        ),
+      ],
+    );
+    if (selected == null) {
+      return;
+    }
+    await _applyDispatchSceneModelSelection(
+      providerProfileId: selected.providerProfileId,
+      modelId: selected.modelId,
+    );
+  }
+
+  @override
+  Future<void> _applyDispatchSceneModelSelection({
+    required String providerProfileId,
+    required String modelId,
+  }) async {
+    const sceneId = 'scene.dispatch.model';
+    final currentSelection = _activeDispatchSceneSelection;
+    if (currentSelection != null &&
+        currentSelection.providerProfileId == providerProfileId &&
+        currentSelection.modelId == modelId) {
+      return;
+    }
+    try {
+      await SceneModelConfigService.saveSceneModelBinding(
+        sceneId: sceneId,
+        providerProfileId: providerProfileId,
+        modelId: modelId,
+      );
+      await _loadNormalChatModelContext();
+      if (!mounted) return;
+      showToast('Agent 模型已切换到 $modelId', type: ToastType.success);
+    } catch (e) {
+      if (!mounted) return;
+      showToast('更新 Agent 模型失败：$e', type: ToastType.error);
+    }
+  }
+
+  @override
+  Widget _buildModelMentionPanel() {
+    return _ChatModelMentionPanel(
+      profiles: _modelProviderProfiles,
+      providerModelsByProfileId: _modelOptionsByProfileId,
+      query: _activeModelMentionToken?.query ?? '',
+      currentSelection: _activeConversationModelOverrideSelection,
+      onSelect: (selection) {
+        unawaited(
+          _applyConversationModelOverride(
+            providerProfileId: selection.providerProfileId,
+            modelId: selection.modelId,
+            displayAsMentionChip: true,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ActiveModelMentionToken {
+  final String query;
+  final int start;
+  final int end;
+
+  const _ActiveModelMentionToken({
+    required this.query,
+    required this.start,
+    required this.end,
+  });
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is _ActiveModelMentionToken &&
+        other.query == query &&
+        other.start == start &&
+        other.end == end;
+  }
+
+  @override
+  int get hashCode => Object.hash(query, start, end);
+}
+
+class _ChatModelOverrideSelection {
+  final String providerProfileId;
+  final String modelId;
+
+  const _ChatModelOverrideSelection({
+    required this.providerProfileId,
+    required this.modelId,
+  });
+}
+
+class _ChatModelMentionPanel extends StatefulWidget {
+  final List<ModelProviderProfileSummary> profiles;
+  final Map<String, List<ProviderModelOption>> providerModelsByProfileId;
+  final String query;
+  final _ChatModelOverrideSelection? currentSelection;
+  final ValueChanged<_ChatModelOverrideSelection> onSelect;
+
+  const _ChatModelMentionPanel({
+    required this.profiles,
+    required this.providerModelsByProfileId,
+    required this.query,
+    required this.currentSelection,
+    required this.onSelect,
+  });
+
+  @override
+  State<_ChatModelMentionPanel> createState() => _ChatModelMentionPanelState();
+}
+
+class _ChatModelMentionPanelState extends State<_ChatModelMentionPanel> {
+  List<ProviderModelOption> _filteredModels(String profileId) {
+    final normalizedQuery = widget.query.trim().toLowerCase();
+    final models =
+        widget.providerModelsByProfileId[profileId] ??
+        const <ProviderModelOption>[];
+    if (normalizedQuery.isEmpty) {
+      return models;
+    }
+    return models.where((item) {
+      final modelId = item.id.toLowerCase();
+      final displayName = item.displayName.toLowerCase();
+      return modelId.contains(normalizedQuery) ||
+          displayName.contains(normalizedQuery);
+    }).toList();
+  }
+
+  Widget _buildProviderHeader(
+    ModelProviderProfileSummary profile,
+    int modelCount,
+  ) {
+    final isCurrentProvider =
+        widget.currentSelection?.providerProfileId == profile.id;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 2, 10, 2),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF4F6FA),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                profile.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Color(0xFF64748B),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '$modelCount',
+              style: const TextStyle(
+                fontSize: 11,
+                color: Color(0xFF9AA4B6),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (isCurrentProvider) ...[
+              const SizedBox(width: 6),
+              const Icon(
+                Icons.check_circle_rounded,
+                size: 13,
+                color: Color(0xFF2C7FEB),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelRow({
+    required ModelProviderProfileSummary profile,
+    required ProviderModelOption item,
+  }) {
+    final selected =
+        widget.currentSelection?.providerProfileId == profile.id &&
+        widget.currentSelection?.modelId == item.id;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 2, 10, 2),
+      child: InkWell(
+        onTap: () {
+          widget.onSelect(
+            _ChatModelOverrideSelection(
+              providerProfileId: profile.id,
+              modelId: item.id,
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFEAF3FF) : const Color(0xFFF8FAFD),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.id,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF1F2937),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (selected)
+                const Icon(
+                  Icons.check_rounded,
+                  size: 15,
+                  color: Color(0xFF2C7FEB),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final visibleProfiles = widget.profiles.where((profile) {
+      if (!profile.configured) {
+        return false;
+      }
+      return _filteredModels(profile.id).isNotEmpty;
+    }).toList();
+
+    if (visibleProfiles.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final mediaQuery = MediaQuery.of(context);
+    final dynamicMaxHeight =
+        (mediaQuery.size.height - mediaQuery.viewInsets.bottom - 180)
+            .clamp(150.0, 240.0)
+            .toDouble();
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: dynamicMaxHeight),
+      child: Scrollbar(
+        child: ListView.builder(
+          padding: const EdgeInsets.only(bottom: 6),
+          itemCount: visibleProfiles.length,
+          itemBuilder: (context, index) {
+            final profile = visibleProfiles[index];
+            final models = _filteredModels(profile.id);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildProviderHeader(profile, models.length),
+                if (models.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: Text(
+                      '没有匹配的模型',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF94A3B8),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  )
+                else
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: models
+                        .map(
+                          (item) =>
+                              _buildModelRow(profile: profile, item: item),
+                        )
+                        .toList(),
+                  ),
+                if (index != visibleProfiles.length - 1)
+                  const SizedBox(height: 4),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ConversationModelSelectorPopupEntry
+    extends PopupMenuEntry<_ChatModelOverrideSelection> {
+  const _ConversationModelSelectorPopupEntry({
+    required this.width,
+    required this.estimatedHeight,
+    required this.profiles,
+    required this.providerModelsByProfileId,
+    required this.currentSelection,
+  });
+
+  final double width;
+  final double estimatedHeight;
+  final List<ModelProviderProfileSummary> profiles;
+  final Map<String, List<ProviderModelOption>> providerModelsByProfileId;
+  final _ChatModelOverrideSelection? currentSelection;
+
+  @override
+  double get height => estimatedHeight;
+
+  @override
+  bool represents(_ChatModelOverrideSelection? value) => false;
+
+  @override
+  State<_ConversationModelSelectorPopupEntry> createState() =>
+      _ConversationModelSelectorPopupEntryState();
+}
+
+class _ConversationModelSelectorPopupEntryState
+    extends State<_ConversationModelSelectorPopupEntry> {
+  final TextEditingController _searchController = TextEditingController();
+  late final Set<String> _expandedProfileIds;
+
+  bool get _hasSearchQuery => _searchController.text.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _expandedProfileIds = <String>{
+      if (widget.currentSelection != null)
+        widget.currentSelection!.providerProfileId,
+    };
+    if (_expandedProfileIds.isEmpty && widget.profiles.isNotEmpty) {
+      _expandedProfileIds.add(widget.profiles.first.id);
+    }
+    _searchController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<ProviderModelOption> _filteredModels(String profileId) {
+    final query = _searchController.text.trim().toLowerCase();
+    final models = widget.providerModelsByProfileId[profileId] ?? const [];
+    if (query.isEmpty) {
+      return models;
+    }
+    return models.where((item) {
+      final modelId = item.id.toLowerCase();
+      final displayName = item.displayName.toLowerCase();
+      return modelId.contains(query) || displayName.contains(query);
+    }).toList();
+  }
+
+  List<ModelProviderProfileSummary> get _visibleProfiles {
+    final configuredProfiles = widget.profiles
+        .where((profile) => profile.configured)
+        .toList();
+    if (!_hasSearchQuery) {
+      return configuredProfiles;
+    }
+    return configuredProfiles.where((profile) {
+      return _filteredModels(profile.id).isNotEmpty;
+    }).toList();
+  }
+
+  bool _isExpanded(String profileId) {
+    if (_hasSearchQuery) {
+      return true;
+    }
+    return _expandedProfileIds.contains(profileId);
+  }
+
+  Widget _buildSearchRow() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      child: Row(
+        children: [
+          const Icon(Icons.search, size: 18, color: Color(0xFF9AA4B6)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              autofocus: false,
+              scrollPadding: EdgeInsets.zero,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Color(0xFF1F2937),
+                fontWeight: FontWeight.w500,
+              ),
+              decoration: const InputDecoration(
+                isDense: true,
+                hintText: '搜索模型 ID',
+                hintStyle: TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF9AA4B6),
+                  fontWeight: FontWeight.w500,
+                ),
+                border: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfileHeader(ModelProviderProfileSummary profile) {
+    final expanded = _isExpanded(profile.id);
+    final models = _filteredModels(profile.id);
+    final isSelectedProvider =
+        widget.currentSelection?.providerProfileId == profile.id;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 2, 10, 2),
+      child: InkWell(
+        onTap: () {
+          if (_hasSearchQuery) {
+            return;
+          }
+          setState(() {
+            if (expanded) {
+              _expandedProfileIds.remove(profile.id);
+            } else {
+              _expandedProfileIds.add(profile.id);
+            }
+          });
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF4F6FA),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  profile.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF64748B),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                '${models.length}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Color(0xFF9AA4B6),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (isSelectedProvider) ...[
+                const SizedBox(width: 6),
+                const Icon(
+                  Icons.check_circle_rounded,
+                  size: 13,
+                  color: Color(0xFF2C7FEB),
+                ),
+              ],
+              const SizedBox(width: 6),
+              Icon(
+                _hasSearchQuery
+                    ? Icons.unfold_more_rounded
+                    : expanded
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
+                size: 16,
+                color: const Color(0xFF94A3B8),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModelRow({
+    required ModelProviderProfileSummary profile,
+    required ProviderModelOption model,
+  }) {
+    final selected =
+        widget.currentSelection?.providerProfileId == profile.id &&
+        widget.currentSelection?.modelId == model.id;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 2, 10, 2),
+      child: InkWell(
+        onTap: () {
+          Navigator.of(context).pop(
+            _ChatModelOverrideSelection(
+              providerProfileId: profile.id,
+              modelId: model.id,
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFFEAF3FF) : const Color(0xFFF8FAFD),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  model.id,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF1F2937),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (selected)
+                const Icon(
+                  Icons.check_rounded,
+                  size: 15,
+                  color: Color(0xFF2C7FEB),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final dynamicMaxHeight =
+        (mediaQuery.size.height - mediaQuery.viewInsets.bottom - 96)
+            .clamp(220.0, widget.estimatedHeight)
+            .toDouble();
+    final configuredProfiles = widget.profiles
+        .where((profile) => profile.configured)
+        .toList();
+    final visibleProfiles = _visibleProfiles;
+    return SizedBox(
+      width: widget.width,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: dynamicMaxHeight),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildSearchRow(),
+            if (configuredProfiles.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  '请先在模型提供商页配置 Provider',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF94A3B8),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              )
+            else if (visibleProfiles.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  '没有匹配的模型',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF94A3B8),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              )
+            else
+              Flexible(
+                child: Scrollbar(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    itemCount: visibleProfiles.length,
+                    itemBuilder: (context, index) {
+                      final profile = visibleProfiles[index];
+                      final expanded = _isExpanded(profile.id);
+                      final models = _filteredModels(profile.id);
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildProfileHeader(profile),
+                          if (expanded)
+                            if (models.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
+                                child: Text(
+                                  '该 Provider 暂无可选模型',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF94A3B8),
+                                  ),
+                                ),
+                              )
+                            else
+                              Column(
+                                children: models
+                                    .map(
+                                      (item) => _buildModelRow(
+                                        profile: profile,
+                                        model: item,
+                                      ),
+                                    )
+                                    .toList(),
+                              ),
+                          if (index != visibleProfiles.length - 1)
+                            const SizedBox(height: 6),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
