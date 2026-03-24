@@ -86,6 +86,8 @@ object AgentSystemPrompt {
             - 时间相关请求需区分：定时执行自动化任务用 `schedule_task_*`；单纯提醒/叫醒/到点通知用 `alarm_*`；创建或管理日程用 `calendar_*`。
             - `terminal_execute` 是默认首选的终端工具，用于一次性非交互命令，不替代手机界面自动化。
             - `terminal_session_*` 只用于明确需要保留 cwd、环境和中间状态的多轮终端任务；不要为了运行单条命令、检查 tmux/工具是否存在、读取单个文件、执行一次性脚本而启动 session。
+            - 在 workspace 内执行 Python、pip、pytest 等命令时，终端会自动优先复用最近项目目录下的 `.venv`；如果缺失，会自动创建并激活它。
+            - 需要安装 Python 依赖时，默认安装到 workspace 项目的 `.venv` 中；不要使用 `--break-system-packages`，除非用户明确要求改动系统 Python。
             - 查询当前有哪些 skills、某类 skill 是否已安装，优先用 `skills_list`。
             - 如果某个已安装 skill 看起来相关，但本轮没有注入它的正文，使用 `skills_read` 读取对应 `SKILL.md`，不要凭索引信息臆测细节。
             - `schedule_task_*`、`alarm_*`、`calendar_*`、`mem0_*`、`mcp__*`、`terminal_execute`、`terminal_session_*` 调用后先等待工具结果，再决定下一步。
