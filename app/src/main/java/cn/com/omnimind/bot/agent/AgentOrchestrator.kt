@@ -40,8 +40,6 @@ class AgentOrchestrator(
     private val tag = "AgentOrchestrator"
 
     companion object {
-        private const val MAX_MODEL_ROUNDS = 6
-        private const val MAX_TOOL_EXECUTIONS = 8
         private const val MAX_EXECUTION_INTENT_RETRIES = 1
         private const val MAX_TOOL_FAILURE_RECOVERY_RETRIES = 2
         internal fun extractRecoverableToolFailure(
@@ -110,10 +108,13 @@ class AgentOrchestrator(
         var executionIntentRetryCount = 0
         var pendingRecoverableToolFailure: RecoverableToolFailure? = null
         var toolFailureRecoveryRetryCount = 0
+        var completedModelRounds = 0
         var terminated = false
 
         try {
-            roundLoop@ for (round in 1..MAX_MODEL_ROUNDS) {
+            roundLoop@ while (true) {
+                completedModelRounds += 1
+                val round = completedModelRounds
                 callback.onThinkingStart()
                 val toolChoiceForRound = if (messages.lastOrNull()?.role == "tool") {
                     null
@@ -289,11 +290,6 @@ class AgentOrchestrator(
                 }
 
                 for (toolCall in toolCalls) {
-                    if (toolExecutionCount >= MAX_TOOL_EXECUTIONS) {
-                        terminated = true
-                        break@roundLoop
-                    }
-
                     val descriptor = toolRegistry.runtimeDescriptor(toolCall.function.name)
                     val parsedArgs: JsonObject = try {
                         parseToolArguments(toolCall.function.arguments)
@@ -413,10 +409,6 @@ class AgentOrchestrator(
                     }
                 }
 
-                if (toolExecutionCount >= MAX_TOOL_EXECUTIONS) {
-                    terminated = true
-                    break
-                }
                 if (terminated) break
             }
         } catch (e: CancellationException) {
