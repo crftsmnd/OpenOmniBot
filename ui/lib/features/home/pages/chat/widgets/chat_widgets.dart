@@ -404,7 +404,6 @@ class _ChatToolSlider extends StatelessWidget {
   final VoidCallback? onInteracted;
 
   const _ChatToolSlider({
-    super.key,
     required this.terminalIconSvg,
     required this.browserIconSvg,
     this.activeToolType,

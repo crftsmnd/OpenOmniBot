@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -30,9 +29,7 @@ class _SvgTestAssetBundle extends CachingAssetBundle {
 }
 
 class _ChatAppBarHarness extends StatefulWidget {
-  const _ChatAppBarHarness({this.isBrowserEnabled = false});
-
-  final bool isBrowserEnabled;
+  const _ChatAppBarHarness();
 
   @override
   State<_ChatAppBarHarness> createState() => _ChatAppBarHarnessState();
@@ -73,7 +70,7 @@ class _ChatAppBarHarnessState extends State<_ChatAppBarHarness> {
                     _browserTapCount += 1;
                   });
                 },
-                isBrowserEnabled: widget.isBrowserEnabled,
+                isBrowserEnabled: false,
                 activeToolType: null,
               ),
               Text('layer:${_displayLayer.wireName}'),
@@ -88,11 +85,9 @@ class _ChatAppBarHarnessState extends State<_ChatAppBarHarness> {
 
 class _SurfaceTransitionHarness extends StatefulWidget {
   const _SurfaceTransitionHarness({
-    this.initialMode = ChatSurfaceMode.openclaw,
     this.applyDelayByMode = const <ChatSurfaceMode, Duration>{},
   });
 
-  final ChatSurfaceMode initialMode;
   final Map<ChatSurfaceMode, Duration> applyDelayByMode;
 
   @override
@@ -104,9 +99,9 @@ class _SurfaceTransitionHarnessState extends State<_SurfaceTransitionHarness> {
   static const Duration _revealDelay = Duration(milliseconds: 1700);
 
   late final PageController _pageController = PageController(
-    initialPage: _pageIndexForSurface(widget.initialMode),
+    initialPage: _pageIndexForSurface(ChatSurfaceMode.openclaw),
   );
-  late ChatSurfaceMode _activeMode = widget.initialMode;
+  ChatSurfaceMode _activeMode = ChatSurfaceMode.openclaw;
   ChatIslandDisplayLayer _normalDisplayLayer = ChatIslandDisplayLayer.model;
   Timer? _revealTimer;
   bool _isSurfacePageScrolling = false;
