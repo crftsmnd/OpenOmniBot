@@ -344,40 +344,20 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
         );
       },
     );
-    final toolLayerWidget = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: _ChatIslandToolButton(
-              key: const ValueKey('chat-island-terminal-button'),
-              svgIcon: _terminalIconSvg,
-              isActive: widget.activeToolType?.trim() == 'terminal',
-              tooltip: '打开终端',
-              onTap: () {
-                _idleTimer?.cancel();
-                widget.onTerminalTap();
-              },
-            ),
-          ),
-          const SizedBox(width: 4),
-          Expanded(
-            child: _ChatIslandToolButton(
-              key: const ValueKey('chat-island-browser-button'),
-              svgIcon: _browserIconSvg,
-              isActive: widget.activeToolType?.trim() == 'browser',
-              isEnabled: widget.isBrowserEnabled,
-              tooltip: widget.isBrowserEnabled
-                  ? '打开当前会话浏览器'
-                  : '当前会话还没有可用的浏览器会话',
-              onTap: () {
-                _idleTimer?.cancel();
-                widget.onBrowserTap();
-              },
-            ),
-          ),
-        ],
-      ),
+    final toolLayerWidget = _ChatToolSlider(
+      terminalIconSvg: _terminalIconSvg,
+      browserIconSvg: _browserIconSvg,
+      activeToolType: widget.activeToolType,
+      isBrowserEnabled: widget.isBrowserEnabled,
+      onTerminalTap: () {
+        _idleTimer?.cancel();
+        widget.onTerminalTap();
+      },
+      onBrowserTap: () {
+        _idleTimer?.cancel();
+        widget.onBrowserTap();
+      },
+      onInteracted: _handleSliderInteraction,
     );
     final currentOrder = _layerOrder(widget.displayLayer);
 
@@ -448,55 +428,143 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
   }
 }
 
-class _ChatIslandToolButton extends StatelessWidget {
-  const _ChatIslandToolButton({
+class _ChatToolSlider extends StatelessWidget {
+  final String terminalIconSvg;
+  final String browserIconSvg;
+  final String? activeToolType;
+  final bool isBrowserEnabled;
+  final VoidCallback onTerminalTap;
+  final VoidCallback onBrowserTap;
+  final VoidCallback? onInteracted;
+
+  const _ChatToolSlider({
     super.key,
-    required this.svgIcon,
-    required this.onTap,
-    this.isEnabled = true,
-    this.isActive = false,
-    this.tooltip,
+    required this.terminalIconSvg,
+    required this.browserIconSvg,
+    this.activeToolType,
+    this.isBrowserEnabled = false,
+    required this.onTerminalTap,
+    required this.onBrowserTap,
+    this.onInteracted,
   });
 
-  final String svgIcon;
-  final VoidCallback onTap;
-  final bool isEnabled;
-  final bool isActive;
-  final String? tooltip;
+  bool get _isBrowserActive => activeToolType?.trim() == 'browser';
+  bool get _isTerminalActive => !_isBrowserActive;
+
+  Alignment get _activeAlignment =>
+      _isBrowserActive ? Alignment.centerRight : Alignment.centerLeft;
 
   @override
   Widget build(BuildContext context) {
-    final foreground = !isEnabled
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+            alignment: _activeAlignment,
+            child: FractionallySizedBox(
+              widthFactor: 0.5,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 1),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF2DA5F0), Color(0xFF1930D9)],
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x291930D9),
+                      blurRadius: 10,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: _buildToolSegment(
+                  key: const ValueKey('chat-island-terminal-button'),
+                  isSelected: _isTerminalActive,
+                  isEnabled: true,
+                  tooltip: '打开终端',
+                  onTap: onTerminalTap,
+                  child: SvgPicture.string(
+                    terminalIconSvg,
+                    width: 16,
+                    height: 16,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: _buildToolSegment(
+                  key: const ValueKey('chat-island-browser-button'),
+                  isSelected: _isBrowserActive,
+                  isEnabled: isBrowserEnabled,
+                  tooltip: isBrowserEnabled ? '打开当前会话浏览器' : '当前会话还没有可用的浏览器会话',
+                  onTap: onBrowserTap,
+                  child: SvgPicture.string(
+                    browserIconSvg,
+                    width: 16,
+                    height: 16,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolSegment({
+    required Key key,
+    required bool isSelected,
+    required bool isEnabled,
+    required String tooltip,
+    required VoidCallback onTap,
+    required Widget child,
+  }) {
+    final color = !isEnabled
         ? const Color(0xFFB8C4D8)
-        : isActive
-        ? const Color(0xFF1930D9)
+        : isSelected
+        ? Colors.white
         : const Color(0xFF617390);
-    final background = isActive ? const Color(0xFFE9EEFF) : Colors.transparent;
-    final child = InkWell(
-      onTap: isEnabled ? onTap : null,
-      borderRadius: BorderRadius.circular(999),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(999),
-        ),
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        key: key,
+        onTap: isEnabled
+            ? () {
+                onInteracted?.call();
+                onTap();
+              }
+            : null,
+        borderRadius: BorderRadius.circular(999),
         child: Center(
-          child: SvgPicture.string(
-            svgIcon,
-            width: 16,
-            height: 16,
-            colorFilter: ColorFilter.mode(foreground, BlendMode.srcIn),
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            scale: isSelected ? 1 : 0.95,
+            child: ColorFiltered(
+              colorFilter: ColorFilter.mode(color, BlendMode.srcIn),
+              child: child,
+            ),
           ),
         ),
       ),
     );
-    if (tooltip == null || tooltip!.trim().isEmpty) {
-      return child;
-    }
-    return Tooltip(message: tooltip, child: child);
   }
 }
 
