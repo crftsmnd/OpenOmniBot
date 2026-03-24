@@ -190,7 +190,10 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
         key: _scaffoldKey,
         backgroundColor: const Color(0xFFF9FCFF),
         resizeToAvoidBottomInset: false,
-        drawer: HomeDrawer(key: _drawerKey),
+        drawer: HomeDrawer(
+          key: _drawerKey,
+          newConversationMode: _conversationModeForPageMode(_activeMode),
+        ),
         onDrawerChanged: (isOpen) {
           if (isOpen) {
             _drawerKey.currentState?.reloadConversations();

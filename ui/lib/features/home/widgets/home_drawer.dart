@@ -17,9 +17,14 @@ import 'package:ui/features/memory/services/mem0_memory_service.dart';
 
 /// 首页侧边栏
 class HomeDrawer extends ConsumerStatefulWidget {
-  const HomeDrawer({super.key, this.memoryCount});
+  const HomeDrawer({
+    super.key,
+    this.memoryCount,
+    this.newConversationMode = ConversationMode.normal,
+  });
 
   final int? memoryCount;
+  final ConversationMode newConversationMode;
 
   @override
   ConsumerState<HomeDrawer> createState() => HomeDrawerState();
@@ -214,6 +219,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
     GoRouterManager.pushReplacement(
       '/home/chat',
       extra: ConversationThreadTarget.newConversation(
+        mode: widget.newConversationMode,
         requestKey: DateTime.now().microsecondsSinceEpoch.toString(),
       ),
     );
