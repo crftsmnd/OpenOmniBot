@@ -131,6 +131,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
   }) async {
     final targetMode = _pageModeForConversationMode(target.mode);
     _storeDraftForActiveConversationMode();
+    _cancelNormalSurfaceModelReveal();
     if (!mounted) return;
     setState(() {
       _resolvedThreadTarget = target;
@@ -142,6 +143,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       _openClawPanelExpanded = false;
       _openClawDeployPanelExpanded = false;
       _isBrowserOverlayVisible = false;
+      _isSurfacePageScrolling = false;
     });
     _resetLocalConversationState(targetMode);
     _vlmAnswerController.clear();
@@ -155,10 +157,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
 
   @override
   Future<void> _ensureConversationModeReady(ChatPageMode mode) async {
-    final runtime = _runtimeForMode(mode);
-    if (_currentConversationIdByMode[mode] != null ||
-        _messagesByMode[mode]!.isNotEmpty ||
-        (runtime?.messages.isNotEmpty ?? false)) {
+    if (_hasPreparedConversationState(mode)) {
       return;
     }
     final target = await _resolveConversationThreadTarget(
@@ -166,7 +165,81 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       preferredMode: _conversationModeForPageMode(mode),
     );
     if (!mounted) return;
-    await _applyConversationThreadTarget(target, syncPage: false);
+    await _prepareConversationModeState(mode, target);
+  }
+
+  bool _hasPreparedConversationState(ChatPageMode mode) {
+    final runtime = _runtimeForMode(mode);
+    final draft = _draftMessageByMode[mode] ?? '';
+    return _currentConversationIdByMode[mode] != null ||
+        _currentConversationByMode[mode] != null ||
+        _messagesByMode[mode]!.isNotEmpty ||
+        (runtime?.messages.isNotEmpty ?? false) ||
+        draft.isNotEmpty ||
+        _pendingAttachmentsByMode[mode]!.isNotEmpty;
+  }
+
+  Future<void> _prepareConversationModeState(
+    ChatPageMode mode,
+    ConversationThreadTarget target,
+  ) async {
+    if (target.isNewConversation) {
+      return;
+    }
+
+    final conversationId = target.conversationId;
+    if (conversationId == null) {
+      return;
+    }
+
+    final runtime = _runtimeCoordinator.runtimeFor(
+      conversationId: conversationId,
+      mode: _modeKey(mode),
+    );
+    final inMemoryConversation = runtime?.conversation;
+    final inMemoryMessages = runtime == null || runtime.messages.isEmpty
+        ? null
+        : List<ChatMessageModel>.from(runtime.messages);
+    final conversations = await ConversationService.getAllConversations();
+    if (!mounted) return;
+
+    ConversationModel? conversation;
+    try {
+      conversation = conversations.firstWhere(
+        (item) =>
+            item.id == conversationId &&
+            item.mode == _conversationModeForPageMode(mode),
+      );
+    } catch (_) {
+      conversation = null;
+    }
+
+    final resolvedConversation = inMemoryConversation ?? conversation;
+    final resolvedMessages =
+        inMemoryMessages ??
+        await ConversationHistoryService.getConversationMessages(
+          conversationId,
+          mode: _conversationModeForPageMode(mode),
+        );
+    if (!mounted) return;
+
+    _currentConversationIdByMode[mode] = conversationId;
+    _currentConversationByMode[mode] = resolvedConversation;
+    _messagesByMode[mode]!
+      ..clear()
+      ..addAll(resolvedMessages);
+
+    if (runtime == null) {
+      _runtimeCoordinator.ensureRuntime(
+        conversationId: conversationId,
+        mode: _modeKey(mode),
+        initialMessages: resolvedMessages,
+        conversation: resolvedConversation,
+        initialChatIslandDisplayLayer: _chatIslandDisplayLayerForMode(mode),
+      );
+    } else if (resolvedConversation != null) {
+      runtime.conversation = resolvedConversation;
+    }
   }
 
   @override
@@ -401,6 +474,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_runtimeCoordinator.flushAllPendingPersistence());
     unawaited(_persistVisibleThreadTargetIfNeeded());
+    _cancelNormalSurfaceModelReveal();
     if (_subscribedRoute != null) {
       GoRouterManager.routeObserver.unsubscribe(this);
       _subscribedRoute = null;
@@ -546,14 +620,23 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     ChatSurfaceMode targetMode, {
     bool syncPage = true,
   }) async {
+    final requestId = ++_surfaceSwitchRequestId;
+    bool isStaleRequest() => !mounted || requestId != _surfaceSwitchRequestId;
     if (!mounted) return;
     if (_activeSurfaceMode == targetMode) {
       if (syncPage) _jumpToCurrentModePage();
+      if (targetMode == ChatSurfaceMode.normal &&
+          !_isSurfacePageScrolling &&
+          (!syncPage || !_modePageController.hasClients)) {
+        _scheduleNormalSurfaceModelReveal();
+      }
       return;
     }
 
+    _cancelNormalSurfaceModelReveal();
     _storeDraftForActiveConversationMode();
     await _persistVisibleThreadTargetIfNeeded();
+    if (isStaleRequest()) return;
 
     if (targetMode == ChatSurfaceMode.workspace) {
       _inputFocusNode.unfocus();
@@ -574,6 +657,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
 
     if (targetMode == ChatSurfaceMode.openclaw) {
       await _ensureConversationModeReady(ChatPageMode.openclaw);
+      if (isStaleRequest()) return;
       final hasConfig = _openClawBaseUrl.trim().isNotEmpty;
       setState(() {
         _activeSurfaceMode = ChatSurfaceMode.openclaw;
@@ -589,6 +673,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       });
       _applyDraftForConversationMode(ChatPageMode.openclaw);
       await _persistVisibleThreadTargetIfNeeded();
+      if (isStaleRequest()) return;
       if (syncPage) _jumpToCurrentModePage();
       if (!hasConfig) {
         showToast('请先输入 /deploy 或 /openclaw 完成配置');
@@ -597,6 +682,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     }
 
     await _ensureConversationModeReady(ChatPageMode.normal);
+    if (isStaleRequest()) return;
     setState(() {
       _activeSurfaceMode = ChatSurfaceMode.normal;
       _activeConversationMode = ChatPageMode.normal;
@@ -607,9 +693,14 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     });
     _applyDraftForConversationMode(ChatPageMode.normal);
     await _persistVisibleThreadTargetIfNeeded();
+    if (isStaleRequest()) return;
     _hideSlashCommandPanel();
     unawaited(_loadNormalChatModelContext());
     if (syncPage) _jumpToCurrentModePage();
+    if (!_isSurfacePageScrolling &&
+        (!syncPage || !_modePageController.hasClients)) {
+      _scheduleNormalSurfaceModelReveal();
+    }
   }
 
   @override

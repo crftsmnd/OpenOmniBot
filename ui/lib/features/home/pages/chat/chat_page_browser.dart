@@ -163,6 +163,7 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
     if (_activeSurfaceMode != ChatSurfaceMode.normal) {
       return;
     }
+    _cancelNormalSurfaceModelReveal();
     setState(() {
       _setChatIslandDisplayLayerForMode(ChatPageMode.normal, layer);
       if (layer != ChatIslandDisplayLayer.tools) {
@@ -176,6 +177,7 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
     if (_activeSurfaceMode != ChatSurfaceMode.normal) {
       return;
     }
+    _cancelNormalSurfaceModelReveal();
     setState(() {
       _setChatIslandDisplayLayerForMode(
         ChatPageMode.normal,
@@ -197,6 +199,7 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
     if (_activeSurfaceMode != ChatSurfaceMode.normal) {
       return;
     }
+    _cancelNormalSurfaceModelReveal();
     if (!Platform.isAndroid) {
       showToast('当前平台暂不支持浏览器工具视图', type: ToastType.warning);
       return;

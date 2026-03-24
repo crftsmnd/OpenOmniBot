@@ -248,6 +248,7 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                                 _activeSurfaceMode == ChatSurfaceMode.normal
                                 ? _chatIslandDisplayLayer
                                 : ChatIslandDisplayLayer.mode,
+                            onInteracted: _cancelNormalSurfaceModelReveal,
                             onDisplayLayerChanged:
                                 _handleChatIslandDisplayLayerChanged,
                             onTerminalTap: _handleTerminalToolTap,
@@ -272,14 +273,20 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                             ),
                           Expanded(
                             child: ClipRect(
-                              child: PageView(
-                                controller: _modePageController,
-                                onPageChanged: _handleModePageChanged,
-                                children: [
-                                  _buildWorkspaceSurfacePage(),
-                                  _buildModeMessagePage(ChatPageMode.normal),
-                                  _buildModeMessagePage(ChatPageMode.openclaw),
-                                ],
+                              child: NotificationListener<ScrollNotification>(
+                                onNotification:
+                                    _handleModePageScrollNotification,
+                                child: PageView(
+                                  controller: _modePageController,
+                                  onPageChanged: _handleModePageChanged,
+                                  children: [
+                                    _buildWorkspaceSurfacePage(),
+                                    _buildModeMessagePage(ChatPageMode.normal),
+                                    _buildModeMessagePage(
+                                      ChatPageMode.openclaw,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),

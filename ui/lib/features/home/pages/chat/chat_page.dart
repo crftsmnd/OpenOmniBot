@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import '../../../../models/conversation_model.dart';
 import '../../../../models/conversation_thread_target.dart';
@@ -235,6 +236,9 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   static const Duration _openClawGatewayInitToastCooldown = Duration(
     seconds: 3,
   );
+  static const Duration _normalSurfaceModelRevealDelay = Duration(
+    milliseconds: 1700,
+  );
   DateTime? _lastOpenClawGatewayInitToastAt;
   int _workspaceSurfaceSeed = 0;
   bool _hasInitializedHalfScreen = false;
@@ -254,6 +258,9 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   String? _lastObservedBrowserSnapshotSignature;
   int? _pageGesturePointerId;
   double _pageVerticalDragDelta = 0;
+  Timer? _normalSurfaceModelRevealTimer;
+  int _surfaceSwitchRequestId = 0;
+  bool _isSurfacePageScrolling = false;
 
   ChatPageMode get _activeMode => _activeConversationMode;
   ConversationMode _conversationModeForPageMode(ChatPageMode mode) =>
@@ -283,6 +290,12 @@ abstract class _ChatPageStateBase extends State<ChatPage>
 
   ChatConversationRuntimeState? get _activeRuntime =>
       _runtimeForMode(_activeMode);
+  ChatIslandDisplayLayer _chatIslandDisplayLayerForMode(ChatPageMode mode) =>
+      _runtimeForMode(mode)?.chatIslandDisplayLayer ??
+      (_chatIslandDisplayLayerByMode[mode] ??
+          (mode == ChatPageMode.normal
+              ? ChatIslandDisplayLayer.model
+              : ChatIslandDisplayLayer.mode));
   bool get _isOpenClawSurface => _activeSurfaceMode == ChatSurfaceMode.openclaw;
   bool get _isWorkspaceSurface =>
       _activeSurfaceMode == ChatSurfaceMode.workspace;
@@ -442,11 +455,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   }
 
   ChatIslandDisplayLayer get _chatIslandDisplayLayer =>
-      _activeRuntime?.chatIslandDisplayLayer ??
-      (_chatIslandDisplayLayerByMode[_activeMode] ??
-          (_activeMode == ChatPageMode.normal
-              ? ChatIslandDisplayLayer.model
-              : ChatIslandDisplayLayer.mode));
+      _chatIslandDisplayLayerForMode(_activeMode);
   set _chatIslandDisplayLayer(ChatIslandDisplayLayer value) {
     final runtime = _activeRuntime;
     if (runtime != null) {
@@ -454,6 +463,127 @@ abstract class _ChatPageStateBase extends State<ChatPage>
       return;
     }
     _chatIslandDisplayLayerByMode[_activeMode] = value;
+  }
+
+  void _cancelNormalSurfaceModelReveal() {
+    _normalSurfaceModelRevealTimer?.cancel();
+    _normalSurfaceModelRevealTimer = null;
+  }
+
+  bool _canAutoRevealNormalSurfaceModel() {
+    final modelId = _activeNormalChatModelId?.trim() ?? '';
+    return _activeSurfaceMode == ChatSurfaceMode.normal &&
+        !_isSurfacePageScrolling &&
+        modelId.isNotEmpty &&
+        _chatIslandDisplayLayerForMode(ChatPageMode.normal) ==
+            ChatIslandDisplayLayer.mode;
+  }
+
+  void _scheduleNormalSurfaceModelReveal() {
+    _cancelNormalSurfaceModelReveal();
+    if (!_canAutoRevealNormalSurfaceModel()) {
+      return;
+    }
+    _normalSurfaceModelRevealTimer = Timer(_normalSurfaceModelRevealDelay, () {
+      _normalSurfaceModelRevealTimer = null;
+      if (!mounted || !_canAutoRevealNormalSurfaceModel()) {
+        return;
+      }
+      setState(() {
+        _setChatIslandDisplayLayerForMode(
+          ChatPageMode.normal,
+          ChatIslandDisplayLayer.model,
+        );
+      });
+    });
+  }
+
+  void _forceNormalSurfaceModeLayer() {
+    if (_chatIslandDisplayLayerForMode(ChatPageMode.normal) ==
+        ChatIslandDisplayLayer.mode) {
+      return;
+    }
+    _setChatIslandDisplayLayerForMode(
+      ChatPageMode.normal,
+      ChatIslandDisplayLayer.mode,
+    );
+  }
+
+  void _handleSurfaceScrollStart() {
+    _cancelNormalSurfaceModelReveal();
+    if (!mounted) {
+      _isSurfacePageScrolling = true;
+      _forceNormalSurfaceModeLayer();
+      return;
+    }
+    if (_isSurfacePageScrolling &&
+        _chatIslandDisplayLayerForMode(ChatPageMode.normal) ==
+            ChatIslandDisplayLayer.mode) {
+      return;
+    }
+    setState(() {
+      _isSurfacePageScrolling = true;
+      _forceNormalSurfaceModeLayer();
+    });
+  }
+
+  void _handleSurfaceScrollSettled(ChatSurfaceMode mode) {
+    _cancelNormalSurfaceModelReveal();
+    if (!mounted) {
+      _isSurfacePageScrolling = false;
+      if (mode == ChatSurfaceMode.normal) {
+        _forceNormalSurfaceModeLayer();
+      }
+      return;
+    }
+    final shouldSettleState =
+        _isSurfacePageScrolling ||
+        (mode == ChatSurfaceMode.normal &&
+            _chatIslandDisplayLayerForMode(ChatPageMode.normal) !=
+                ChatIslandDisplayLayer.mode);
+    if (shouldSettleState) {
+      setState(() {
+        _isSurfacePageScrolling = false;
+        if (mode == ChatSurfaceMode.normal) {
+          _forceNormalSurfaceModeLayer();
+        }
+      });
+    } else {
+      _isSurfacePageScrolling = false;
+    }
+    if (mode == ChatSurfaceMode.normal) {
+      _scheduleNormalSurfaceModelReveal();
+    }
+  }
+
+  bool _handleModePageScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0 ||
+        notification.metrics.axis != Axis.horizontal) {
+      return false;
+    }
+    if (notification is ScrollStartNotification) {
+      _handleSurfaceScrollStart();
+      return false;
+    }
+    if (notification is UserScrollNotification) {
+      final direction = notification.direction;
+      if (direction == ScrollDirection.forward ||
+          direction == ScrollDirection.reverse) {
+        _handleSurfaceScrollStart();
+      }
+      return false;
+    }
+    if (notification is ScrollEndNotification) {
+      final pageMetrics = notification.metrics;
+      final rawPage = pageMetrics is PageMetrics
+          ? pageMetrics.page
+          : (_modePageController.hasClients ? _modePageController.page : null);
+      final settledPageIndex =
+          (rawPage ?? _pageIndexForSurface(_activeSurfaceMode).toDouble())
+              .round();
+      _handleSurfaceScrollSettled(_surfaceForPageIndex(settledPageIndex));
+    }
+    return false;
   }
 
   String? get _lastAgentToolType =>
@@ -697,6 +827,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
         mode: _modeKey(pageMode),
         initialMessages: messages,
         conversation: conversation,
+        initialChatIslandDisplayLayer: _chatIslandDisplayLayerForMode(pageMode),
       );
     } else if (conversation != null) {
       runtime.conversation = conversation;

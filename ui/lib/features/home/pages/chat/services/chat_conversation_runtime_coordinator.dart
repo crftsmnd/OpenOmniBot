@@ -155,15 +155,22 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     required String mode,
     List<ChatMessageModel>? initialMessages,
     ConversationModel? conversation,
+    ChatIslandDisplayLayer? initialChatIslandDisplayLayer,
   }) {
     final key = _runtimeKey(conversationId: conversationId, mode: mode);
-    final runtime = _runtimes.putIfAbsent(
-      key,
-      () => ChatConversationRuntimeState(
-        conversationId: conversationId,
-        mode: mode,
-      ),
-    );
+    final existing = _runtimes[key];
+    final runtime =
+        existing ??
+        ChatConversationRuntimeState(
+          conversationId: conversationId,
+          mode: mode,
+        );
+    if (existing == null) {
+      if (initialChatIslandDisplayLayer != null) {
+        runtime.chatIslandDisplayLayer = initialChatIslandDisplayLayer;
+      }
+      _runtimes[key] = runtime;
+    }
     if (runtime.messages.isEmpty && initialMessages != null) {
       runtime.messages
         ..clear()

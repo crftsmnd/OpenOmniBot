@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../../../models/chat_message_model.dart';
@@ -18,6 +16,7 @@ class ChatAppBar extends StatelessWidget {
   final String? activeModelId;
   final ValueChanged<BuildContext>? onModelTap;
   final ChatIslandDisplayLayer displayLayer;
+  final VoidCallback? onInteracted;
   final ValueChanged<ChatIslandDisplayLayer> onDisplayLayerChanged;
   final VoidCallback onTerminalTap;
   final VoidCallback onBrowserTap;
@@ -35,6 +34,7 @@ class ChatAppBar extends StatelessWidget {
     this.activeModelId,
     this.onModelTap,
     this.displayLayer = ChatIslandDisplayLayer.mode,
+    this.onInteracted,
     required this.onDisplayLayerChanged,
     required this.onTerminalTap,
     required this.onBrowserTap,
@@ -78,6 +78,7 @@ class ChatAppBar extends StatelessWidget {
                     activeModelId: activeModelId,
                     onModelTap: onModelTap,
                     displayLayer: displayLayer,
+                    onInteracted: onInteracted,
                     onDisplayLayerChanged: onDisplayLayerChanged,
                     onTerminalTap: onTerminalTap,
                     onBrowserTap: onBrowserTap,
@@ -133,6 +134,7 @@ class _ChatModeModelSwitcher extends StatefulWidget {
     this.activeModelId,
     this.onModelTap,
     required this.displayLayer,
+    this.onInteracted,
     required this.onDisplayLayerChanged,
     required this.onTerminalTap,
     required this.onBrowserTap,
@@ -145,6 +147,7 @@ class _ChatModeModelSwitcher extends StatefulWidget {
   final String? activeModelId;
   final ValueChanged<BuildContext>? onModelTap;
   final ChatIslandDisplayLayer displayLayer;
+  final VoidCallback? onInteracted;
   final ValueChanged<ChatIslandDisplayLayer> onDisplayLayerChanged;
   final VoidCallback onTerminalTap;
   final VoidCallback onBrowserTap;
@@ -178,14 +181,12 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
       'C5.9604 4.68775 8.7831 3 12 3C16.9706 3 21 7.02944 21 12C21 16.9706 '
       '16.9706 21 12 21C11.5722 21 11.1513 20.9702 10.7394 20.9124"/>'
       '</svg>';
-  static const Duration _idleDelay = Duration(milliseconds: 1700);
   static const Duration _switchDuration = Duration(milliseconds: 460);
   static const double _verticalSwitchThreshold = 10;
   static const double _verticalVelocityThreshold = 240;
   static const double _switcherHeight = 32;
   static const double _offstageLayerGap = 2;
 
-  Timer? _idleTimer;
   double _verticalDragDelta = 0;
   double _horizontalDragDelta = 0;
 
@@ -201,59 +202,14 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
       widget.activeMode == ChatSurfaceMode.normal &&
       (widget.activeModelId ?? '').trim().isNotEmpty;
 
-  bool get _shouldAutoRevealModel =>
-      _canRevealModelLabel &&
-      widget.displayLayer == ChatIslandDisplayLayer.mode;
-
   int _layerOrder(ChatIslandDisplayLayer layer) => switch (layer) {
     ChatIslandDisplayLayer.tools => 0,
     ChatIslandDisplayLayer.model => 1,
     ChatIslandDisplayLayer.mode => 2,
   };
 
-  @override
-  void initState() {
-    super.initState();
-    _armIdleTimer();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ChatModeModelSwitcher oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.activeMode != widget.activeMode ||
-        oldWidget.displayLayer != widget.displayLayer) {
-      _armIdleTimer();
-      return;
-    }
-    final previousModelId = (oldWidget.activeModelId ?? '').trim();
-    final currentModelId = (widget.activeModelId ?? '').trim();
-    if (previousModelId != currentModelId) {
-      _armIdleTimer();
-    }
-  }
-
-  @override
-  void dispose() {
-    _idleTimer?.cancel();
-    super.dispose();
-  }
-
-  void _armIdleTimer() {
-    _idleTimer?.cancel();
-    if (!_shouldAutoRevealModel) {
-      return;
-    }
-    _idleTimer = Timer(_idleDelay, () {
-      if (!mounted || !_shouldAutoRevealModel) {
-        return;
-      }
-      widget.onDisplayLayerChanged(ChatIslandDisplayLayer.model);
-    });
-  }
-
   void _handleSliderInteraction() {
-    _idleTimer?.cancel();
-    _armIdleTimer();
+    widget.onInteracted?.call();
   }
 
   void _handleHorizontalDragUpdate(DragUpdateDetails details) {
@@ -285,6 +241,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
       0,
       ChatSurfaceMode.values.length - 1,
     );
+    widget.onInteracted?.call();
     widget.onModeChanged(ChatSurfaceMode.values[targetIndex]);
   }
 
@@ -307,7 +264,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
     if (widget.activeMode != ChatSurfaceMode.normal) {
       return;
     }
-    _idleTimer?.cancel();
+    widget.onInteracted?.call();
     if (intent > 0) {
       if (widget.displayLayer != ChatIslandDisplayLayer.tools) {
         widget.onDisplayLayerChanged(ChatIslandDisplayLayer.tools);
@@ -340,7 +297,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
         }
         return InkWell(
           onTap: () {
-            _idleTimer?.cancel();
+            widget.onInteracted?.call();
             widget.onModelTap?.call(anchorContext);
           },
           borderRadius: BorderRadius.circular(999),
@@ -354,11 +311,11 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
       activeToolType: widget.activeToolType,
       isBrowserEnabled: widget.isBrowserEnabled,
       onTerminalTap: () {
-        _idleTimer?.cancel();
+        widget.onInteracted?.call();
         widget.onTerminalTap();
       },
       onBrowserTap: () {
-        _idleTimer?.cancel();
+        widget.onInteracted?.call();
         widget.onBrowserTap();
       },
       onInteracted: _handleSliderInteraction,

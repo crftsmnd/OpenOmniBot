@@ -274,4 +274,25 @@ void main() {
     expect(snapshot?.title, 'Sign In');
     expect(snapshot?.userAgentProfile, 'desktop_safari');
   });
+
+  test('applies initial island layer when a runtime is created late', () {
+    const conversationId = 7001;
+
+    final runtime = coordinator.ensureRuntime(
+      conversationId: conversationId,
+      mode: kChatRuntimeModeNormal,
+      initialChatIslandDisplayLayer: ChatIslandDisplayLayer.mode,
+    );
+
+    expect(runtime.chatIslandDisplayLayer, ChatIslandDisplayLayer.mode);
+
+    final reused = coordinator.ensureRuntime(
+      conversationId: conversationId,
+      mode: kChatRuntimeModeNormal,
+      initialChatIslandDisplayLayer: ChatIslandDisplayLayer.model,
+    );
+
+    expect(identical(runtime, reused), isTrue);
+    expect(reused.chatIslandDisplayLayer, ChatIslandDisplayLayer.mode);
+  });
 }
