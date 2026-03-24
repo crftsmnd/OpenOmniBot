@@ -24,6 +24,8 @@ class AgentSystemPromptTest {
         )
 
         assertTrue(prompt.contains(".venv"))
+        assertTrue(prompt.contains("uv"))
+        assertTrue(prompt.contains("--copies"))
         assertTrue(prompt.contains("--break-system-packages"))
     }
 }

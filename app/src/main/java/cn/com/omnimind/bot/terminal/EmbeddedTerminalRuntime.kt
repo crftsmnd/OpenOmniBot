@@ -94,7 +94,7 @@ object EmbeddedTerminalRuntime {
 
     private const val PREFS_NAME = "embedded_terminal_runtime"
     private const val KEY_BASE_PACKAGE_VERSION = "base_package_version"
-    private const val BASE_PACKAGE_VERSION = 1
+    private const val BASE_PACKAGE_VERSION = 2
     private const val SESSION_DONE_PREFIX = "__OMNIBOT_SESSION_DONE__"
     private const val DEFAULT_CURRENT_DIRECTORY = "/root"
     private const val BASE_PACKAGE_READY_MARKER = "__OMNIBOT_BASE_PACKAGES_READY__"
@@ -108,12 +108,14 @@ object EmbeddedTerminalRuntime {
         "git",
         "node",
         "npm",
+        "pipx",
         "pkill",
         "python",
         "python3",
         "pip3",
         "rg",
         "tmux",
+        "uv",
         "xz"
     )
 
@@ -132,6 +134,7 @@ object EmbeddedTerminalRuntime {
           git \
           nodejs \
           npm \
+          pipx \
           procps \
           psmisc \
           python-is-python3 \
@@ -140,7 +143,11 @@ object EmbeddedTerminalRuntime {
           python3-venv \
           ripgrep \
           tmux \
-          xz-utils
+          xz-utils && \
+        export PATH="${'$'}HOME/.local/bin:${'$'}PATH" && \
+        pipx install uv --force && \
+        if [ -x "${'$'}HOME/.local/bin/uv" ]; then ln -sf "${'$'}HOME/.local/bin/uv" /usr/local/bin/uv; fi && \
+        if [ -x "${'$'}HOME/.local/bin/uvx" ]; then ln -sf "${'$'}HOME/.local/bin/uvx" /usr/local/bin/uvx; fi
     """.trimIndent()
 
     fun isSupportedDevice(): Boolean {
@@ -439,7 +446,20 @@ object EmbeddedTerminalRuntime {
         timeoutSeconds: Int,
         onLiveUpdate: suspend (TermuxLiveUpdate) -> Unit = {}
     ): CommandResult {
-        val status = prepareEnvironment(context, installBasePackages = false)
+        val status = ensureCommandEnvironmentReady(context) { progress ->
+            if (progress.message.isBlank()) return@ensureCommandEnvironmentReady
+            onLiveUpdate(
+                TermuxLiveUpdate(
+                    sessionId = "env-bootstrap",
+                    summary = progress.message,
+                    outputDelta = if (progress.kind == EnvironmentProgress.Kind.OUTPUT) progress.message else "",
+                    streamState = when (progress.kind) {
+                        EnvironmentProgress.Kind.ERROR -> "error"
+                        else -> "running"
+                    }
+                )
+            )
+        }
         val liveSessionId = UUID.randomUUID().toString()
         if (!status.success) {
             return CommandResult(
@@ -510,7 +530,7 @@ object EmbeddedTerminalRuntime {
         requestedSessionId: String,
         workingDirectory: String?
     ): SessionStartResult {
-        val status = prepareEnvironment(context, installBasePackages = false)
+        val status = ensureCommandEnvironmentReady(context)
         require(status.success) { status.message }
 
         val manager = terminalManager(context)
@@ -575,7 +595,7 @@ object EmbeddedTerminalRuntime {
                 errorMessage = "终端会话不存在：$sessionId"
             )
 
-        val status = prepareEnvironment(context, installBasePackages = false)
+        val status = ensureCommandEnvironmentReady(context)
         if (!status.success) {
             return SessionCommandResult(
                 sessionId = sessionId,
@@ -762,6 +782,8 @@ object EmbeddedTerminalRuntime {
     }
 
     internal fun buildPythonEnvironmentPrelude(): String = """
+        export PATH="${'$'}HOME/.local/bin:${'$'}PATH"
+
         __omni_find_python_project_root() {
           __omni_current_dir="${'$'}PWD"
           __omni_workspace_root=${TermuxCommandBuilder.quoteForShell(AgentWorkspaceManager.SHELL_ROOT_PATH)}
@@ -801,8 +823,11 @@ object EmbeddedTerminalRuntime {
           __omni_project_root=$(__omni_find_python_project_root) || return 0
           __omni_venv_dir="${'$'}__omni_project_root/.venv"
           if [ ! -f "${'$'}__omni_venv_dir/bin/activate" ] && [ "${'$'}__omni_create_if_missing" = "1" ]; then
+            if [ -d "${'$'}__omni_venv_dir" ]; then
+              rm -rf "${'$'}__omni_venv_dir" || return ${'$'}?
+            fi
             printf '[omnibot] Creating Python virtual environment at %s\n' "${'$'}__omni_venv_dir" >&2
-            command python3 -m venv "${'$'}__omni_venv_dir" || return ${'$'}?
+            command python3 -m venv --copies "${'$'}__omni_venv_dir" || return ${'$'}?
           fi
           if [ -f "${'$'}__omni_venv_dir/bin/activate" ] && [ "${'$'}VIRTUAL_ENV" != "${'$'}__omni_venv_dir" ]; then
             if [ -n "${'$'}VIRTUAL_ENV" ] && command -v deactivate >/dev/null 2>&1; then
@@ -926,6 +951,25 @@ object EmbeddedTerminalRuntime {
             .apply()
     }
 
+    private suspend fun ensureCommandEnvironmentReady(
+        context: Context,
+        onProgress: suspend (EnvironmentProgress) -> Unit = {}
+    ): EnvironmentStatus {
+        val status = prepareEnvironment(
+            context = context,
+            installBasePackages = false,
+            onProgress = onProgress
+        )
+        if (!status.success || status.basePackagesReady) {
+            return status
+        }
+        return prepareEnvironment(
+            context = context,
+            installBasePackages = true,
+            onProgress = onProgress
+        )
+    }
+
     private suspend fun probeBasePackageCommands(context: Context): BasePackageProbeResult {
         val result = terminalManager(context).executeHiddenCommand(
             command = buildBasePackageProbeCommand(),
@@ -975,6 +1019,7 @@ object EmbeddedTerminalRuntime {
     private fun buildBasePackageProbeCommand(): String {
         val commands = requiredCliCommands.joinToString(" ")
         return """
+            export PATH="${'$'}HOME/.local/bin:${'$'}PATH"
             missing=""
             for cmd in $commands; do
               if ! command -v "${'$'}cmd" >/dev/null 2>&1; then
