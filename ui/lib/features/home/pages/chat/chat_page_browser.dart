@@ -27,6 +27,12 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
       _pageVerticalDragDelta = 0;
       return;
     }
+    if (_isBrowserOverlayVisible &&
+        _isPointerInside(_browserOverlayKey, event.position)) {
+      _pageGesturePointerId = null;
+      _pageVerticalDragDelta = 0;
+      return;
+    }
     _pageGesturePointerId = event.pointer;
     _pageVerticalDragDelta = 0;
   }
@@ -387,19 +393,22 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
       top: bounds.top,
       width: bounds.width,
       height: bounds.height,
-      child: ChatBrowserOverlay(
+      child: KeyedSubtree(
         key: ValueKey(
           'agent-browser-overlay-${snapshot.workspaceId}-$_browserOverlayViewSeed',
         ),
-        workspaceId: snapshot.workspaceId,
-        title: snapshot.title,
-        currentUrl: snapshot.currentUrl,
-        onClose: _hideBrowserOverlay,
-        onDragDelta: (delta) => _moveBrowserOverlay(delta, constraints),
-        onResizeLeftDelta: (delta) =>
-            _resizeBrowserOverlayFromLeft(delta, constraints),
-        onResizeRightDelta: (delta) =>
-            _resizeBrowserOverlayFromRight(delta, constraints),
+        child: ChatBrowserOverlay(
+          key: _browserOverlayKey,
+          workspaceId: snapshot.workspaceId,
+          title: snapshot.title,
+          currentUrl: snapshot.currentUrl,
+          onClose: _hideBrowserOverlay,
+          onDragDelta: (delta) => _moveBrowserOverlay(delta, constraints),
+          onResizeLeftDelta: (delta) =>
+              _resizeBrowserOverlayFromLeft(delta, constraints),
+          onResizeRightDelta: (delta) =>
+              _resizeBrowserOverlayFromRight(delta, constraints),
+        ),
       ),
     );
   }

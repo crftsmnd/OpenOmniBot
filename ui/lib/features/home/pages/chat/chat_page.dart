@@ -90,6 +90,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
       GlobalKey<ChatInputAreaState>();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final GlobalKey<HomeDrawerState> _drawerKey = GlobalKey<HomeDrawerState>();
+  final GlobalKey _browserOverlayKey = GlobalKey();
 
   // ===================== State =====================
   bool _isPopupVisible = false;
