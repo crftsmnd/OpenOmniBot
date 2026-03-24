@@ -498,7 +498,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
         _messageController.clear();
         _setChatIslandDisplayLayerForMode(
           ChatPageMode.normal,
-          ChatIslandDisplayLayer.model,
+          ChatIslandDisplayLayer.mode,
         );
         _isBrowserOverlayVisible = false;
       });
@@ -517,7 +517,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
         _activeModelMentionToken = null;
         _setChatIslandDisplayLayerForMode(
           ChatPageMode.normal,
-          ChatIslandDisplayLayer.model,
+          ChatIslandDisplayLayer.mode,
         );
         _isBrowserOverlayVisible = false;
       });
@@ -534,6 +534,10 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       _activeSurfaceMode = ChatSurfaceMode.normal;
       _activeConversationMode = ChatPageMode.normal;
       _openClawEnabled = false;
+      _setChatIslandDisplayLayerForMode(
+        ChatPageMode.normal,
+        ChatIslandDisplayLayer.mode,
+      );
     });
     _applyDraftForConversationMode(ChatPageMode.normal);
     await StorageService.setBool(kOpenClawEnabledKey, false);
