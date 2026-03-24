@@ -573,6 +573,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
         _activeModelMentionToken = null;
       });
       _applyDraftForConversationMode(ChatPageMode.openclaw);
+      await restoreConversationForCurrentModeIfNeeded();
       await StorageService.setBool(kOpenClawEnabledKey, hasConfig);
       if (syncPage) _jumpToCurrentModePage();
       if (!hasConfig) {
@@ -587,6 +588,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       _openClawEnabled = false;
     });
     _applyDraftForConversationMode(ChatPageMode.normal);
+    await restoreConversationForCurrentModeIfNeeded();
     await StorageService.setBool(kOpenClawEnabledKey, false);
     _hideSlashCommandPanel();
     unawaited(_loadNormalChatModelContext());

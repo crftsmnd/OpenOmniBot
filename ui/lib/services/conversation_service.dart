@@ -111,6 +111,16 @@ class ConversationService {
     return conversations;
   }
 
+  static List<ConversationModel> _filterConversationsByMode(
+    List<ConversationModel> conversations,
+    String mode,
+  ) {
+    final normalizedMode = normalizeConversationMode(mode);
+    return conversations
+        .where((conversation) => conversation.resolvedMode == normalizedMode)
+        .toList();
+  }
+
   static int _nextConversationId(List<ConversationModel> conversations) {
     if (conversations.isEmpty) return 1;
     int maxId = conversations.first.id;
@@ -155,6 +165,31 @@ class ConversationService {
     }
 
     return [];
+  }
+
+  /// 获取指定模式的对话列表
+  static Future<List<ConversationModel>> getConversationsByMode(String mode) async {
+    final conversations = await getAllConversations();
+    return _filterConversationsByMode(conversations, mode);
+  }
+
+  /// 获取指定模式下最近一条对话
+  static Future<ConversationModel?> getLatestConversationByMode(String mode) async {
+    final conversations = await getConversationsByMode(mode);
+    if (conversations.isEmpty) {
+      return null;
+    }
+    return conversations.first;
+  }
+
+  /// 获取指定对话
+  static Future<ConversationModel?> getConversationById(int conversationId) async {
+    final conversations = await getAllConversations();
+    try {
+      return conversations.firstWhere((conversation) => conversation.id == conversationId);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 分页获取对话列表
@@ -229,10 +264,26 @@ class ConversationService {
       conversations.removeWhere((c) => c.id == conversationId);
       await _saveLocalConversations(_sortConversations(conversations));
 
-      // 3. 如果删除的是当前对话，清除当前对话ID
-      final currentId = await ConversationHistoryService.getCurrentConversationId();
-      if (currentId == conversationId) {
-        await ConversationHistoryService.saveCurrentConversationId(null);
+      // 3. 如果删除的是某个模式下的当前对话，清除对应模式的 currentConversationId
+      for (final mode in <String>[
+        kConversationModeNormal,
+        kConversationModeOpenClaw,
+      ]) {
+        final currentId = await ConversationHistoryService.getCurrentConversationId(
+          mode: mode,
+        );
+        if (currentId == conversationId) {
+          await ConversationHistoryService.saveCurrentConversationId(
+            null,
+            mode: mode,
+          );
+        }
+      }
+
+      final lastActiveId =
+          await ConversationHistoryService.getLastActiveConversationId();
+      if (lastActiveId == conversationId) {
+        await ConversationHistoryService.saveLastActiveConversationId(null);
         await setCurrentConversationId(null);
       }
 

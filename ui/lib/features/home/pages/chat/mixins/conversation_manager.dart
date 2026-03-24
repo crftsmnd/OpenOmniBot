@@ -8,6 +8,7 @@ import '../../../../../services/conversation_history_service.dart';
 /// 负责对话的创建、加载、保存、切换等功能
 mixin ConversationManager<T extends StatefulWidget> on State<T> {
   static const String _kNativeRouteFlag = '__from_native__';
+  static bool _hasBootstrappedConversationRestore = false;
   bool _hasSavedConversation = false;
 
   // ===================== 抽象属性/方法（需要在主类中实现）=====================
@@ -19,6 +20,7 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
   set currentConversation(ConversationModel? value);
   String get currentConversationMode;
   List<String> get widgetArgs;
+  void onAllConversationCachesCleared() {}
   void onConversationReset() {}
   void onConversationLoaded(
     int conversationId,
@@ -40,14 +42,18 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
       await ConversationHistoryService.reloadLocalCache();
     }
 
+    final allowLatestConversationRestore = !_hasBootstrappedConversationRestore;
+    _hasBootstrappedConversationRestore = true;
+
     if (widgetArgs.isNotEmpty) {
       final idStr = widgetArgs.first;
 
       // 检查是否是新对话的特殊标识
       if (idStr == 'new' || idStr == '__new__') {
         // 清除当前对话状态，开始新对话
+        onAllConversationCachesCleared();
         await ConversationService.setCurrentConversationId(null);
-        await ConversationHistoryService.saveCurrentConversationId(null);
+        await ConversationHistoryService.clearAllCurrentConversationIds();
         setState(() {
           messages.clear();
           currentConversationId = null;
@@ -62,6 +68,13 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
       if (conversationId != null) {
         await loadConversation(conversationId);
         await ConversationService.setCurrentConversationId(conversationId);
+        await ConversationHistoryService.saveCurrentConversationId(
+          conversationId,
+          mode: currentConversationMode,
+        );
+        await ConversationHistoryService.saveLastActiveConversationId(
+          conversationId,
+        );
 
         // 加载对话后，再次验证对话是否仍然存在
         verifyConversationExists();
@@ -69,28 +82,81 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
       }
     }
 
-    // 如果没有传入conversationId，尝试恢复上次的对话
-    final savedConversationId = await ConversationHistoryService.getCurrentConversationId();
-    if (savedConversationId != null) {
-      await loadConversation(savedConversationId);
-      await ConversationService.setCurrentConversationId(savedConversationId);
+    await restoreConversationForCurrentModeIfNeeded(
+      allowLatestFallback: allowLatestConversationRestore,
+    );
+  }
 
-      // 恢复对话后，再次验证对话是否仍然存在
-      verifyConversationExists();
+  Future<void> restoreConversationForCurrentModeIfNeeded({
+    bool allowLatestFallback = false,
+  }) async {
+    if (currentConversationId != null || messages.isNotEmpty) {
       return;
     }
 
-    await _restoreLatestConversationOrReset();
+    final requestedMode = currentConversationMode;
+    final savedConversationId =
+        await ConversationHistoryService.getCurrentConversationId(
+      mode: requestedMode,
+    );
+    if (!mounted || currentConversationMode != requestedMode) {
+      return;
+    }
+
+    if (savedConversationId != null) {
+      final savedConversation = await ConversationService.getConversationById(
+        savedConversationId,
+      );
+      if (!mounted || currentConversationMode != requestedMode) {
+        return;
+      }
+
+      if (savedConversation != null &&
+          savedConversation.resolvedMode != normalizeConversationMode(
+            requestedMode,
+          )) {
+        await ConversationHistoryService.saveCurrentConversationId(
+          null,
+          mode: requestedMode,
+        );
+      } else {
+        await loadConversation(savedConversationId);
+        await ConversationService.setCurrentConversationId(savedConversationId);
+        await ConversationHistoryService.saveLastActiveConversationId(
+          savedConversationId,
+        );
+
+        // 恢复对话后，再次验证对话是否仍然存在
+        verifyConversationExists();
+        return;
+      }
+    }
+
+    if (allowLatestFallback) {
+      await _restoreLatestConversationOrReset(requestedMode: requestedMode);
+      return;
+    }
+
+    await _resetCurrentConversationOrPersistedSelection(requestedMode);
   }
 
-  Future<void> _restoreLatestConversationOrReset() async {
+  Future<void> _restoreLatestConversationOrReset({
+    required String requestedMode,
+  }) async {
     try {
-      final conversations = await ConversationService.getAllConversations();
-      if (conversations.isNotEmpty) {
-        final latestConversation = conversations.first;
+      final latestConversation =
+          await ConversationService.getLatestConversationByMode(requestedMode);
+      if (!mounted || currentConversationMode != requestedMode) {
+        return;
+      }
+      if (latestConversation != null) {
         await loadConversation(latestConversation.id);
         await ConversationService.setCurrentConversationId(latestConversation.id);
         await ConversationHistoryService.saveCurrentConversationId(
+          latestConversation.id,
+          mode: requestedMode,
+        );
+        await ConversationHistoryService.saveLastActiveConversationId(
           latestConversation.id,
         );
         verifyConversationExists();
@@ -98,6 +164,16 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
       }
     } catch (e) {
       debugPrint('恢复最近对话失败: $e');
+    }
+
+    await _resetCurrentConversationOrPersistedSelection(requestedMode);
+  }
+
+  Future<void> _resetCurrentConversationOrPersistedSelection(
+    String requestedMode,
+  ) async {
+    if (mounted && currentConversationMode != requestedMode) {
+      return;
     }
 
     if (mounted) {
@@ -116,7 +192,11 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
 
     onConversationReset();
     await ConversationService.setCurrentConversationId(null);
-    await ConversationHistoryService.saveCurrentConversationId(null);
+    await ConversationHistoryService.saveCurrentConversationId(
+      null,
+      mode: requestedMode,
+    );
+    await ConversationHistoryService.saveLastActiveConversationId(null);
   }
 
   /// 加载对话
@@ -178,14 +258,21 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
           return;
         }
 
-        if (allConversations.isNotEmpty) {
-          final fallbackConversation = allConversations.first;
+        final modeConversations = await ConversationService.getConversationsByMode(
+          currentConversationMode,
+        );
+        if (modeConversations.isNotEmpty) {
+          final fallbackConversation = modeConversations.first;
           await loadConversation(fallbackConversation.id);
           await ConversationService.setCurrentConversationId(fallbackConversation.id);
           await ConversationHistoryService.saveCurrentConversationId(
             fallbackConversation.id,
+            mode: currentConversationMode,
           );
-          debugPrint('当前对话已失效，已切换到最近对话: ${fallbackConversation.id}');
+          await ConversationHistoryService.saveLastActiveConversationId(
+            fallbackConversation.id,
+          );
+          debugPrint('当前对话已失效，已切换到当前模式最近对话: ${fallbackConversation.id}');
           return;
         }
 
@@ -202,7 +289,11 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
           currentConversation = null;
         }
         await ConversationService.setCurrentConversationId(null);
-        await ConversationHistoryService.saveCurrentConversationId(null);
+        await ConversationHistoryService.saveCurrentConversationId(
+          null,
+          mode: currentConversationMode,
+        );
+        await ConversationHistoryService.saveLastActiveConversationId(null);
         debugPrint('当前对话已被删除，已切换到新对话');
       }
     } catch (e) {
@@ -242,7 +333,13 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
 
       await ConversationService.updateConversation(recovered);
       await ConversationService.setCurrentConversationId(conversationId);
-      await ConversationHistoryService.saveCurrentConversationId(conversationId);
+      await ConversationHistoryService.saveCurrentConversationId(
+        conversationId,
+        mode: currentConversationMode,
+      );
+      await ConversationHistoryService.saveLastActiveConversationId(
+        conversationId,
+      );
 
       if (mounted) {
         setState(() {
@@ -377,7 +474,13 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
 
           if (currentConversationId == snapshotConversationId) {
              await ConversationService.setCurrentConversationId(newConversationId);
-             await ConversationHistoryService.saveCurrentConversationId(newConversationId);
+             await ConversationHistoryService.saveCurrentConversationId(
+               newConversationId,
+               mode: currentConversationMode,
+             );
+             await ConversationHistoryService.saveLastActiveConversationId(
+               newConversationId,
+             );
           }
         }
       }
@@ -386,7 +489,13 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
         // 只有当前上下文仍然是该对话时，才更新全局当前对话ID
         if (currentConversationId == snapshotConversationId) {
           await ConversationService.setCurrentConversationId(targetId);
-          await ConversationHistoryService.saveCurrentConversationId(targetId);
+          await ConversationHistoryService.saveCurrentConversationId(
+            targetId,
+            mode: currentConversationMode,
+          );
+          await ConversationHistoryService.saveLastActiveConversationId(
+            targetId,
+          );
         }
         
         await ConversationHistoryService.saveConversationMessages(
@@ -457,6 +566,7 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
 
   /// 创建新对话
   Future<void> createNewConversation() async {
+    onAllConversationCachesCleared();
     setState(() {
       messages.clear();
       currentConversationId = null;
@@ -466,6 +576,6 @@ mixin ConversationManager<T extends StatefulWidget> on State<T> {
     onConversationReset();
 
     await ConversationService.setCurrentConversationId(null);
-    await ConversationHistoryService.saveCurrentConversationId(null);
+    await ConversationHistoryService.clearAllCurrentConversationIds();
   }
 }

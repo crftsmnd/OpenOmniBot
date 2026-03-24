@@ -644,7 +644,11 @@ class _ChatBotSheetState extends State<ChatBotSheet> with AgentStreamHandler {
           );
           // 同步对话ID到Kotlin层，用于任务完成后导航
           await ConversationService.setCurrentConversationId(newId);
-          await ConversationHistoryService.saveCurrentConversationId(newId);
+          await ConversationHistoryService.saveCurrentConversationId(
+            newId,
+            mode: kConversationModeNormal,
+          );
+          await ConversationHistoryService.saveLastActiveConversationId(newId);
           debugPrint('[ChatBotSheet] 创建对话成功，ID: $newId');
         }
       }
@@ -654,6 +658,10 @@ class _ChatBotSheetState extends State<ChatBotSheet> with AgentStreamHandler {
           _currentConversationId,
         );
         await ConversationHistoryService.saveCurrentConversationId(
+          _currentConversationId,
+          mode: kConversationModeNormal,
+        );
+        await ConversationHistoryService.saveLastActiveConversationId(
           _currentConversationId,
         );
         await ConversationHistoryService.saveConversationMessages(

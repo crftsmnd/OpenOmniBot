@@ -646,6 +646,15 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   Future<void> persistAgentConversation() => saveConversation();
 
   @override
+  void onAllConversationCachesCleared() {
+    for (final mode in ChatPageMode.values) {
+      _resetLocalConversationState(mode);
+    }
+    _messageController.clear();
+    _vlmAnswerController.clear();
+  }
+
+  @override
   void onConversationReset() {
     _resetLocalConversationState(_activeMode);
   }
