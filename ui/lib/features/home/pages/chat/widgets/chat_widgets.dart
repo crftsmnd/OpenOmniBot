@@ -47,77 +47,80 @@ class ChatAppBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final iconTint = Colors.grey[800]!;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      child: Row(
-        children: [
-          // 左侧菜单按钮 - 和主页一样的样式
-          GestureDetector(
-            onTap: onMenuTap,
-            child: Container(
-              color: Colors.transparent,
-              padding: const EdgeInsets.all(15),
-              child: SvgPicture.asset(
-                'assets/home/drawer_icon.svg',
-                width: 20,
-                height: 20,
-                colorFilter: ColorFilter.mode(iconTint, BlendMode.srcIn),
-              ),
-            ),
-          ),
-          // 顶部模式滑块
-          Expanded(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 176),
-                child: _ChatModeModelSwitcher(
-                  activeMode: activeMode,
-                  onModeChanged: onModeChanged,
-                  activeModelId: activeModelId,
-                  onModelTap: onModelTap,
-                  displayLayer: displayLayer,
-                  onDisplayLayerChanged: onDisplayLayerChanged,
-                  onTerminalTap: onTerminalTap,
-                  onBrowserTap: onBrowserTap,
-                  isBrowserEnabled: isBrowserEnabled,
-                  activeToolType: activeToolType,
+    return ColoredBox(
+      color: const Color(0xFFF9FCFF),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          children: [
+            // 左侧菜单按钮 - 和主页一样的样式
+            GestureDetector(
+              onTap: onMenuTap,
+              child: Container(
+                color: Colors.transparent,
+                padding: const EdgeInsets.all(15),
+                child: SvgPicture.asset(
+                  'assets/home/drawer_icon.svg',
+                  width: 20,
+                  height: 20,
+                  colorFilter: ColorFilter.mode(iconTint, BlendMode.srcIn),
                 ),
               ),
             ),
-          ),
-          // 右侧小万陪伴按钮
-          GestureDetector(
-            onTap: isCompanionToggleLoading ? null : onCompanionTap,
-            child: Container(
-              color: Colors.transparent,
-              padding: const EdgeInsets.all(15),
-              child: isCompanionToggleLoading
-                  ? SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
+            // 顶部模式滑块
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 176),
+                  child: _ChatModeModelSwitcher(
+                    activeMode: activeMode,
+                    onModeChanged: onModeChanged,
+                    activeModelId: activeModelId,
+                    onModelTap: onModelTap,
+                    displayLayer: displayLayer,
+                    onDisplayLayerChanged: onDisplayLayerChanged,
+                    onTerminalTap: onTerminalTap,
+                    onBrowserTap: onBrowserTap,
+                    isBrowserEnabled: isBrowserEnabled,
+                    activeToolType: activeToolType,
+                  ),
+                ),
+              ),
+            ),
+            // 右侧小万陪伴按钮
+            GestureDetector(
+              onTap: isCompanionToggleLoading ? null : onCompanionTap,
+              child: Container(
+                color: Colors.transparent,
+                padding: const EdgeInsets.all(15),
+                child: isCompanionToggleLoading
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            isCompanionModeEnabled
+                                ? const Color(0xFF1930D9)
+                                : iconTint,
+                          ),
+                        ),
+                      )
+                    : SvgPicture.asset(
+                        'assets/home/avatar.svg',
+                        width: 20,
+                        height: 20,
+                        colorFilter: ColorFilter.mode(
                           isCompanionModeEnabled
                               ? const Color(0xFF1930D9)
                               : iconTint,
+                          BlendMode.srcIn,
                         ),
                       ),
-                    )
-                  : SvgPicture.asset(
-                      'assets/home/avatar.svg',
-                      width: 20,
-                      height: 20,
-                      colorFilter: ColorFilter.mode(
-                        isCompanionModeEnabled
-                            ? const Color(0xFF1930D9)
-                            : iconTint,
-                        BlendMode.srcIn,
-                      ),
-                    ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -180,6 +183,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
   static const double _verticalSwitchThreshold = 10;
   static const double _verticalVelocityThreshold = 240;
   static const double _switcherHeight = 32;
+  static const double _offstageLayerGap = 2;
 
   Timer? _idleTimer;
   double _verticalDragDelta = 0;
@@ -362,7 +366,10 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
     final currentOrder = _layerOrder(widget.displayLayer);
 
     double topFor(ChatIslandDisplayLayer layer) {
-      return (_layerOrder(layer) - currentOrder) * _switcherHeight;
+      final delta = _layerOrder(layer) - currentOrder;
+      if (delta == 0) return 0;
+      final direction = delta > 0 ? 1 : -1;
+      return delta * _switcherHeight + direction * _offstageLayerGap;
     }
 
     return DecoratedBox(
@@ -395,10 +402,12 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
                   right: 0,
                   height: _switcherHeight,
                   top: topFor(ChatIslandDisplayLayer.mode),
-                  child: ChatModeSlider(
-                    activeMode: widget.activeMode,
-                    onChanged: widget.onModeChanged,
-                    onInteracted: _handleSliderInteraction,
+                  child: ClipRect(
+                    child: ChatModeSlider(
+                      activeMode: widget.activeMode,
+                      onChanged: widget.onModeChanged,
+                      onInteracted: _handleSliderInteraction,
+                    ),
                   ),
                 ),
                 AnimatedPositioned(
@@ -417,7 +426,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
                   right: 0,
                   height: _switcherHeight,
                   top: topFor(ChatIslandDisplayLayer.tools),
-                  child: toolLayerWidget,
+                  child: ClipRect(child: toolLayerWidget),
                 ),
               ],
             ),
@@ -770,37 +779,40 @@ class ChatMessageList extends StatelessWidget {
       );
     }
 
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ListView.builder(
-        controller: scrollController,
-        reverse: true,
-        shrinkWrap: true,
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-        itemCount: messages.length,
-        itemBuilder: (context, index) {
-          final message = messages[index];
-          final isLastMessage = index == 0;
-          final isOldestMessage = index == messages.length - 1;
-          final needBottomPadding = isLastMessage && messages.length > 1;
-          final needTopPadding = isOldestMessage && message.user != 1;
-          return Padding(
-            padding: EdgeInsets.only(
-              top: needTopPadding ? 24.0 : 0.0,
-              bottom: needBottomPadding ? 40.0 : 0.0,
-            ),
-            child: MessageBubble(
-              message: message,
-              key: ValueKey(message.dbId ?? message.contentId ?? message.id),
-              onBeforeTaskExecute: onBeforeTaskExecute,
-              onCancelTask: onCancelTask,
-              enableThinkingCollapse: true,
-              parentScrollController: scrollController,
-              onRequestAuthorize: onRequestAuthorize,
-            ),
-          );
-        },
+    return ClipRect(
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ListView.builder(
+          controller: scrollController,
+          reverse: true,
+          shrinkWrap: true,
+          physics: const ClampingScrollPhysics(),
+          clipBehavior: Clip.hardEdge,
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+          itemCount: messages.length,
+          itemBuilder: (context, index) {
+            final message = messages[index];
+            final isLastMessage = index == 0;
+            final isOldestMessage = index == messages.length - 1;
+            final needBottomPadding = isLastMessage && messages.length > 1;
+            final needTopPadding = isOldestMessage && message.user != 1;
+            return Padding(
+              padding: EdgeInsets.only(
+                top: needTopPadding ? 24.0 : 0.0,
+                bottom: needBottomPadding ? 40.0 : 0.0,
+              ),
+              child: MessageBubble(
+                message: message,
+                key: ValueKey(message.dbId ?? message.contentId ?? message.id),
+                onBeforeTaskExecute: onBeforeTaskExecute,
+                onCancelTask: onCancelTask,
+                enableThinkingCollapse: true,
+                parentScrollController: scrollController,
+                onRequestAuthorize: onRequestAuthorize,
+              ),
+            );
+          },
+        ),
       ),
     );
   }
