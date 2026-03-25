@@ -76,6 +76,11 @@ class EmbeddedTerminalRuntimeStatus {
     required this.allReady,
     required this.missingCommands,
     required this.message,
+    required this.nodeReady,
+    required this.nodeVersion,
+    required this.nodeMinMajor,
+    required this.pnpmReady,
+    required this.pnpmVersion,
     required this.workspaceAccessGranted,
   });
 
@@ -85,6 +90,11 @@ class EmbeddedTerminalRuntimeStatus {
   final bool allReady;
   final List<String> missingCommands;
   final String message;
+  final bool nodeReady;
+  final String? nodeVersion;
+  final int nodeMinMajor;
+  final bool pnpmReady;
+  final String? pnpmVersion;
   final bool workspaceAccessGranted;
 
   factory EmbeddedTerminalRuntimeStatus.fromMap(Map<dynamic, dynamic> map) {
@@ -98,6 +108,11 @@ class EmbeddedTerminalRuntimeStatus {
           ? rawMissing.map((it) => it.toString()).toList(growable: false)
           : const <String>[],
       message: (map['message'] as String? ?? '').trim(),
+      nodeReady: map['nodeReady'] == true,
+      nodeVersion: (map['nodeVersion'] as String?)?.trim(),
+      nodeMinMajor: (map['nodeMinMajor'] as num?)?.toInt() ?? 22,
+      pnpmReady: map['pnpmReady'] == true,
+      pnpmVersion: (map['pnpmVersion'] as String?)?.trim(),
       workspaceAccessGranted: map['workspaceAccessGranted'] == true,
     );
   }

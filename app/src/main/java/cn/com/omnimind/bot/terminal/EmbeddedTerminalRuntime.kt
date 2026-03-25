@@ -3,6 +3,7 @@ package cn.com.omnimind.bot.terminal
 import android.content.Context
 import android.os.Build
 import cn.com.omnimind.bot.agent.AgentWorkspaceManager
+import cn.com.omnimind.bot.openclaw.OpenClawRuntimeSupport
 import cn.com.omnimind.bot.termux.TermuxCommandBuilder
 import cn.com.omnimind.bot.termux.TermuxLiveUpdate
 import com.ai.assistance.operit.terminal.TerminalManager
@@ -44,7 +45,12 @@ object EmbeddedTerminalRuntime {
         val runtimeReady: Boolean,
         val basePackagesReady: Boolean,
         val missingCommands: List<String>,
-        val message: String
+        val message: String,
+        val nodeReady: Boolean,
+        val nodeVersion: String?,
+        val nodeMinMajor: Int,
+        val pnpmReady: Boolean,
+        val pnpmVersion: String?
     )
 
     data class CommandResult(
@@ -89,7 +95,12 @@ object EmbeddedTerminalRuntime {
 
     private data class BasePackageProbeResult(
         val missingCommands: List<String> = emptyList(),
-        val errorMessage: String? = null
+        val errorMessage: String? = null,
+        val nodeReady: Boolean = false,
+        val nodeVersion: String? = null,
+        val nodeMajor: Int? = null,
+        val pnpmReady: Boolean = false,
+        val pnpmVersion: String? = null
     )
 
     private const val PREFS_NAME = "embedded_terminal_runtime"
@@ -99,6 +110,9 @@ object EmbeddedTerminalRuntime {
     private const val DEFAULT_CURRENT_DIRECTORY = "/root"
     private const val BASE_PACKAGE_READY_MARKER = "__OMNIBOT_BASE_PACKAGES_READY__"
     private const val BASE_PACKAGE_MISSING_MARKER = "__OMNIBOT_BASE_PACKAGES_MISSING__"
+    private const val BASE_PACKAGE_NODE_VERSION_MARKER = "__OMNIBOT_NODE_VERSION__"
+    private const val BASE_PACKAGE_PNPM_VERSION_MARKER = "__OMNIBOT_PNPM_VERSION__"
+    private const val NODE_MIN_MAJOR = 22
 
     private val sessionHandles = ConcurrentHashMap<String, SessionHandle>()
     private val packageInstallMutex = Mutex()
@@ -145,6 +159,7 @@ object EmbeddedTerminalRuntime {
           tmux \
           xz-utils && \
         export PATH="${'$'}HOME/.local/bin:${'$'}PATH" && \
+        npm install -g pnpm --no-audit --no-fund >/dev/null 2>&1 || true && \
         pipx install uv --force && \
         if [ -x "${'$'}HOME/.local/bin/uv" ]; then ln -sf "${'$'}HOME/.local/bin/uv" /usr/local/bin/uv; fi && \
         if [ -x "${'$'}HOME/.local/bin/uvx" ]; then ln -sf "${'$'}HOME/.local/bin/uvx" /usr/local/bin/uvx; fi
@@ -175,7 +190,12 @@ object EmbeddedTerminalRuntime {
                 runtimeReady = false,
                 basePackagesReady = false,
                 missingCommands = emptyList(),
-                message = "当前设备 ABI 不受支持，内嵌 Ubuntu 终端仅支持 arm64-v8a。"
+                message = "当前设备 ABI 不受支持，内嵌 Ubuntu 终端仅支持 arm64-v8a。",
+                nodeReady = false,
+                nodeVersion = null,
+                nodeMinMajor = NODE_MIN_MAJOR,
+                pnpmReady = false,
+                pnpmVersion = null
             )
         }
 
@@ -190,7 +210,12 @@ object EmbeddedTerminalRuntime {
                 runtimeReady = false,
                 basePackagesReady = false,
                 missingCommands = emptyList(),
-                message = environmentStatus.message.ifBlank { "内嵌 Ubuntu 终端初始化失败。" }
+                message = environmentStatus.message.ifBlank { "内嵌 Ubuntu 终端初始化失败。" },
+                nodeReady = false,
+                nodeVersion = null,
+                nodeMinMajor = NODE_MIN_MAJOR,
+                pnpmReady = false,
+                pnpmVersion = null
             )
         }
 
@@ -202,19 +227,36 @@ object EmbeddedTerminalRuntime {
                 runtimeReady = true,
                 basePackagesReady = false,
                 missingCommands = emptyList(),
-                message = probeError
+                message = probeError,
+                nodeReady = probeResult.nodeReady,
+                nodeVersion = probeResult.nodeVersion,
+                nodeMinMajor = NODE_MIN_MAJOR,
+                pnpmReady = probeResult.pnpmReady,
+                pnpmVersion = probeResult.pnpmVersion
             )
         }
 
         val missingCommands = probeResult.missingCommands
         if (missingCommands.isEmpty()) {
             markBasePackagesReady(context)
+            ensureOpenClawCompatRuntime(context)
+            val readyMessage =
+                if (probeResult.nodeReady && probeResult.pnpmReady) {
+                    "内嵌 Ubuntu 终端和基础 Agent CLI 包均已就绪。"
+                } else {
+                    "内嵌 Ubuntu 终端和基础 Agent CLI 包已就绪；Node.js/PNPM 状态可在环境页查看。"
+                }
             return RuntimeReadinessStatus(
                 supported = true,
                 runtimeReady = true,
                 basePackagesReady = true,
                 missingCommands = emptyList(),
-                message = "内嵌 Ubuntu 终端和基础 Agent CLI 包均已就绪。"
+                message = readyMessage,
+                nodeReady = probeResult.nodeReady,
+                nodeVersion = probeResult.nodeVersion,
+                nodeMinMajor = NODE_MIN_MAJOR,
+                pnpmReady = probeResult.pnpmReady,
+                pnpmVersion = probeResult.pnpmVersion
             )
         }
 
@@ -223,7 +265,12 @@ object EmbeddedTerminalRuntime {
             runtimeReady = true,
             basePackagesReady = false,
             missingCommands = missingCommands,
-            message = "检测到基础 Agent CLI 包缺失：${missingCommands.joinToString(", ")}"
+            message = "检测到基础 Agent CLI 包缺失：${missingCommands.joinToString(", ")}",
+            nodeReady = probeResult.nodeReady,
+            nodeVersion = probeResult.nodeVersion,
+            nodeMinMajor = NODE_MIN_MAJOR,
+            pnpmReady = probeResult.pnpmReady,
+            pnpmVersion = probeResult.pnpmVersion
         )
     }
 
@@ -295,6 +342,7 @@ object EmbeddedTerminalRuntime {
 
         if (!installBasePackages) {
             val basePackagesReady = isBasePackagesReady(context)
+            ensureOpenClawCompatRuntime(context)
             emitEnvironmentProgress(
                 onProgress,
                 EnvironmentProgress(
@@ -329,6 +377,7 @@ object EmbeddedTerminalRuntime {
             val preflightProbe = probeBasePackageCommands(context)
             if (preflightProbe.errorMessage == null && preflightProbe.missingCommands.isEmpty()) {
                 markBasePackagesReady(context)
+                ensureOpenClawCompatRuntime(context)
                 emitEnvironmentProgress(
                     onProgress,
                     EnvironmentProgress(
@@ -390,6 +439,7 @@ object EmbeddedTerminalRuntime {
                 val postInstallProbe = probeBasePackageCommands(context)
                 if (postInstallProbe.errorMessage == null && postInstallProbe.missingCommands.isEmpty()) {
                     markBasePackagesReady(context)
+                    ensureOpenClawCompatRuntime(context)
                     emitEnvironmentProgress(
                         onProgress,
                         EnvironmentProgress(
@@ -1093,6 +1143,12 @@ object EmbeddedTerminalRuntime {
             .apply()
     }
 
+    private fun ensureOpenClawCompatRuntime(context: Context) {
+        runCatching {
+            OpenClawRuntimeSupport.ensureRuntimeFiles(context)
+        }
+    }
+
     private suspend fun ensureCommandEnvironmentReady(
         context: Context,
         onProgress: suspend (EnvironmentProgress) -> Unit = {}
@@ -1140,6 +1196,27 @@ object EmbeddedTerminalRuntime {
         val missingLine = outputLines.lastOrNull { line ->
             line.startsWith(BASE_PACKAGE_MISSING_MARKER)
         }
+        val nodeVersionLine = outputLines.lastOrNull { line ->
+            line.startsWith(BASE_PACKAGE_NODE_VERSION_MARKER)
+        }
+        val pnpmVersionLine = outputLines.lastOrNull { line ->
+            line.startsWith(BASE_PACKAGE_PNPM_VERSION_MARKER)
+        }
+        val nodeVersion = nodeVersionLine
+            ?.removePrefix(BASE_PACKAGE_NODE_VERSION_MARKER)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it != "missing" }
+            ?.removePrefix("v")
+        val nodeMajor = nodeVersion
+            ?.substringBefore('.')
+            ?.toIntOrNull()
+        val nodeReady = nodeMajor != null && nodeMajor >= NODE_MIN_MAJOR
+        val pnpmVersion = pnpmVersionLine
+            ?.removePrefix(BASE_PACKAGE_PNPM_VERSION_MARKER)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it != "missing" }
+        val pnpmReady = !pnpmVersion.isNullOrBlank()
+
         if (missingLine != null) {
             val missing = missingLine
                 .removePrefix(BASE_PACKAGE_MISSING_MARKER)
@@ -1148,13 +1225,32 @@ object EmbeddedTerminalRuntime {
                 .map { it.trim() }
                 .filter { it.isNotBlank() }
                 .distinct()
-            return BasePackageProbeResult(missingCommands = missing)
+            return BasePackageProbeResult(
+                missingCommands = missing,
+                nodeReady = nodeReady,
+                nodeVersion = nodeVersion,
+                nodeMajor = nodeMajor,
+                pnpmReady = pnpmReady,
+                pnpmVersion = pnpmVersion
+            )
         }
         if (outputLines.any { line -> line == BASE_PACKAGE_READY_MARKER }) {
-            return BasePackageProbeResult(missingCommands = emptyList())
+            return BasePackageProbeResult(
+                missingCommands = emptyList(),
+                nodeReady = nodeReady,
+                nodeVersion = nodeVersion,
+                nodeMajor = nodeMajor,
+                pnpmReady = pnpmReady,
+                pnpmVersion = pnpmVersion
+            )
         }
         return BasePackageProbeResult(
-            errorMessage = "基础 Agent CLI 包检查失败：探测结果无法解析。"
+            errorMessage = "基础 Agent CLI 包检查失败：探测结果无法解析。",
+            nodeReady = nodeReady,
+            nodeVersion = nodeVersion,
+            nodeMajor = nodeMajor,
+            pnpmReady = pnpmReady,
+            pnpmVersion = pnpmVersion
         )
     }
 
@@ -1173,6 +1269,26 @@ object EmbeddedTerminalRuntime {
             else
               echo "$BASE_PACKAGE_READY_MARKER"
             fi
+            node_version=""
+            if command -v node >/dev/null 2>&1; then
+              node_version=$(node -v 2>/dev/null | head -n 1 | tr -d '\r')
+            fi
+            if [ -z "${'$'}node_version" ]; then
+              node_version="missing"
+            fi
+            echo "$BASE_PACKAGE_NODE_VERSION_MARKER ${'$'}node_version"
+
+            pnpm_version=""
+            if command -v pnpm >/dev/null 2>&1; then
+              pnpm_version=$(pnpm -v 2>/dev/null | head -n 1 | tr -d '\r')
+            fi
+            if [ -z "${'$'}pnpm_version" ] && command -v corepack >/dev/null 2>&1; then
+              pnpm_version=$(corepack pnpm -v 2>/dev/null | head -n 1 | tr -d '\r')
+            fi
+            if [ -z "${'$'}pnpm_version" ]; then
+              pnpm_version="missing"
+            fi
+            echo "$BASE_PACKAGE_PNPM_VERSION_MARKER ${'$'}pnpm_version"
         """.trimIndent()
     }
 

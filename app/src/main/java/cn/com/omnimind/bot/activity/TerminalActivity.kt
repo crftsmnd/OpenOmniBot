@@ -3,17 +3,13 @@ package cn.com.omnimind.bot.activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -24,9 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
-import cn.com.omnimind.bot.openclaw.OpenClawGatewayManager
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
 import com.ai.assistance.operit.terminal.TerminalManager
 import com.ai.assistance.operit.terminal.main.TerminalScreen
@@ -73,53 +67,12 @@ class TerminalActivity : ComponentActivity() {
                         )
                     }
                 ) { paddingValues ->
-                    Column(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            AssistChip(
-                                onClick = {
-                                    lifecycleScope.launch {
-                                        terminalManager.sendCommand("cd /root/.openclaw/workspace")
-                                    }
-                                },
-                                label = { Text("Workspace") }
-                            )
-                            AssistChip(
-                                onClick = {
-                                    lifecycleScope.launch {
-                                        terminalManager.sendCommand("tail -n 120 /root/openclaw.log")
-                                    }
-                                },
-                                label = { Text("Gateway 日志") }
-                            )
-                            AssistChip(
-                                onClick = {
-                                    OpenClawGatewayManager.startGateway(this@TerminalActivity, forceRestart = true)
-                                },
-                                label = { Text("重启 Gateway") },
-                                leadingIcon = {
-                                    androidx.compose.material3.Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = null
-                                    )
-                                }
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f)
-                        ) {
-                            TerminalScreen(env)
-                        }
+                        TerminalScreen(env)
                     }
                 }
             }

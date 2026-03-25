@@ -25,6 +25,11 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   bool _isBasePackagesReady = false;
   List<String> _missingCommands = const <String>[];
   String _runtimeStatusMessage = '';
+  bool _nodeReady = false;
+  String? _nodeVersion;
+  int _nodeMinMajor = 22;
+  bool _pnpmReady = false;
+  String? _pnpmVersion;
 
   bool _isPreparingWrapper = false;
   bool _isLoadingGatewayStatus = true;
@@ -139,6 +144,11 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _isBasePackagesReady = status.basePackagesReady;
         _missingCommands = status.missingCommands;
         _runtimeStatusMessage = status.message;
+        _nodeReady = status.nodeReady;
+        _nodeVersion = status.nodeVersion;
+        _nodeMinMajor = status.nodeMinMajor;
+        _pnpmReady = status.pnpmReady;
+        _pnpmVersion = status.pnpmVersion;
         _wrapperReady = status.allReady;
         _gatewayStatus = gatewayStatus;
         _gatewayStatusSnapshotAt = DateTime.now();
@@ -162,6 +172,11 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _isBasePackagesReady = false;
         _missingCommands = const <String>[];
         _runtimeStatusMessage = '状态探测失败，请尝试初始化。';
+        _nodeReady = false;
+        _nodeVersion = null;
+        _nodeMinMajor = 22;
+        _pnpmReady = false;
+        _pnpmVersion = null;
         _wrapperReady = false;
         _isLoadingStatus = false;
         _gatewayStatus = gatewayStatus;
@@ -187,6 +202,11 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _isBasePackagesReady = false;
         _missingCommands = const <String>[];
         _runtimeStatusMessage = '状态探测失败，请尝试初始化。';
+        _nodeReady = false;
+        _nodeVersion = null;
+        _nodeMinMajor = 22;
+        _pnpmReady = false;
+        _pnpmVersion = null;
         _wrapperReady = false;
         _isLoadingStatus = false;
         _gatewayStatus = gatewayStatus;
@@ -529,6 +549,8 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
           ),
           const SizedBox(height: 14),
           _buildPrepareActionButton(),
+          const SizedBox(height: 12),
+          _buildNodeAndPnpmStatusPanel(),
           if (_shouldShowPrepareConsole) ...[
             const SizedBox(height: 14),
             _buildPrepareConsolePanel(),
@@ -561,6 +583,107 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildNodeAndPnpmStatusPanel() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFD),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x14000000)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Node.js / PNPM 状态',
+            style: TextStyle(
+              color: AppColors.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildRuntimeToolStatusTile(
+            name: 'Node.js',
+            ready: _nodeReady,
+            detail: _nodeVersion?.isNotEmpty == true
+                ? 'v$_nodeVersion'
+                : '未检测到',
+            notReadyReason: _nodeVersion?.isNotEmpty == true
+                ? '版本过低，最低要求 v$_nodeMinMajor'
+                : '未安装或不可用',
+          ),
+          const SizedBox(height: 8),
+          _buildRuntimeToolStatusTile(
+            name: 'PNPM',
+            ready: _pnpmReady,
+            detail: _pnpmVersion?.isNotEmpty == true ? _pnpmVersion! : '未检测到',
+            notReadyReason: '未安装或不可用',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRuntimeToolStatusTile({
+    required String name,
+    required bool ready,
+    required String detail,
+    required String notReadyReason,
+  }) {
+    final badgeColor = ready ? const Color(0x141E9E63) : const Color(0x14EF6B5F);
+    final badgeTextColor = ready
+        ? const Color(0xFF1E9E63)
+        : const Color(0xFFB34A40);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$name：$detail',
+                style: const TextStyle(
+                  color: AppColors.text,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: badgeColor,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                ready ? 'ready' : 'not ready',
+                style: TextStyle(
+                  color: badgeTextColor,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (!ready)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              notReadyReason,
+              style: const TextStyle(
+                color: Color(0xFFB34A40),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+      ],
     );
   }
 

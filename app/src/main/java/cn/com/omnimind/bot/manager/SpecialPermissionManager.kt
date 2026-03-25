@@ -371,6 +371,11 @@ class SpecialPermissionManager(private val context: Context) {
                             "allReady" to (readiness.supported && readiness.runtimeReady && readiness.basePackagesReady),
                             "missingCommands" to readiness.missingCommands,
                             "message" to readiness.message,
+                            "nodeReady" to readiness.nodeReady,
+                            "nodeVersion" to readiness.nodeVersion,
+                            "nodeMinMajor" to readiness.nodeMinMajor,
+                            "pnpmReady" to readiness.pnpmReady,
+                            "pnpmVersion" to readiness.pnpmVersion,
                             "workspaceAccessGranted" to workspaceGranted
                         )
                     )
