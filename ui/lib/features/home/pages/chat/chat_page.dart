@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import '../../../../models/conversation_model.dart';
 import '../../../../models/conversation_thread_target.dart';
 import '../../../../models/chat_message_model.dart';
@@ -36,6 +37,7 @@ import 'package:ui/services/scene_model_config_service.dart';
 import 'package:ui/services/special_permission.dart';
 import 'package:ui/utils/popup_menu_anchor_position.dart';
 import 'package:ui/services/storage_service.dart';
+import 'package:ui/utils/cache_util.dart';
 import 'package:ui/utils/ui.dart';
 
 // 导入 Mixins
@@ -258,6 +260,14 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   String? _lastObservedBrowserSnapshotSignature;
   int? _pageGesturePointerId;
   double _pageVerticalDragDelta = 0;
+  static const double _newConversationPullThreshold = 156;
+  static const double _newConversationPullMaxDistance = 236;
+  static const double _newConversationPullActivationZoneHeight = 120;
+  bool _isNewConversationPullTracking = false;
+  double _newConversationPullDistance = 0;
+  bool _newConversationPullThresholdReached = false;
+  bool _newConversationPullHapticTriggered = false;
+  bool _isCreatingConversationFromPull = false;
   Timer? _normalSurfaceModelRevealTimer;
   int _surfaceSwitchRequestId = 0;
   bool _isSurfacePageScrolling = false;
@@ -271,13 +281,13 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     if (runtimeConversation?.mode == ConversationMode.subagent) {
       return ConversationMode.subagent;
     }
-    if (
-        mode == _activeConversationMode &&
+    if (mode == _activeConversationMode &&
         _resolvedThreadTarget?.mode == ConversationMode.subagent) {
       return ConversationMode.subagent;
     }
     return ConversationMode.normal;
   }
+
   ChatPageMode _pageModeForConversationMode(ConversationMode mode) =>
       mode == ConversationMode.openclaw
       ? ChatPageMode.openclaw
