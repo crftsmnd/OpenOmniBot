@@ -2848,12 +2848,12 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                         message: String,
                         isFinal: Boolean
                     ) {
-                        if (message.isNotBlank()) {
-                            if (scheduledAssistantBuffer.isEmpty()) {
-                                scheduledAssistantBuffer.append(message)
-                            } else {
-                                scheduledAssistantBuffer.append(message)
-                            }
+                        val normalizedMessage = message.trim()
+                        if (normalizedMessage.isNotEmpty()) {
+                            // Agent 回调 message 是当前轮次的“完整文本快照”，这里必须覆盖而不是追加，
+                            // 否则会把同一段内容在流式阶段重复拼接。
+                            scheduledAssistantBuffer.setLength(0)
+                            scheduledAssistantBuffer.append(normalizedMessage)
                             scheduledSubagentMeta?.let { meta ->
                                 val streamingText = scheduledAssistantBuffer.toString().trim()
                                 if (streamingText.isNotEmpty()) {
