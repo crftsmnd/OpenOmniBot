@@ -376,7 +376,7 @@ class _SettingsPageState extends State<SettingsPage> {
             iconSvg: 'assets/home/termux.svg',
             iconColor: AppColors.buttonPrimary,
             title: 'Ubuntu 与 OpenClaw',
-            subtitle: '管理应用内 Ubuntu、OpenClaw Gateway 与 workspace 映射',
+            subtitle: '管理应用内 Ubuntu、OpenClaw Gateway ',
             onTap: () {
               GoRouterManager.push('/home/termux_setting');
             },
