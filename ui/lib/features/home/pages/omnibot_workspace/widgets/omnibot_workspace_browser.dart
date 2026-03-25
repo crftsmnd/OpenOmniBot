@@ -21,11 +21,15 @@ class _WorkspaceDragPayload {
 class OmnibotWorkspaceBrowser extends StatefulWidget {
   final String workspacePath;
   final String? workspaceShellPath;
+  final bool enableSystemBackHandler;
+  final ValueChanged<bool>? onCanGoUpChanged;
 
   const OmnibotWorkspaceBrowser({
     super.key,
     required this.workspacePath,
     this.workspaceShellPath,
+    this.enableSystemBackHandler = true,
+    this.onCanGoUpChanged,
   });
 
   @override
@@ -75,7 +79,18 @@ class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     super.initState();
     _rootDirectory = Directory(widget.workspacePath);
     _directory = _rootDirectory;
+    _notifyCanGoUpChanged();
     _refresh();
+  }
+
+  void _notifyCanGoUpChanged() {
+    final callback = widget.onCanGoUpChanged;
+    if (callback == null) return;
+    final value = canGoUp;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      callback(value);
+    });
   }
 
   void _refresh() {
@@ -114,6 +129,7 @@ class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
       _expandedDirectoryPaths.clear();
       _directoryChildrenCache.clear();
     });
+    _notifyCanGoUpChanged();
     _refresh();
   }
 
@@ -123,6 +139,7 @@ class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
       _expandedDirectoryPaths.clear();
       _directoryChildrenCache.clear();
     });
+    _notifyCanGoUpChanged();
     _refresh();
   }
 
@@ -175,72 +192,75 @@ class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     final canGoUp = _directory.path != _rootDirectory.path;
     final itemCount = _entries.length + (canGoUp ? 1 : 0);
 
+    final content = Column(
+      children: [
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: () async => _refresh(),
+            child: !exists
+                ? _buildStatusList(message: '工作区不存在')
+                : itemCount == 0
+                ? _buildStatusList(message: '当前目录为空')
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                    itemCount: itemCount,
+                    separatorBuilder: (_, __) => const Divider(
+                      height: 1,
+                      thickness: 1,
+                      indent: 12,
+                      endIndent: 12,
+                    ),
+                    itemBuilder: (context, index) {
+                      final isFirst = index == 0;
+                      final isLast = index == itemCount - 1;
+                      final borderRadius = BorderRadius.vertical(
+                        top: isFirst ? const Radius.circular(4) : Radius.zero,
+                        bottom: isLast ? const Radius.circular(4) : Radius.zero,
+                      );
+
+                      if (canGoUp && index == 0) {
+                        final parentRow = _buildWorkspaceItem(
+                          title: '..',
+                          leading: Icon(
+                            Icons.arrow_upward_rounded,
+                            size: 20,
+                            color: AppColors.text.withValues(alpha: 0.8),
+                          ),
+                          borderRadius: borderRadius,
+                          onTap: openParentDirectory,
+                        );
+                        return _buildDirectoryDropTarget(
+                          child: parentRow,
+                          borderRadius: borderRadius,
+                          targetDirectoryPath: _directory.parent.path,
+                        );
+                      }
+
+                      final entry = _entries[index - (canGoUp ? 1 : 0)];
+                      return _buildEntryNode(
+                        entry: entry,
+                        depth: 0,
+                        currentShellPath: currentShellPath,
+                        borderRadius: borderRadius,
+                      );
+                    },
+                  ),
+          ),
+        ),
+      ],
+    );
+
+    if (!widget.enableSystemBackHandler) {
+      return content;
+    }
     return PopScope(
       canPop: !canGoUp,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         openParentDirectory();
       },
-      child: Column(
-        children: [
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: () async => _refresh(),
-              child: !exists
-                  ? _buildStatusList(message: '工作区不存在')
-                  : itemCount == 0
-                  ? _buildStatusList(message: '当前目录为空')
-                  : ListView.separated(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                      itemCount: itemCount,
-                      separatorBuilder: (_, __) => const Divider(
-                        height: 1,
-                        thickness: 1,
-                        indent: 12,
-                        endIndent: 12,
-                      ),
-                      itemBuilder: (context, index) {
-                        final isFirst = index == 0;
-                        final isLast = index == itemCount - 1;
-                        final borderRadius = BorderRadius.vertical(
-                          top: isFirst ? const Radius.circular(4) : Radius.zero,
-                          bottom: isLast
-                              ? const Radius.circular(4)
-                              : Radius.zero,
-                        );
-
-                        if (canGoUp && index == 0) {
-                          final parentRow = _buildWorkspaceItem(
-                            title: '..',
-                            leading: Icon(
-                              Icons.arrow_upward_rounded,
-                              size: 20,
-                              color: AppColors.text.withValues(alpha: 0.8),
-                            ),
-                            borderRadius: borderRadius,
-                            onTap: openParentDirectory,
-                          );
-                          return _buildDirectoryDropTarget(
-                            child: parentRow,
-                            borderRadius: borderRadius,
-                            targetDirectoryPath: _directory.parent.path,
-                          );
-                        }
-
-                        final entry = _entries[index - (canGoUp ? 1 : 0)];
-                        return _buildEntryNode(
-                          entry: entry,
-                          depth: 0,
-                          currentShellPath: currentShellPath,
-                          borderRadius: borderRadius,
-                        );
-                      },
-                    ),
-            ),
-          ),
-        ],
-      ),
+      child: content,
     );
   }
 

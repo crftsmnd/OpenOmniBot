@@ -233,6 +233,12 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
       key: ValueKey('workspace_surface_$_workspaceSurfaceSeed'),
       workspacePath: OmnibotResourceService.rootPath,
       workspaceShellPath: OmnibotResourceService.shellRootPath,
+      onCanGoUpChanged: (canGoUp) {
+        if (_workspaceBrowserCanGoUp == canGoUp || !mounted) return;
+        setState(() {
+          _workspaceBrowserCanGoUp = canGoUp;
+        });
+      },
     );
   }
 
@@ -261,6 +267,9 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (_isWorkspaceSurface && _workspaceBrowserCanGoUp) {
+          return;
+        }
         unawaited(saveConversationWithSummary());
         if (GoRouterManager.canPop()) {
           GoRouterManager.pop();

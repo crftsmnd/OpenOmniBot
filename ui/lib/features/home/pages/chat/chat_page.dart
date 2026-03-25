@@ -243,6 +243,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   );
   DateTime? _lastOpenClawGatewayInitToastAt;
   int _workspaceSurfaceSeed = 0;
+  bool _workspaceBrowserCanGoUp = false;
   bool _hasInitializedHalfScreen = false;
   bool _isCompanionModeEnabled = false;
   bool _isCompanionToggleLoading = false;
