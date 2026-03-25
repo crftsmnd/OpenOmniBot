@@ -20,7 +20,8 @@ class AgentSystemPromptTest {
             installedSkills = emptyList(),
             skillsRootShellPath = "/workspace/.omnibot/skills",
             skillsRootAndroidPath = "/data/user/0/cn.com.omnimind.bot/workspace/.omnibot/skills",
-            resolvedSkills = emptyList()
+            resolvedSkills = emptyList(),
+            memoryContext = null
         )
 
         assertTrue(prompt.contains(".venv"))
