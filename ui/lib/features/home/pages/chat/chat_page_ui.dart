@@ -331,7 +331,25 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                                         );
                                       }
                                     : null,
-                                topBanner: _buildAppUpdateBanner(),
+                                topBanner: _buildInputTopBanner(),
+                                showContextMeter:
+                                    _activeMode == ChatPageMode.normal,
+                                contextUtilization:
+                                    _activeMode == ChatPageMode.normal
+                                    ? _resolvedNormalContextUsage.utilization
+                                    : 0,
+                                contextUsedTokens:
+                                    _activeMode == ChatPageMode.normal
+                                    ? _resolvedNormalContextUsage.usedTokens
+                                    : 0,
+                                contextWindow:
+                                    _activeMode == ChatPageMode.normal
+                                    ? _resolvedNormalContextUsage.contextWindow
+                                    : 128000,
+                                contextCompressionActive:
+                                    _activeMode == ChatPageMode.normal &&
+                                    _activeAgentRunState?.phase ==
+                                        'compressing',
                               ),
                             ),
                           SizedBox(height: inputBottomPadding + keyboardSpacer),
@@ -362,6 +380,43 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
           ),
         ),
       ),
+    );
+  }
+
+  Widget? _buildInputTopBanner() {
+    final items = <Widget>[];
+    final appBanner = _buildAppUpdateBanner();
+    if (appBanner != null) {
+      items.add(appBanner);
+    }
+
+    final agentRunState = _activeMode == ChatPageMode.normal
+        ? _activeAgentRunState
+        : null;
+    if (agentRunState != null) {
+      if (items.isNotEmpty) {
+        items.add(const SizedBox(height: 8));
+      }
+      items.add(
+        AgentPlanStrip(
+          state: agentRunState,
+          expanded: _isAgentPlanExpanded,
+          onToggleExpanded: () {
+            setState(() {
+              _isAgentPlanExpanded = !_isAgentPlanExpanded;
+            });
+          },
+        ),
+      );
+    }
+
+    if (items.isEmpty) {
+      return null;
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: items,
     );
   }
 }

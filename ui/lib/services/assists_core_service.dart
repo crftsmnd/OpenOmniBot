@@ -37,6 +37,7 @@ typedef DispatchStreamErrorCallBack =
 typedef AgentThinkingStartCallback = void Function(String taskId);
 typedef AgentThinkingUpdateCallback =
     void Function(String taskId, String thinking);
+typedef AgentRunStateCallback = void Function(AgentRunStateData state);
 typedef AgentToolCallStartCallback = void Function(AgentToolEventData event);
 typedef AgentToolCallProgressCallback = void Function(AgentToolEventData event);
 typedef AgentToolCallCompleteCallback = void Function(AgentToolEventData event);
@@ -168,6 +169,173 @@ class AgentToolEventData {
   }
 }
 
+class AgentPlanStepData {
+  final String id;
+  final String title;
+  final String status;
+  final int order;
+  final String summary;
+
+  const AgentPlanStepData({
+    required this.id,
+    required this.title,
+    required this.status,
+    required this.order,
+    this.summary = '',
+  });
+
+  factory AgentPlanStepData.fromMap(Map<dynamic, dynamic>? map) {
+    final rawOrder = map?['order'];
+    return AgentPlanStepData(
+      id: (map?['id'] ?? '').toString(),
+      title: (map?['title'] ?? '').toString(),
+      status: (map?['status'] ?? 'pending').toString(),
+      order: rawOrder is num ? rawOrder.toInt() : 0,
+      summary: (map?['summary'] ?? '').toString(),
+    );
+  }
+}
+
+class AgentWorkflowNodeData {
+  final String id;
+  final String title;
+  final String status;
+  final int order;
+
+  const AgentWorkflowNodeData({
+    required this.id,
+    required this.title,
+    required this.status,
+    required this.order,
+  });
+
+  factory AgentWorkflowNodeData.fromMap(Map<dynamic, dynamic>? map) {
+    final rawOrder = map?['order'];
+    return AgentWorkflowNodeData(
+      id: (map?['id'] ?? '').toString(),
+      title: (map?['title'] ?? '').toString(),
+      status: (map?['status'] ?? 'pending').toString(),
+      order: rawOrder is num ? rawOrder.toInt() : 0,
+    );
+  }
+}
+
+class AgentWorkflowEdgeData {
+  final String from;
+  final String to;
+
+  const AgentWorkflowEdgeData({required this.from, required this.to});
+
+  factory AgentWorkflowEdgeData.fromMap(Map<dynamic, dynamic>? map) {
+    return AgentWorkflowEdgeData(
+      from: (map?['from'] ?? '').toString(),
+      to: (map?['to'] ?? '').toString(),
+    );
+  }
+}
+
+class AgentWorkflowData {
+  final List<AgentWorkflowNodeData> nodes;
+  final List<AgentWorkflowEdgeData> edges;
+  final String? activeNodeId;
+
+  const AgentWorkflowData({
+    this.nodes = const [],
+    this.edges = const [],
+    this.activeNodeId,
+  });
+
+  factory AgentWorkflowData.fromMap(Map<dynamic, dynamic>? map) {
+    return AgentWorkflowData(
+      nodes: ((map?['nodes'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((item) => AgentWorkflowNodeData.fromMap(item))
+          .toList(),
+      edges: ((map?['edges'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((item) => AgentWorkflowEdgeData.fromMap(item))
+          .toList(),
+      activeNodeId: map?['activeNodeId']?.toString(),
+    );
+  }
+}
+
+class AgentContextUsageData {
+  final int usedTokens;
+  final int contextWindow;
+  final double utilization;
+  final int compressionCount;
+  final int? lastCompressedAt;
+
+  const AgentContextUsageData({
+    this.usedTokens = 0,
+    this.contextWindow = 128000,
+    this.utilization = 0,
+    this.compressionCount = 0,
+    this.lastCompressedAt,
+  });
+
+  factory AgentContextUsageData.fromMap(Map<dynamic, dynamic>? map) {
+    final rawUtilization = map?['utilization'];
+    final rawLastCompressedAt = map?['lastCompressedAt'];
+    return AgentContextUsageData(
+      usedTokens: map?['usedTokens'] is num
+          ? (map?['usedTokens'] as num).toInt()
+          : 0,
+      contextWindow: map?['contextWindow'] is num
+          ? (map?['contextWindow'] as num).toInt()
+          : 128000,
+      utilization: rawUtilization is num
+          ? rawUtilization.toDouble()
+          : double.tryParse(rawUtilization?.toString() ?? '') ?? 0,
+      compressionCount: map?['compressionCount'] is num
+          ? (map?['compressionCount'] as num).toInt()
+          : 0,
+      lastCompressedAt: rawLastCompressedAt is num
+          ? rawLastCompressedAt.toInt()
+          : int.tryParse(rawLastCompressedAt?.toString() ?? ''),
+    );
+  }
+}
+
+class AgentRunStateData {
+  final String taskId;
+  final String runId;
+  final String phase;
+  final String? currentStepId;
+  final List<AgentPlanStepData> steps;
+  final AgentWorkflowData workflow;
+  final AgentContextUsageData contextUsage;
+
+  const AgentRunStateData({
+    required this.taskId,
+    required this.runId,
+    required this.phase,
+    this.currentStepId,
+    this.steps = const [],
+    this.workflow = const AgentWorkflowData(),
+    this.contextUsage = const AgentContextUsageData(),
+  });
+
+  factory AgentRunStateData.fromMap(Map<dynamic, dynamic>? map) {
+    final raw = map ?? const {};
+    return AgentRunStateData(
+      taskId: (raw['taskId'] ?? raw['runId'] ?? '').toString(),
+      runId: (raw['runId'] ?? '').toString(),
+      phase: (raw['phase'] ?? 'planning').toString(),
+      currentStepId: raw['currentStepId']?.toString(),
+      steps:
+          ((raw['steps'] as List?) ?? const [])
+              .whereType<Map>()
+              .map((item) => AgentPlanStepData.fromMap(item))
+              .toList()
+            ..sort((a, b) => a.order.compareTo(b.order)),
+      workflow: AgentWorkflowData.fromMap(raw['workflow'] as Map?),
+      contextUsage: AgentContextUsageData.fromMap(raw['contextUsage'] as Map?),
+    );
+  }
+}
+
 class AssistsMessageService {
   static const MethodChannel assistCore = MethodChannel(
     'cn.com.omnimind.bot/AssistCoreEvent',
@@ -186,6 +354,7 @@ class AssistsMessageService {
   // Agent回调
   static AgentThinkingStartCallback? _onAgentThinkingStartCallback;
   static AgentThinkingUpdateCallback? _onAgentThinkingUpdateCallback;
+  static AgentRunStateCallback? _onAgentRunStateCallback;
   static AgentToolCallStartCallback? _onAgentToolCallStartCallback;
   static AgentToolCallProgressCallback? _onAgentToolCallProgressCallback;
   static AgentToolCallCompleteCallback? _onAgentToolCallCompleteCallback;
@@ -306,6 +475,11 @@ class AssistsMessageService {
           _onAgentThinkingUpdateCallback?.call(
             (data['taskId'] ?? '').toString(),
             data['thinking'] ?? '',
+          );
+          break;
+        case 'onAgentRunState':
+          _onAgentRunStateCallback?.call(
+            AgentRunStateData.fromMap(call.arguments as Map?),
           );
           break;
         case 'onAgentToolCallStart':
@@ -515,6 +689,10 @@ class AssistsMessageService {
     AgentThinkingUpdateCallback? callback,
   ) {
     _onAgentThinkingUpdateCallback = callback;
+  }
+
+  static void setOnAgentRunStateCallback(AgentRunStateCallback? callback) {
+    _onAgentRunStateCallback = callback;
   }
 
   static void setOnAgentToolCallStartCallback(

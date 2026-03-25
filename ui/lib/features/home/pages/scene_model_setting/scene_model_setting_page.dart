@@ -53,9 +53,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
   }
 
   List<SceneCatalogItem> get _orderedCatalog {
-    final map = {
-      for (final item in _catalog) item.sceneId: item,
-    };
+    final map = {for (final item in _catalog) item.sceneId: item};
 
     final ordered = <SceneCatalogItem>[];
     for (final sceneId in _sceneOrder) {
@@ -69,9 +67,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
   }
 
   Map<String, SceneModelBindingEntry> get _bindingMap {
-    return {
-      for (final item in _bindings) item.sceneId: item,
-    };
+    return {for (final item in _bindings) item.sceneId: item};
   }
 
   String _sceneDisplayName(String sceneId) {
@@ -152,6 +148,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
             id: binding.modelId,
             displayName: binding.modelId,
             ownedBy: 'binding',
+            contextWindow: 128000,
           ),
         );
       }
@@ -178,9 +175,10 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
           apiKey: profile.apiKey,
           profileId: profile.id,
         );
-        final manualModelIds = await ModelProviderConfigService.getManualModelIds(
-          profileId: profile.id,
-        );
+        final manualModelIds =
+            await ModelProviderConfigService.getManualModelIds(
+              profileId: profile.id,
+            );
         nextModels[profile.id] = ModelProviderConfigService.mergeModelOptions(
           remoteModels: remoteModels,
           manualModelIds: manualModelIds,
@@ -248,7 +246,10 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      showToast('保存 ${_sceneDisplayName(sceneId)} 配置失败：$e', type: ToastType.error);
+      showToast(
+        '保存 ${_sceneDisplayName(sceneId)} 配置失败：$e',
+        type: ToastType.error,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -280,7 +281,10 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      showToast('清除 ${_sceneDisplayName(sceneId)} 配置失败：$e', type: ToastType.error);
+      showToast(
+        '清除 ${_sceneDisplayName(sceneId)} 配置失败：$e',
+        type: ToastType.error,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -324,10 +328,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
       context: context,
       color: Colors.white,
       elevation: 8,
-      constraints: BoxConstraints(
-        minWidth: popupWidth,
-        maxWidth: popupWidth,
-      ),
+      constraints: BoxConstraints(minWidth: popupWidth, maxWidth: popupWidth),
       position: position,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       items: [
@@ -375,7 +376,9 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
     if (binding == null) {
       return '默认：${scene.defaultModel}';
     }
-    final profile = _profiles.where((item) => item.id == binding.providerProfileId);
+    final profile = _profiles.where(
+      (item) => item.id == binding.providerProfileId,
+    );
     final profileName = profile.isEmpty ? 'Provider 已失效' : profile.first.name;
     return '$profileName / ${binding.modelId}';
   }
@@ -428,10 +431,15 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
             child: Builder(
               builder: (fieldContext) {
                 return InkWell(
-                  onTap: isSaving ? null : () => _openSceneSelector(scene, fieldContext),
+                  onTap: isSaving
+                      ? null
+                      : () => _openSceneSelector(scene, fieldContext),
                   borderRadius: BorderRadius.circular(8),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 11,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
@@ -555,7 +563,8 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
                               final scene = _orderedCatalog[index];
                               return _buildSceneRow(scene);
                             },
-                            separatorBuilder: (_, _) => const SizedBox(height: 8),
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
                           ),
                       ],
                     ),
@@ -573,9 +582,9 @@ class _SceneSelectionAction {
   final String modelId;
 
   const _SceneSelectionAction.restore()
-      : restoreDefault = true,
-        providerProfileId = '',
-        modelId = '';
+    : restoreDefault = true,
+      providerProfileId = '',
+      modelId = '';
 
   const _SceneSelectionAction.select({
     required this.providerProfileId,
@@ -611,8 +620,7 @@ class _SceneSelectionPopupEntry extends PopupMenuEntry<_SceneSelectionAction> {
       _SceneSelectionPopupEntryState();
 }
 
-class _SceneSelectionPopupEntryState
-    extends State<_SceneSelectionPopupEntry> {
+class _SceneSelectionPopupEntryState extends State<_SceneSelectionPopupEntry> {
   final TextEditingController _searchController = TextEditingController();
   late final Set<String> _expandedProfileIds;
 
@@ -622,7 +630,8 @@ class _SceneSelectionPopupEntryState
   void initState() {
     super.initState();
     _expandedProfileIds = <String>{
-      if (widget.currentBinding != null) widget.currentBinding!.providerProfileId,
+      if (widget.currentBinding != null)
+        widget.currentBinding!.providerProfileId,
     };
     if (_expandedProfileIds.isEmpty && widget.profiles.isNotEmpty) {
       _expandedProfileIds.add(widget.profiles.first.id);
@@ -811,8 +820,8 @@ class _SceneSelectionPopupEntryState
                 _hasSearchQuery
                     ? Icons.unfold_more_rounded
                     : expanded
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
                 size: 16,
                 color: const Color(0xFF94A3B8),
               ),
@@ -938,25 +947,30 @@ class _SceneSelectionPopupEntryState
                           if (expanded)
                             profile.configured
                                 ? models.isEmpty
-                                    ? const Padding(
-                                        padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
-                                        child: Text(
-                                          '当前 Provider 没有可选模型',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: Color(0xFF94A3B8),
-                                            fontFamily: 'PingFang SC',
+                                      ? const Padding(
+                                          padding: EdgeInsets.fromLTRB(
+                                            12,
+                                            4,
+                                            12,
+                                            8,
                                           ),
-                                        ),
-                                      )
-                                    : Column(
-                                        children: models.map((item) {
-                                          return _buildModelRow(
-                                            profile: profile,
-                                            item: item,
-                                          );
-                                        }).toList(),
-                                      )
+                                          child: Text(
+                                            '当前 Provider 没有可选模型',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Color(0xFF94A3B8),
+                                              fontFamily: 'PingFang SC',
+                                            ),
+                                          ),
+                                        )
+                                      : Column(
+                                          children: models.map((item) {
+                                            return _buildModelRow(
+                                              profile: profile,
+                                              item: item,
+                                            );
+                                          }).toList(),
+                                        )
                                 : const Padding(
                                     padding: EdgeInsets.fromLTRB(12, 4, 12, 8),
                                     child: Text(

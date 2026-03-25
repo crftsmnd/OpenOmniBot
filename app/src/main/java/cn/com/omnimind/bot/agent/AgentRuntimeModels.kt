@@ -13,12 +13,134 @@ data class AgentWorkspaceDescriptor(
     val retentionPolicy: String
 )
 
+enum class AgentRunPhase(val wireName: String) {
+    PLANNING("planning"),
+    EXECUTING("executing"),
+    REPLANNING("replanning"),
+    COMPRESSING("compressing"),
+    FINALIZING("finalizing"),
+    COMPLETED("completed"),
+    FAILED("failed")
+}
+
+enum class AgentPlanStepStatus(val wireName: String) {
+    PENDING("pending"),
+    RUNNING("running"),
+    COMPLETED("completed"),
+    FAILED("failed"),
+    SKIPPED("skipped")
+}
+
+enum class AgentWorkflowNodeStatus(val wireName: String) {
+    PENDING("pending"),
+    ACTIVE("active"),
+    COMPLETED("completed"),
+    FAILED("failed")
+}
+
+data class AgentPlanStepSnapshot(
+    val id: String,
+    val title: String,
+    val status: AgentPlanStepStatus,
+    val order: Int,
+    val summary: String? = null
+) {
+    fun toPayload(): Map<String, Any?> = linkedMapOf(
+        "id" to id,
+        "title" to title,
+        "status" to status.wireName,
+        "order" to order,
+        "summary" to summary
+    )
+}
+
+data class AgentWorkflowNodeSnapshot(
+    val id: String,
+    val title: String,
+    val status: AgentWorkflowNodeStatus,
+    val order: Int
+) {
+    fun toPayload(): Map<String, Any?> = linkedMapOf(
+        "id" to id,
+        "title" to title,
+        "status" to status.wireName,
+        "order" to order
+    )
+}
+
+data class AgentWorkflowEdgeSnapshot(
+    val from: String,
+    val to: String
+) {
+    fun toPayload(): Map<String, Any?> = linkedMapOf(
+        "from" to from,
+        "to" to to
+    )
+}
+
+data class AgentWorkflowSnapshot(
+    val nodes: List<AgentWorkflowNodeSnapshot>,
+    val edges: List<AgentWorkflowEdgeSnapshot>,
+    val activeNodeId: String? = null
+) {
+    fun toPayload(): Map<String, Any?> = linkedMapOf(
+        "nodes" to nodes.map { it.toPayload() },
+        "edges" to edges.map { it.toPayload() },
+        "activeNodeId" to activeNodeId
+    )
+}
+
+data class AgentContextUsageSnapshot(
+    val usedTokens: Int,
+    val contextWindow: Int,
+    val utilization: Double,
+    val compressionCount: Int,
+    val lastCompressedAt: Long? = null
+) {
+    fun toPayload(): Map<String, Any?> = linkedMapOf(
+        "usedTokens" to usedTokens,
+        "contextWindow" to contextWindow,
+        "utilization" to utilization,
+        "compressionCount" to compressionCount,
+        "lastCompressedAt" to lastCompressedAt
+    )
+}
+
+data class AgentRunStateSnapshot(
+    val runId: String,
+    val phase: AgentRunPhase,
+    val currentStepId: String? = null,
+    val steps: List<AgentPlanStepSnapshot> = emptyList(),
+    val workflow: AgentWorkflowSnapshot = AgentWorkflowSnapshot(
+        nodes = emptyList(),
+        edges = emptyList(),
+        activeNodeId = null
+    ),
+    val contextUsage: AgentContextUsageSnapshot = AgentContextUsageSnapshot(
+        usedTokens = 0,
+        contextWindow = 128000,
+        utilization = 0.0,
+        compressionCount = 0,
+        lastCompressedAt = null
+    )
+) {
+    fun toPayload(): Map<String, Any?> = linkedMapOf(
+        "runId" to runId,
+        "phase" to phase.wireName,
+        "currentStepId" to currentStepId,
+        "steps" to steps.map { it.toPayload() },
+        "workflow" to workflow.toPayload(),
+        "contextUsage" to contextUsage.toPayload()
+    )
+}
+
 data class AgentModelOverride(
     val providerProfileId: String,
     val providerProfileName: String? = null,
     val modelId: String,
     val apiBase: String,
-    val apiKey: String
+    val apiKey: String,
+    val contextWindow: Int? = null
 )
 
 data class ArtifactAction(

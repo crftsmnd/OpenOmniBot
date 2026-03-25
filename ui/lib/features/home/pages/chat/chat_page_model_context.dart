@@ -110,6 +110,7 @@ mixin _ChatPageModelContextMixin on _ChatPageStateBase {
         : _ChatModelOverrideSelection(
             providerProfileId: override.providerProfileId,
             modelId: override.modelId,
+            contextWindow: 128000,
           );
     setState(() {
       _conversationModelOverride = override;
@@ -155,6 +156,7 @@ mixin _ChatPageModelContextMixin on _ChatPageStateBase {
         overrideSelection: _ChatModelOverrideSelection(
           providerProfileId: value.providerProfileId,
           modelId: value.modelId,
+          contextWindow: pending.contextWindow,
         ),
       );
     });
@@ -196,6 +198,18 @@ mixin _ChatPageModelContextMixin on _ChatPageStateBase {
     final selection = _ChatModelOverrideSelection(
       providerProfileId: providerProfileId,
       modelId: modelId,
+      contextWindow:
+          _modelOptionsByProfileId[providerProfileId]
+              ?.firstWhere(
+                (item) => item.id == modelId,
+                orElse: () => const ProviderModelOption(
+                  id: '',
+                  displayName: '',
+                  contextWindow: 128000,
+                ),
+              )
+              .contextWindow ??
+          128000,
     );
     final normalConversationId =
         _currentConversationIdByMode[ChatPageMode.normal];
@@ -285,6 +299,7 @@ mixin _ChatPageModelContextMixin on _ChatPageStateBase {
     return {
       'providerProfileId': override.providerProfileId,
       'modelId': override.modelId,
+      'contextWindow': override.contextWindow,
     };
   }
 
@@ -490,10 +505,12 @@ class _ActiveModelMentionToken {
 class _ChatModelOverrideSelection {
   final String providerProfileId;
   final String modelId;
+  final int contextWindow;
 
   const _ChatModelOverrideSelection({
     required this.providerProfileId,
     required this.modelId,
+    this.contextWindow = 128000,
   });
 }
 
@@ -598,6 +615,7 @@ class _ChatModelMentionPanelState extends State<_ChatModelMentionPanel> {
             _ChatModelOverrideSelection(
               providerProfileId: profile.id,
               modelId: item.id,
+              contextWindow: item.contextWindow ?? 128000,
             ),
           );
         },
@@ -915,6 +933,7 @@ class _ConversationModelSelectorPopupEntryState
             _ChatModelOverrideSelection(
               providerProfileId: profile.id,
               modelId: model.id,
+              contextWindow: model.contextWindow ?? 128000,
             ),
           );
         },

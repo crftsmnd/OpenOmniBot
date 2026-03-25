@@ -22,7 +22,8 @@ data class ModelProviderProfile(
 data class ProviderModelOption(
     val id: String,
     val displayName: String = id,
-    val ownedBy: String? = null
+    val ownedBy: String? = null,
+    val contextWindow: Int? = null
 )
 
 data class SceneCatalogItem(

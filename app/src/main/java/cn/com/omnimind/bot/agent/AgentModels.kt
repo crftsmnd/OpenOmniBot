@@ -189,6 +189,11 @@ interface AgentCallback {
      * 工具调用完成
      */
     suspend fun onToolCallComplete(toolName: String, result: ToolExecutionResult)
+
+    /**
+     * Agent 运行态快照更新
+     */
+    suspend fun onRunState(snapshot: AgentRunStateSnapshot) = Unit
     
     /**
      * 聊天消息

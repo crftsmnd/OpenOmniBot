@@ -84,6 +84,11 @@ class ChatInputArea extends StatefulWidget {
   final ValueChanged<String>? onRemoveAttachment;
   final String? selectedModelOverrideId;
   final VoidCallback? onClearSelectedModelOverride;
+  final bool showContextMeter;
+  final double contextUtilization;
+  final int contextUsedTokens;
+  final int contextWindow;
+  final bool contextCompressionActive;
 
   const ChatInputArea({
     super.key,
@@ -106,10 +111,64 @@ class ChatInputArea extends StatefulWidget {
     this.onRemoveAttachment,
     this.selectedModelOverrideId,
     this.onClearSelectedModelOverride,
+    this.showContextMeter = false,
+    this.contextUtilization = 0,
+    this.contextUsedTokens = 0,
+    this.contextWindow = 128000,
+    this.contextCompressionActive = false,
   });
 
   @override
   State<ChatInputArea> createState() => ChatInputAreaState();
+}
+
+class _ContextMeterRingPainter extends CustomPainter {
+  const _ContextMeterRingPainter({
+    required this.progress,
+    required this.color,
+    required this.trackColor,
+  });
+
+  final double progress;
+  final Color color;
+  final Color trackColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final strokeWidth = math.max(1.8, size.width * 0.12);
+    final rect = Offset.zero & size;
+    final center = rect.center;
+    final radius = (math.min(size.width, size.height) - strokeWidth) / 2;
+    final basePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..color = trackColor;
+    final progressPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..color = color;
+    canvas.drawCircle(center, radius, basePaint);
+    final clamped = progress.clamp(0.0, 1.0);
+    if (clamped <= 0) {
+      return;
+    }
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -math.pi / 2,
+      math.pi * 2 * clamped,
+      false,
+      progressPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ContextMeterRingPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.color != color ||
+        oldDelegate.trackColor != trackColor;
+  }
 }
 
 class ChatInputAreaState extends _ChatInputAreaStateBase
@@ -159,7 +218,6 @@ abstract class _ChatInputAreaStateBase extends State<ChatInputArea>
   late Widget _sendSvg;
   late Widget _pauseSvg;
   late Widget _addSvg;
-  late Widget _closeSvg;
 
   // 按钮动画相关
   final Duration _buttonAnimationDuration = const Duration(milliseconds: 200);
@@ -186,11 +244,6 @@ abstract class _ChatInputAreaStateBase extends State<ChatInputArea>
     );
     _addSvg = SvgPicture.asset(
       'assets/home/input_add_icon.svg',
-      width: 20,
-      height: 20,
-    );
-    _closeSvg = SvgPicture.asset(
-      'assets/home/input_add_close_icon.svg',
       width: 20,
       height: 20,
     );

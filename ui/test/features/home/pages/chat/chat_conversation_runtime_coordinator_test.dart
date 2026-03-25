@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/features/home/pages/chat/chat_page_models.dart';
 import 'package:ui/features/home/pages/chat/services/chat_conversation_runtime_coordinator.dart';
+import 'package:ui/services/assists_core_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -108,6 +109,61 @@ void main() {
     expect(runtimeA.messages.first.text, 'hello from openclaw');
     expect(runtimeB.messages, isEmpty);
   });
+
+  test(
+    'binds agent run state by outer taskId while preserving runId',
+    () async {
+      const conversationId = 2101;
+      const taskId = 'agent-run-task';
+      const runId = 'koog-run-42';
+
+      coordinator.ensureRuntime(
+        conversationId: conversationId,
+        mode: kChatRuntimeModeNormal,
+      );
+      coordinator.registerTask(
+        taskId: taskId,
+        conversationId: conversationId,
+        mode: kChatRuntimeModeNormal,
+      );
+
+      await emitPlatformEvent('onAgentRunState', <String, dynamic>{
+        'taskId': taskId,
+        'runId': runId,
+        'phase': 'executing',
+        'currentStepId': 'step-1',
+        'steps': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'step-1',
+            'title': '执行工具',
+            'status': 'running',
+            'order': 0,
+          },
+        ],
+        'workflow': <String, dynamic>{
+          'nodes': <Map<String, dynamic>>[],
+          'edges': <Map<String, dynamic>>[],
+          'activeNodeId': 'executeStep',
+        },
+        'contextUsage': <String, dynamic>{
+          'usedTokens': 2048,
+          'contextWindow': 128000,
+          'utilization': 0.016,
+          'compressionCount': 0,
+        },
+      });
+
+      final runtime = coordinator.runtimeFor(
+        conversationId: conversationId,
+        mode: kChatRuntimeModeNormal,
+      )!;
+
+      expect(runtime.agentRunState, isNotNull);
+      expect(runtime.agentRunState!.taskId, taskId);
+      expect(runtime.agentRunState!.runId, runId);
+      expect(runtime.agentRunState!.contextUsage.usedTokens, 2048);
+    },
+  );
 
   test(
     'routes VLM request-input state to the bound conversation only',
@@ -294,5 +350,119 @@ void main() {
 
     expect(identical(runtime, reused), isTrue);
     expect(reused.chatIslandDisplayLayer, ChatIslandDisplayLayer.mode);
+  });
+
+  test(
+    'stores agent run state snapshot on the bound conversation only',
+    () async {
+      const conversationA = 8001;
+      const conversationB = 8002;
+      const taskId = 'agent-run-task';
+
+      coordinator.ensureRuntime(
+        conversationId: conversationA,
+        mode: kChatRuntimeModeNormal,
+      );
+      coordinator.ensureRuntime(
+        conversationId: conversationB,
+        mode: kChatRuntimeModeNormal,
+      );
+      coordinator.registerTask(
+        taskId: taskId,
+        conversationId: conversationA,
+        mode: kChatRuntimeModeNormal,
+      );
+
+      await emitPlatformEvent('onAgentRunState', <String, dynamic>{
+        'taskId': taskId,
+        'runId': taskId,
+        'phase': 'executing',
+        'currentStepId': 'step-2',
+        'steps': <Map<String, dynamic>>[
+          <String, dynamic>{
+            'id': 'step-1',
+            'title': '理解目标',
+            'status': 'completed',
+            'order': 0,
+          },
+          <String, dynamic>{
+            'id': 'step-2',
+            'title': '执行工具',
+            'status': 'running',
+            'order': 1,
+            'summary': '处理中',
+          },
+        ],
+        'workflow': <String, dynamic>{
+          'nodes': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'prepareInput',
+              'title': 'Prepare Input',
+              'status': 'completed',
+              'order': 0,
+            },
+            <String, dynamic>{
+              'id': 'executeStep',
+              'title': 'Execute Step',
+              'status': 'active',
+              'order': 1,
+            },
+          ],
+          'edges': const <Map<String, dynamic>>[],
+          'activeNodeId': 'executeStep',
+        },
+        'contextUsage': <String, dynamic>{
+          'usedTokens': 92000,
+          'contextWindow': 100000,
+          'utilization': 0.92,
+          'compressionCount': 1,
+        },
+      });
+
+      final runtimeA = coordinator.runtimeFor(
+        conversationId: conversationA,
+        mode: kChatRuntimeModeNormal,
+      )!;
+      final runtimeB = coordinator.runtimeFor(
+        conversationId: conversationB,
+        mode: kChatRuntimeModeNormal,
+      )!;
+
+      expect(runtimeA.agentRunState, isNotNull);
+      expect(runtimeA.agentRunState?.taskId, taskId);
+      expect(runtimeA.agentRunState?.phase, 'executing');
+      expect(runtimeA.agentRunState?.steps, hasLength(2));
+      expect(runtimeA.agentRunState?.contextUsage.usedTokens, 92000);
+      expect(runtimeB.agentRunState, isNull);
+    },
+  );
+
+  test('registerTask clears previous agent run state for a new run', () {
+    const conversationId = 9001;
+    final runtime = coordinator.ensureRuntime(
+      conversationId: conversationId,
+      mode: kChatRuntimeModeNormal,
+    );
+    runtime.agentRunState = const AgentRunStateData(
+      taskId: 'old-task',
+      runId: 'old-task',
+      phase: 'completed',
+      steps: <AgentPlanStepData>[
+        AgentPlanStepData(
+          id: 'step-1',
+          title: '旧步骤',
+          status: 'completed',
+          order: 0,
+        ),
+      ],
+    );
+
+    coordinator.registerTask(
+      taskId: 'new-task',
+      conversationId: conversationId,
+      mode: kChatRuntimeModeNormal,
+    );
+
+    expect(runtime.agentRunState, isNull);
   });
 }

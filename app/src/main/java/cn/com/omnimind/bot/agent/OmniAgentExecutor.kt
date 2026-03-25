@@ -91,17 +91,19 @@ class OmniAgentExecutor(
             workspaceManager = workspaceManager
         )
         val eventAdapter = AgentEventAdapter(json)
-        val orchestrator = AgentOrchestrator(
+        val runtime = KoogAgentRuntime(
             llmClient = llmClient,
             toolRegistry = toolRegistry,
             toolRouter = toolRouter,
             eventAdapter = eventAdapter,
-            model = agentModelScene
+            model = agentModelScene,
+            modelOverride = modelOverride,
+            json = json
         )
 
         return try {
-            orchestrator.run(
-                AgentOrchestrator.Input(
+            runtime.run(
+                KoogAgentRuntime.Input(
                     callback = callback,
                     initialMessages = initialMessages,
                     executionEnv = AgentToolRouter.ExecutionEnvironment(

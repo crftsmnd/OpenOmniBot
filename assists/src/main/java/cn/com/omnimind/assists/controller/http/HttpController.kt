@@ -1139,11 +1139,32 @@ object HttpController {
                     ProviderModelOption(
                         id = id,
                         displayName = item.optString("display_name").trim().ifEmpty { id },
-                        ownedBy = item.optString("owned_by").trim().takeIf { it.isNotEmpty() }
+                        ownedBy = item.optString("owned_by").trim().takeIf { it.isNotEmpty() },
+                        contextWindow = parseProviderContextWindow(item)
                     )
                 )
             }
         }.sortedBy { it.id.lowercase() }
+    }
+
+    private fun parseProviderContextWindow(item: JSONObject): Int? {
+        val candidates = listOf(
+            item.opt("context_window"),
+            item.opt("max_context_tokens"),
+            item.opt("context_length"),
+            item.opt("input_token_limit"),
+            item.optJSONObject("limits")?.opt("context_window"),
+            item.optJSONObject("limits")?.opt("max_context_tokens"),
+            item.optJSONObject("capabilities")?.opt("context_window"),
+            item.optJSONObject("capabilities")?.opt("max_context_tokens")
+        )
+        return candidates.firstNotNullOfOrNull { raw ->
+            when (raw) {
+                is Number -> raw.toInt()
+                is String -> raw.trim().toIntOrNull()
+                else -> null
+            }?.takeIf { it > 0 }
+        }
     }
 
     private fun encodeChatCompletionRequest(request: ChatCompletionRequest): String {

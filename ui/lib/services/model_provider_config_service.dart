@@ -110,18 +110,24 @@ class ProviderModelOption {
   final String id;
   final String displayName;
   final String? ownedBy;
+  final int? contextWindow;
 
   const ProviderModelOption({
     required this.id,
     required this.displayName,
     this.ownedBy,
+    this.contextWindow,
   });
 
   factory ProviderModelOption.fromMap(Map<dynamic, dynamic>? map) {
+    final rawContextWindow = map?['contextWindow'];
     return ProviderModelOption(
       id: (map?['id'] ?? '').toString(),
       displayName: (map?['displayName'] ?? map?['id'] ?? '').toString(),
       ownedBy: map?['ownedBy']?.toString(),
+      contextWindow: rawContextWindow is num
+          ? rawContextWindow.toInt()
+          : int.tryParse(rawContextWindow?.toString() ?? ''),
     );
   }
 }
@@ -331,6 +337,7 @@ class ModelProviderConfigService {
               'id': item.id,
               'displayName': item.displayName,
               'ownedBy': item.ownedBy,
+              'contextWindow': item.contextWindow,
             },
           )
           .toList(),
@@ -399,6 +406,7 @@ class ModelProviderConfigService {
             id: modelId,
             displayName: modelId,
             ownedBy: 'manual',
+            contextWindow: 128000,
           ),
         );
       }

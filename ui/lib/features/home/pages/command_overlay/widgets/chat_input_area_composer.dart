@@ -104,7 +104,9 @@ mixin _ChatInputAreaComposerMixin
                   _buildAttachmentPreview(),
                   const SizedBox(height: 8),
                 ],
-                if ((widget.selectedModelOverrideId ?? '').trim().isNotEmpty) ...[
+                if ((widget.selectedModelOverrideId ?? '')
+                    .trim()
+                    .isNotEmpty) ...[
                   _buildSelectedModelOverrideChip(),
                   const SizedBox(height: 8),
                 ],
@@ -128,6 +130,10 @@ mixin _ChatInputAreaComposerMixin
       children: [
         SizedBox(width: 28, height: 28, child: _buildLargeAddButton()),
         const Spacer(),
+        if (widget.showContextMeter) ...[
+          SizedBox(width: 28, height: 28, child: _buildContextMeterIcon()),
+          const SizedBox(width: 6),
+        ],
         SizedBox(
           width: 28,
           height: 28,
@@ -493,6 +499,14 @@ mixin _ChatInputAreaComposerMixin
           openClawButton,
           const SizedBox(width: 2),
         ],
+        if (widget.showContextMeter) ...[
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: _buildContextMeterIcon(compact: true),
+          ),
+          const SizedBox(width: 2),
+        ],
         SizedBox(
           width: 24,
           height: 24,
@@ -548,6 +562,58 @@ mixin _ChatInputAreaComposerMixin
       onPressed: () {
         toggleRecording();
       },
+    );
+  }
+
+  Widget _buildContextMeterIcon({bool compact = false}) {
+    final progress = widget.contextUtilization.clamp(0.0, 1.0);
+    final isWarning = progress >= 0.8;
+    final accentColor = widget.contextCompressionActive
+        ? const Color(0xFF2573F5)
+        : isWarning
+        ? const Color(0xFFF08A1D)
+        : const Color(0xFF3B82F6);
+    final trackColor = widget.contextCompressionActive
+        ? const Color(0x332573F5)
+        : isWarning
+        ? const Color(0x33F08A1D)
+        : const Color(0x223B82F6);
+    final iconSize = compact ? 18.0 : 20.0;
+    final shellSize = compact ? 24.0 : 28.0;
+    final tooltip = widget.contextCompressionActive
+        ? '上下文压缩中 ${widget.contextUsedTokens}/${widget.contextWindow}'
+        : '上下文占用 ${widget.contextUsedTokens}/${widget.contextWindow}';
+
+    return Tooltip(
+      message: tooltip,
+      child: IgnorePointer(
+        child: Center(
+          child: SizedBox(
+            width: shellSize,
+            height: shellSize,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CustomPaint(
+                  size: Size.square(shellSize),
+                  painter: _ContextMeterRingPainter(
+                    progress: progress,
+                    color: accentColor,
+                    trackColor: trackColor,
+                  ),
+                ),
+                Icon(
+                  widget.contextCompressionActive
+                      ? Icons.compress_rounded
+                      : Icons.auto_awesome_motion_rounded,
+                  size: iconSize,
+                  color: accentColor,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

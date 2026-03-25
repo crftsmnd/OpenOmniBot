@@ -872,6 +872,11 @@ class ChatInputWrapper extends StatelessWidget {
   final Widget? topBanner;
   final String? selectedModelOverrideId;
   final VoidCallback? onClearSelectedModelOverride;
+  final bool showContextMeter;
+  final double contextUtilization;
+  final int contextUsedTokens;
+  final int contextWindow;
+  final bool contextCompressionActive;
 
   const ChatInputWrapper({
     super.key,
@@ -893,6 +898,11 @@ class ChatInputWrapper extends StatelessWidget {
     this.topBanner,
     this.selectedModelOverrideId,
     this.onClearSelectedModelOverride,
+    this.showContextMeter = false,
+    this.contextUtilization = 0,
+    this.contextUsedTokens = 0,
+    this.contextWindow = 128000,
+    this.contextCompressionActive = false,
   });
 
   @override
@@ -922,6 +932,11 @@ class ChatInputWrapper extends StatelessWidget {
             onRemoveAttachment: onRemoveAttachment,
             selectedModelOverrideId: selectedModelOverrideId,
             onClearSelectedModelOverride: onClearSelectedModelOverride,
+            showContextMeter: showContextMeter,
+            contextUtilization: contextUtilization,
+            contextUsedTokens: contextUsedTokens,
+            contextWindow: contextWindow,
+            contextCompressionActive: contextCompressionActive,
           ),
         ],
       ),

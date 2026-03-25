@@ -17,6 +17,7 @@ import '../command_overlay/widgets/chat_input_area.dart';
 import '../command_overlay/constants/messages.dart';
 import '../common/openclaw_connection_checker.dart';
 import '../omnibot_workspace/widgets/omnibot_workspace_browser.dart';
+import 'services/chat_context_usage_estimator.dart';
 import 'services/chat_conversation_runtime_coordinator.dart';
 import 'package:ui/constants/openclaw/openclaw_keys.dart';
 import 'package:ui/core/router/go_router_manager.dart';
@@ -47,6 +48,7 @@ import 'mixins/conversation_manager.dart';
 
 // 导入 Widgets
 import 'chat_page_models.dart';
+import 'widgets/agent_plan_strip.dart';
 import 'widgets/chat_widgets.dart';
 import 'widgets/chat_browser_overlay.dart';
 import 'package:ui/widgets/app_update_banner.dart';
@@ -160,6 +162,10 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   _browserSessionSnapshotByMode = {
     ChatPageMode.normal: null,
     ChatPageMode.openclaw: null,
+  };
+  final Map<ChatPageMode, bool> _agentPlanExpandedByMode = {
+    ChatPageMode.normal: false,
+    ChatPageMode.openclaw: false,
   };
 
   // 输入框/任务执行状态
@@ -454,6 +460,20 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     }
   }
 
+  AgentRunStateData? get _activeAgentRunState => _activeRuntime?.agentRunState;
+  AgentContextUsageData get _resolvedNormalContextUsage =>
+      resolveAgentContextUsage(
+        contextWindow: _activeNormalContextWindow,
+        runtimeUsage: _activeAgentRunState?.contextUsage,
+        visibleMessages: _messages,
+        draftText: _messageController.text,
+      );
+
+  bool get _isAgentPlanExpanded =>
+      _agentPlanExpandedByMode[_activeMode] ?? false;
+  set _isAgentPlanExpanded(bool value) =>
+      _agentPlanExpandedByMode[_activeMode] = value;
+
   ChatIslandDisplayLayer get _chatIslandDisplayLayer =>
       _chatIslandDisplayLayerForMode(_activeMode);
   set _chatIslandDisplayLayer(ChatIslandDisplayLayer value) {
@@ -665,6 +685,21 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     return null;
   }
 
+  int get _activeNormalContextWindow {
+    final overrideSelection = _activeConversationModelOverrideSelection;
+    if (overrideSelection != null) {
+      return overrideSelection.contextWindow;
+    }
+    final sceneSelection = _activeDispatchSceneSelection;
+    if (sceneSelection != null) {
+      return _resolveConfiguredContextWindow(
+        providerProfileId: sceneSelection.providerProfileId,
+        modelId: sceneSelection.modelId,
+      );
+    }
+    return 128000;
+  }
+
   _ChatModelOverrideSelection? get _activeDispatchSceneSelection {
     final dispatchScene = _dispatchSceneCatalogItem;
     if (dispatchScene == null) {
@@ -679,6 +714,21 @@ abstract class _ChatPageStateBase extends State<ChatPage>
       providerProfileId: providerProfileId,
       modelId: modelId,
     );
+  }
+
+  int _resolveConfiguredContextWindow({
+    required String providerProfileId,
+    required String modelId,
+  }) {
+    final options =
+        _modelOptionsByProfileId[providerProfileId] ??
+        const <ProviderModelOption>[];
+    for (final option in options) {
+      if (option.id == modelId) {
+        return option.contextWindow ?? 128000;
+      }
+    }
+    return 128000;
   }
 
   // ===================== Mixin 接口实现 =====================
@@ -1054,6 +1104,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
             id: normalizedModelId,
             displayName: normalizedModelId,
             ownedBy: ownedBy,
+            contextWindow: 128000,
           ),
         );
       }

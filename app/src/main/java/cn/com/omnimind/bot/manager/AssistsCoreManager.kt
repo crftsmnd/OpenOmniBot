@@ -32,6 +32,7 @@ import cn.com.omnimind.bot.agent.AgentCallback
 import cn.com.omnimind.bot.agent.AgentAlarmToolService
 import cn.com.omnimind.bot.agent.AgentModelOverride
 import cn.com.omnimind.bot.agent.AgentResult
+import cn.com.omnimind.bot.agent.AgentRunStateSnapshot
 import cn.com.omnimind.bot.agent.AgentRuntimeContextRepository
 import cn.com.omnimind.bot.agent.AgentScheduleToolBridge
 import cn.com.omnimind.bot.agent.AgentWorkspaceManager
@@ -152,7 +153,8 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
         return mapOf(
             "id" to id,
             "displayName" to displayName,
-            "ownedBy" to ownedBy
+            "ownedBy" to ownedBy,
+            "contextWindow" to contextWindow
         )
     }
 
@@ -1816,7 +1818,9 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                     providerProfileName = providerProfile.name,
                     modelId = modelId,
                     apiBase = providerProfile.baseUrl,
-                    apiKey = providerProfile.apiKey
+                    apiKey = providerProfile.apiKey,
+                    contextWindow = (raw["contextWindow"] as? Number)?.toInt()
+                        ?: raw["contextWindow"]?.toString()?.toIntOrNull()
                 )
             }
         }
@@ -1872,6 +1876,10 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
 
                     override suspend fun onThinkingUpdate(thinking: String) {
                         sendEvent("onAgentThinkingUpdate", mapOf("thinking" to thinking))
+                    }
+
+                    override suspend fun onRunState(snapshot: AgentRunStateSnapshot) {
+                        sendEvent("onAgentRunState", snapshot.toPayload())
                     }
 
                     override suspend fun onToolCallStart(

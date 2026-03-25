@@ -65,6 +65,7 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
       browserSessionSnapshot:
           runtime?.browserSessionSnapshot ??
           _browserSessionSnapshotByMode[mode],
+      agentRunState: runtime?.agentRunState,
     );
   }
 
@@ -552,6 +553,7 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
       _deepThinkingContent = '';
       _isDeepThinking = false;
       _currentThinkingStage = 1;
+      _isAgentPlanExpanded = false;
 
       createThinkingCard(aiMessageId);
       _syncRuntimeSnapshotForMode(_activeMode);

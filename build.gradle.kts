@@ -10,9 +10,13 @@ val forcedCoroutinesVersion = libs.versions.kotlinxCoroutines.get()
 
 subprojects {
     configurations.configureEach {
-        resolutionStrategy.force(
-            "org.jetbrains.kotlinx:kotlinx-coroutines-core:$forcedCoroutinesVersion",
-            "org.jetbrains.kotlinx:kotlinx-coroutines-android:$forcedCoroutinesVersion",
-        )
+        resolutionStrategy.eachDependency {
+            if (requested.group == "org.jetbrains.kotlinx" &&
+                requested.name.startsWith("kotlinx-coroutines-")
+            ) {
+                useVersion(forcedCoroutinesVersion)
+                because("Align coroutine artifacts while allowing Koog to resolve its transitive graph.")
+            }
+        }
     }
 }

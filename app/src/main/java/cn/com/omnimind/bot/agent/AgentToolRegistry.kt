@@ -19,9 +19,15 @@ class AgentToolRegistry(
     discoveredServers: List<RemoteMcpDiscoveredServer>,
     includeMem0Tools: Boolean
 ) {
+    data class ToolDefinition(
+        val descriptor: RuntimeToolDescriptor,
+        val parameters: JsonObject
+    )
+
     data class RuntimeToolDescriptor(
         val name: String,
         val displayName: String,
+        val description: String,
         val toolType: String,
         val serverName: String? = null,
         val remoteTool: RemoteMcpToolDescriptor? = null
@@ -30,8 +36,6 @@ class AgentToolRegistry(
     private val tag = "AgentToolRegistry"
     private val toolSchemas = linkedMapOf<String, JsonObject>()
     private val runtimeDescriptors = linkedMapOf<String, RuntimeToolDescriptor>()
-    val toolsForModel: List<ChatCompletionTool>
-
     init {
         val runtimeDefinitions = mutableListOf<JsonObject>()
         runtimeDefinitions.addAll(AgentToolDefinitions.staticTools())
@@ -42,10 +46,10 @@ class AgentToolRegistry(
             runtimeDefinitions.add(toDynamicMcpToolDefinition(tool))
         }
 
-        toolsForModel = runtimeDefinitions.mapNotNull { definition ->
-            val function = definition["function"] as? JsonObject ?: return@mapNotNull null
+        runtimeDefinitions.forEach { definition ->
+            val function = definition["function"] as? JsonObject ?: return@forEach
             val name = function["name"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
-            if (name.isBlank()) return@mapNotNull null
+            if (name.isBlank()) return@forEach
             val description = function["description"]?.jsonPrimitive?.contentOrNull.orEmpty()
             val parameters = (function["parameters"] as? JsonObject) ?: JsonObject(emptyMap())
             val displayName = function["displayName"]?.jsonPrimitive?.contentOrNull?.trim()
@@ -59,16 +63,10 @@ class AgentToolRegistry(
             runtimeDescriptors[name] = RuntimeToolDescriptor(
                 name = name,
                 displayName = displayName,
+                description = description,
                 toolType = toolType,
                 serverName = serverName,
                 remoteTool = findRemoteTool(name, discoveredServers)
-            )
-            ChatCompletionTool(
-                function = ChatCompletionFunction(
-                    name = name,
-                    description = description,
-                    parameters = parameters
-                )
             )
         }
     }
@@ -77,6 +75,7 @@ class AgentToolRegistry(
         return runtimeDescriptors[toolName] ?: RuntimeToolDescriptor(
             name = toolName,
             displayName = toolName,
+            description = "",
             toolType = "builtin"
         )
     }
@@ -84,6 +83,15 @@ class AgentToolRegistry(
     fun validateArguments(toolName: String, arguments: JsonObject) {
         val schema = toolSchemas[toolName] ?: return
         validateWithSchema(toolName, schema, arguments)
+    }
+
+    fun definitions(): List<ToolDefinition> {
+        return runtimeDescriptors.keys.map { name ->
+            ToolDefinition(
+                descriptor = runtimeDescriptors.getValue(name),
+                parameters = toolSchemas[name] ?: JsonObject(emptyMap())
+            )
+        }
     }
 
     private fun validateWithSchema(

@@ -6,10 +6,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class AgentOrchestratorTest {
+class AgentFailureRecoveryTest {
     @Test
     fun extractRecoverableToolFailureReturnsSummaryForFailedTerminalResult() {
-        val failure = AgentOrchestrator.extractRecoverableToolFailure(
+        val failure = AgentFailureRecovery.extractRecoverableToolFailure(
             toolName = "terminal_execute",
             result = ToolExecutionResult.TerminalResult(
                 toolName = "terminal_execute",
@@ -27,7 +27,7 @@ class AgentOrchestratorTest {
 
     @Test
     fun extractRecoverableToolFailureIgnoresSuccessfulResults() {
-        val failure = AgentOrchestrator.extractRecoverableToolFailure(
+        val failure = AgentFailureRecovery.extractRecoverableToolFailure(
             toolName = "terminal_execute",
             result = ToolExecutionResult.TerminalResult(
                 toolName = "terminal_execute",
@@ -43,12 +43,12 @@ class AgentOrchestratorTest {
 
     @Test
     fun buildToolFailureRetryPromptMentionsToolAndUserRequest() {
-        val prompt = AgentOrchestrator.buildToolFailureRetryPrompt(
+        val prompt = AgentFailureRecovery.buildToolFailureRetryPrompt(
             userMessage = "帮我继续跑 bilibili 分析脚本",
-            failure = AgentOrchestrator.RecoverableToolFailure(
+            failure = RecoverableToolFailure(
                 toolName = "terminal_execute",
-                summary = "uv: command not found"
-            )
+                summary = "uv: command not found",
+            ),
         )
 
         assertTrue(prompt.contains("terminal_execute"))

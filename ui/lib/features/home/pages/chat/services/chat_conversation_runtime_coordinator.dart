@@ -50,6 +50,7 @@ class ChatConversationRuntimeState {
   ChatIslandDisplayLayer chatIslandDisplayLayer;
   String? lastAgentToolType;
   ChatBrowserSessionSnapshot? browserSessionSnapshot;
+  AgentRunStateData? agentRunState;
 
   bool get hasInFlightTask =>
       isAiResponding ||
@@ -119,6 +120,7 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     AssistsMessageService.setOnAgentThinkingUpdateCallback(
       _handleAgentThinkingUpdate,
     );
+    AssistsMessageService.setOnAgentRunStateCallback(_handleAgentRunState);
     AssistsMessageService.setOnAgentToolCallStartCallback(
       _handleAgentToolCallStart,
     );
@@ -208,6 +210,7 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     ChatIslandDisplayLayer chatIslandDisplayLayer = ChatIslandDisplayLayer.mode,
     String? lastAgentToolType,
     ChatBrowserSessionSnapshot? browserSessionSnapshot,
+    AgentRunStateData? agentRunState,
   }) {
     final runtime = ensureRuntime(
       conversationId: conversationId,
@@ -241,6 +244,7 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     runtime.chatIslandDisplayLayer = chatIslandDisplayLayer;
     runtime.lastAgentToolType = lastAgentToolType;
     runtime.browserSessionSnapshot = browserSessionSnapshot;
+    runtime.agentRunState = agentRunState ?? runtime.agentRunState;
     notifyListeners();
   }
 
@@ -250,7 +254,8 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     required String mode,
   }) {
     ensureInitialized();
-    ensureRuntime(conversationId: conversationId, mode: mode);
+    final runtime = ensureRuntime(conversationId: conversationId, mode: mode);
+    runtime.agentRunState = null;
     _taskBindings[taskId] = _TaskBinding(
       conversationId: conversationId,
       mode: mode,
@@ -671,6 +676,20 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
       isLoading: true,
       stage: runtime.currentThinkingStage,
     );
+    notifyListeners();
+    schedulePersistRuntimeConversation(
+      conversationId: binding.conversationId,
+      mode: binding.mode,
+    );
+  }
+
+  void _handleAgentRunState(AgentRunStateData state) {
+    final binding = _taskBindings[state.taskId];
+    final runtime = _runtimeForTask(state.taskId);
+    if (binding == null || runtime == null) return;
+
+    runtime.lastAgentTaskId = state.taskId;
+    runtime.agentRunState = state;
     notifyListeners();
     schedulePersistRuntimeConversation(
       conversationId: binding.conversationId,
