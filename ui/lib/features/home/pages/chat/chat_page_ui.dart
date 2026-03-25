@@ -1,6 +1,88 @@
 part of 'chat_page.dart';
 
 mixin _ChatPageUiMixin on _ChatPageStateBase {
+  bool get _showNewConversationPullIndicator =>
+      _isNewConversationPullTracking || _newConversationPullDistance > 0;
+
+  double _resolveNewConversationPullIndicatorTop({
+    required BuildContext layoutContext,
+    required BoxConstraints constraints,
+    required double inputBottomPadding,
+    required double keyboardSpacer,
+  }) {
+    final fallbackTop =
+        constraints.maxHeight -
+        inputBottomPadding -
+        keyboardSpacer -
+        (_isInputAreaVisible ? 106 : 52);
+    final fallback = fallbackTop
+        .clamp(8.0, constraints.maxHeight - 24)
+        .toDouble();
+    if (!_isInputAreaVisible) {
+      return fallback;
+    }
+    final inputContext = _inputAreaKey.currentContext;
+    final inputBox = inputContext?.findRenderObject();
+    final stackBox = layoutContext.findRenderObject();
+    if (inputBox is! RenderBox ||
+        stackBox is! RenderBox ||
+        !inputBox.hasSize ||
+        !stackBox.hasSize) {
+      return fallback;
+    }
+    final inputTop = inputBox.localToGlobal(Offset.zero, ancestor: stackBox).dy;
+    return (inputTop - 30).clamp(8.0, constraints.maxHeight - 24).toDouble();
+  }
+
+  Widget _buildNewConversationPullIndicator(double topOffset) {
+    final progress =
+        (_newConversationPullDistance /
+                _ChatPageStateBase._newConversationPullThreshold)
+            .clamp(0.0, 1.4)
+            .toDouble();
+    final eased = Curves.easeOutCubic.transform(progress.clamp(0.0, 1.0));
+    final isReady = _newConversationPullThresholdReached;
+    final opacity = (0.10 + eased * 0.90).clamp(0.0, 1.0).toDouble();
+    final offsetY = (1 - eased) * 16;
+    final textColor = isReady
+        ? const Color(0xFF197446)
+        : Color.lerp(const Color(0xFF8FA1BC), const Color(0xFF34527A), eased)!;
+    final hintText = isReady ? '松手即可新建对话' : '继续上滑新建对话';
+
+    return Positioned(
+      left: 24,
+      right: 24,
+      top: topOffset,
+      child: IgnorePointer(
+        child: Opacity(
+          opacity: opacity,
+          child: Transform.translate(
+            offset: Offset(0, offsetY),
+            child: Center(
+              child: Text(
+                hintText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.1,
+                  shadows: [
+                    Shadow(
+                      color: Colors.white.withValues(alpha: 0.65),
+                      blurRadius: 6,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget _buildSlashCommandPanel() {
     final visible =
@@ -151,6 +233,12 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
       key: ValueKey('workspace_surface_$_workspaceSurfaceSeed'),
       workspacePath: OmnibotResourceService.rootPath,
       workspaceShellPath: OmnibotResourceService.shellRootPath,
+      onCanGoUpChanged: (canGoUp) {
+        if (_workspaceBrowserCanGoUp == canGoUp || !mounted) return;
+        setState(() {
+          _workspaceBrowserCanGoUp = canGoUp;
+        });
+      },
     );
   }
 
@@ -179,6 +267,9 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (_isWorkspaceSurface && _workspaceBrowserCanGoUp) {
+          return;
+        }
         unawaited(saveConversationWithSummary());
         if (GoRouterManager.canPop()) {
           GoRouterManager.pop();
@@ -215,6 +306,13 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
               onPointerCancel: _handlePagePointerCancel,
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  final newConversationPullIndicatorTopOffset =
+                      _resolveNewConversationPullIndicatorTop(
+                        layoutContext: context,
+                        constraints: constraints,
+                        inputBottomPadding: inputBottomPadding,
+                        keyboardSpacer: keyboardSpacer,
+                      );
                   return Stack(
                     clipBehavior: Clip.hardEdge,
                     children: [
@@ -343,6 +441,11 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                           right: 24,
                           bottom: commandPanelBottomOffset,
                           child: _buildSlashCommandPanel(),
+                        ),
+                      if (!_isWorkspaceSurface &&
+                          _showNewConversationPullIndicator)
+                        _buildNewConversationPullIndicator(
+                          newConversationPullIndicatorTopOffset,
                         ),
                       if (_isPopupVisible && !_isWorkspaceSurface)
                         Positioned(

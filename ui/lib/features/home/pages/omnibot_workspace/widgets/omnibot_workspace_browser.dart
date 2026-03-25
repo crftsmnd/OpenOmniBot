@@ -21,19 +21,23 @@ class _WorkspaceDragPayload {
 class OmnibotWorkspaceBrowser extends StatefulWidget {
   final String workspacePath;
   final String? workspaceShellPath;
+  final bool enableSystemBackHandler;
+  final ValueChanged<bool>? onCanGoUpChanged;
 
   const OmnibotWorkspaceBrowser({
     super.key,
     required this.workspacePath,
     this.workspaceShellPath,
+    this.enableSystemBackHandler = true,
+    this.onCanGoUpChanged,
   });
 
   @override
   State<OmnibotWorkspaceBrowser> createState() =>
-      _OmnibotWorkspaceBrowserState();
+      OmnibotWorkspaceBrowserState();
 }
 
-class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
+class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
   static const String _folderIconAsset =
       'assets/home/workspace_folder_icon.svg';
   static const String _folderOpenIconAsset =
@@ -75,7 +79,18 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     super.initState();
     _rootDirectory = Directory(widget.workspacePath);
     _directory = _rootDirectory;
+    _notifyCanGoUpChanged();
     _refresh();
+  }
+
+  void _notifyCanGoUpChanged() {
+    final callback = widget.onCanGoUpChanged;
+    if (callback == null) return;
+    final value = canGoUp;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      callback(value);
+    });
   }
 
   void _refresh() {
@@ -105,13 +120,16 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     });
   }
 
-  void _openParentDirectory() {
-    if (_directory.path == _rootDirectory.path) return;
+  bool get canGoUp => _directory.path != _rootDirectory.path;
+
+  void openParentDirectory() {
+    if (!canGoUp) return;
     setState(() {
       _directory = _directory.parent;
       _expandedDirectoryPaths.clear();
       _directoryChildrenCache.clear();
     });
+    _notifyCanGoUpChanged();
     _refresh();
   }
 
@@ -121,6 +139,7 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
       _expandedDirectoryPaths.clear();
       _directoryChildrenCache.clear();
     });
+    _notifyCanGoUpChanged();
     _refresh();
   }
 
@@ -173,7 +192,7 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     final canGoUp = _directory.path != _rootDirectory.path;
     final itemCount = _entries.length + (canGoUp ? 1 : 0);
 
-    return Column(
+    final content = Column(
       children: [
         Expanded(
           child: RefreshIndicator(
@@ -209,7 +228,7 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
                             color: AppColors.text.withValues(alpha: 0.8),
                           ),
                           borderRadius: borderRadius,
-                          onTap: _openParentDirectory,
+                          onTap: openParentDirectory,
                         );
                         return _buildDirectoryDropTarget(
                           child: parentRow,
@@ -230,6 +249,18 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
           ),
         ),
       ],
+    );
+
+    if (!widget.enableSystemBackHandler) {
+      return content;
+    }
+    return PopScope(
+      canPop: !canGoUp,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        openParentDirectory();
+      },
+      child: content,
     );
   }
 

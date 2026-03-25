@@ -103,6 +103,45 @@ class AssistsCoreChannel {
                 "checkVlmModelAvailability" -> {
                     assistsCoreManager!!.checkVlmModelAvailability(call, result)
                 }
+                "getWorkspaceSoul" -> {
+                    assistsCoreManager!!.getWorkspaceSoul(call, result)
+                }
+                "saveWorkspaceSoul" -> {
+                    assistsCoreManager!!.saveWorkspaceSoul(call, result)
+                }
+                "getWorkspaceLongMemory" -> {
+                    assistsCoreManager!!.getWorkspaceLongMemory(call, result)
+                }
+                "getWorkspaceShortMemories" -> {
+                    assistsCoreManager!!.getWorkspaceShortMemories(call, result)
+                }
+                "saveWorkspaceLongMemory" -> {
+                    assistsCoreManager!!.saveWorkspaceLongMemory(call, result)
+                }
+                "getWorkspaceMemoryEmbeddingConfig" -> {
+                    assistsCoreManager!!.getWorkspaceMemoryEmbeddingConfig(call, result)
+                }
+                "saveWorkspaceMemoryEmbeddingConfig" -> {
+                    assistsCoreManager!!.saveWorkspaceMemoryEmbeddingConfig(call, result)
+                }
+                "getWorkspaceMemoryRollupStatus" -> {
+                    assistsCoreManager!!.getWorkspaceMemoryRollupStatus(call, result)
+                }
+                "saveWorkspaceMemoryRollupEnabled" -> {
+                    assistsCoreManager!!.saveWorkspaceMemoryRollupEnabled(call, result)
+                }
+                "runWorkspaceMemoryRollupNow" -> {
+                    assistsCoreManager!!.runWorkspaceMemoryRollupNow(call, result)
+                }
+                "upsertWorkspaceScheduledTask" -> {
+                    assistsCoreManager!!.upsertWorkspaceScheduledTask(call, result)
+                }
+                "deleteWorkspaceScheduledTask" -> {
+                    assistsCoreManager!!.deleteWorkspaceScheduledTask(call, result)
+                }
+                "syncWorkspaceScheduledTasks" -> {
+                    assistsCoreManager!!.syncWorkspaceScheduledTasks(call, result)
+                }
 
                 "cancelChatTask" -> {
                     OmniLog.e(TAG, "cancelChatTask")
@@ -186,6 +225,9 @@ class AssistsCoreChannel {
                 }
                 "postLLMChat"->{
                     assistsCoreManager!!.postLLMChat( call, result)
+                }
+                "generateMemoryGreeting" -> {
+                    assistsCoreManager!!.generateMemoryGreeting(call, result)
                 }
                 "openAPPMarket"->{
                     assistsCoreManager!!.openAPPMarket( call, result)

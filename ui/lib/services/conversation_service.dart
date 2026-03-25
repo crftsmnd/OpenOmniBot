@@ -12,8 +12,13 @@ class ConversationService {
   );
   static const String _localConversationListKey = 'local_conversation_list';
 
-  static Future<List<ConversationModel>> _loadLocalConversations() async {
+  static Future<List<ConversationModel>> _loadLocalConversations({
+    bool reloadCache = false,
+  }) async {
     final prefs = await SharedPreferences.getInstance();
+    if (reloadCache) {
+      await prefs.reload();
+    }
     final jsonStr = prefs.getString(_localConversationListKey);
     if (jsonStr == null || jsonStr.isEmpty) return [];
 
@@ -56,16 +61,29 @@ class ConversationService {
 
     final baseConversations =
         localConversations ?? await _loadLocalConversations();
-    if (messageKeys.isEmpty) return _sortConversations([...baseConversations]);
+    if (messageKeys.isEmpty) {
+      return _canonicalizeConversations(baseConversations);
+    }
 
     final List<ConversationModel> conversations = [];
     final Set<String> existingKeys = baseConversations
         .map((conversation) => conversation.threadKey)
         .toSet();
+    final Set<int> existingIds = baseConversations
+        .map((conversation) => conversation.id)
+        .toSet();
 
     for (final storageKey in messageKeys) {
       if (existingKeys.contains(storageKey.threadKey)) continue;
+      // subagent 会话由原生层显式写入 local_conversation_list，
+      // 这里不从消息键反推，避免把历史残留 key 误展示成新会话。
+      if (storageKey.mode == ConversationMode.subagent) {
+        continue;
+      }
       final conversationId = storageKey.conversationId;
+      if (existingIds.contains(conversationId)) {
+        continue;
+      }
       final mode = storageKey.mode;
 
       final messages = await ConversationHistoryService.getConversationMessages(
@@ -108,14 +126,15 @@ class ConversationService {
       );
     }
 
-    return _sortConversations([...baseConversations, ...conversations]);
+    return _canonicalizeConversations([...baseConversations, ...conversations]);
   }
 
   static Future<void> _saveLocalConversations(
     List<ConversationModel> conversations,
   ) async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonList = conversations.map((c) => c.toJson()).toList();
+    final canonicalized = _canonicalizeConversations(conversations);
+    final jsonList = canonicalized.map((c) => c.toJson()).toList();
     await prefs.setString(_localConversationListKey, jsonEncode(jsonList));
   }
 
@@ -138,16 +157,70 @@ class ConversationService {
   static List<ConversationModel> _sortConversations(
     List<ConversationModel> conversations,
   ) {
-    conversations.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    conversations.sort((a, b) {
+      final byUpdatedAt = b.updatedAt.compareTo(a.updatedAt);
+      if (byUpdatedAt != 0) return byUpdatedAt;
+      final aPenalty = a.mode == ConversationMode.subagent ? 1 : 0;
+      final bPenalty = b.mode == ConversationMode.subagent ? 1 : 0;
+      final byMode = aPenalty.compareTo(bPenalty);
+      if (byMode != 0) return byMode;
+      return b.createdAt.compareTo(a.createdAt);
+    });
     return conversations;
   }
 
-  static int _nextConversationId(List<ConversationModel> conversations) {
-    if (conversations.isEmpty) return 1;
-    int maxId = conversations.first.id;
+  static List<ConversationModel> _canonicalizeConversations(
+    List<ConversationModel> source,
+  ) {
+    if (source.isEmpty) return [];
+    final sorted = _sortConversations([...source]);
+    final seenThreadKeys = <String>{};
+    final seenIds = <int>{};
+    final normalized = <ConversationModel>[];
+    for (final conversation in sorted) {
+      if (seenThreadKeys.contains(conversation.threadKey)) {
+        continue;
+      }
+      // 历史遗留数据可能出现跨 mode 的同 ID 冲突；对外统一只保留一条。
+      if (seenIds.contains(conversation.id)) {
+        continue;
+      }
+      seenThreadKeys.add(conversation.threadKey);
+      seenIds.add(conversation.id);
+      normalized.add(conversation);
+    }
+    return _sortConversations(normalized);
+  }
+
+  static Future<int> _nextConversationId(
+    List<ConversationModel> conversations,
+  ) async {
+    int maxId = 0;
     for (final conv in conversations) {
       if (conv.id > maxId) maxId = conv.id;
     }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final keys = prefs.getKeys();
+    for (final key in keys) {
+      final parsed = ConversationHistoryService.tryParseConversationMessagesKey(
+        key,
+      );
+      if (parsed == null) continue;
+      if (parsed.conversationId > maxId) {
+        maxId = parsed.conversationId;
+      }
+    }
+
+    for (final mode in ConversationMode.values) {
+      final currentId =
+          await ConversationHistoryService.getCurrentConversationId(mode: mode);
+      if (currentId != null && currentId > maxId) {
+        maxId = currentId;
+      }
+    }
+
     return maxId + 1;
   }
 
@@ -178,9 +251,10 @@ class ConversationService {
               ),
             )
             .toList();
-        if (conversations.isNotEmpty) {
-          await _saveLocalConversations(conversations);
-          return _sortConversations(conversations);
+        final normalized = _canonicalizeConversations(conversations);
+        if (normalized.isNotEmpty) {
+          await _saveLocalConversations(normalized);
+          return normalized;
         }
       }
     } on PlatformException catch (e) {
@@ -213,8 +287,8 @@ class ConversationService {
   }) async {
     try {
       final now = DateTime.now().millisecondsSinceEpoch;
-      final conversations = await _loadLocalConversations();
-      final newId = _nextConversationId(conversations);
+      final conversations = await _loadLocalConversations(reloadCache: true);
+      final newId = await _nextConversationId(conversations);
       final conversation = ConversationModel(
         id: newId,
         mode: mode,

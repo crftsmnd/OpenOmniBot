@@ -1004,6 +1004,32 @@ class AssistsMessageService {
     }
   }
 
+  /// 生成记忆中心问候语（原生端优先使用标准 tool_calls）
+  static Future<String?> generateMemoryGreeting({
+    required List<Map<String, String>> records,
+    String model = 'scene.compactor.context',
+  }) async {
+    try {
+      final payloadRecords = records
+          .map(
+            (item) => {
+              'title': item['title'] ?? '',
+              'description': item['description'] ?? '',
+              'appName': item['appName'] ?? '',
+            },
+          )
+          .toList();
+      final result = await assistCore.invokeMethod<String>(
+        'generateMemoryGreeting',
+        {'model': model, 'records': payloadRecords},
+      );
+      return result;
+    } on PlatformException catch (e) {
+      print('生成记忆中心问候语失败: ${e.message}');
+      return null;
+    }
+  }
+
   /// 创建 Agent 任务
   static Future<bool> createAgentTask({
     required String taskId,
@@ -1011,6 +1037,10 @@ class AssistsMessageService {
     required List<Map<String, dynamic>> conversationHistory,
     List<Map<String, dynamic>> attachments = const [],
     int? conversationId,
+    String? conversationMode,
+    String? scheduledTaskId,
+    String? scheduledTaskTitle,
+    bool? scheduleNotificationEnabled,
     Map<String, dynamic>? modelOverride,
   }) async {
     try {
@@ -1021,6 +1051,18 @@ class AssistsMessageService {
       };
       if (conversationId != null) {
         args['conversationId'] = conversationId;
+      }
+      if (conversationMode != null && conversationMode.trim().isNotEmpty) {
+        args['conversationMode'] = conversationMode.trim();
+      }
+      if (scheduledTaskId != null && scheduledTaskId.trim().isNotEmpty) {
+        args['scheduledTaskId'] = scheduledTaskId.trim();
+      }
+      if (scheduledTaskTitle != null && scheduledTaskTitle.trim().isNotEmpty) {
+        args['scheduledTaskTitle'] = scheduledTaskTitle.trim();
+      }
+      if (scheduleNotificationEnabled != null) {
+        args['scheduleNotificationEnabled'] = scheduleNotificationEnabled;
       }
       if (attachments.isNotEmpty) {
         args['attachments'] = attachments;
@@ -1035,6 +1077,55 @@ class AssistsMessageService {
     } on PlatformException catch (e) {
       print('创建 Agent 任务失败: ${e.message}');
       return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> upsertWorkspaceScheduledTask(
+    Map<String, dynamic> task,
+  ) async {
+    try {
+      final result = await assistCore.invokeMethod<Map<dynamic, dynamic>>(
+        'upsertWorkspaceScheduledTask',
+        {'task': task},
+      );
+      if (result == null) return null;
+      return result.map((k, v) => MapEntry(k.toString(), v));
+    } on PlatformException catch (e) {
+      print('更新原生定时任务失败: ${e.message}');
+      return null;
+    }
+  }
+
+  static Future<bool> deleteWorkspaceScheduledTask(String taskId) async {
+    try {
+      final result = await assistCore.invokeMethod<Map<dynamic, dynamic>>(
+        'deleteWorkspaceScheduledTask',
+        {'taskId': taskId},
+      );
+      if (result == null) return false;
+      return result['deleted'] == true;
+    } on PlatformException catch (e) {
+      print('删除原生定时任务失败: ${e.message}');
+      return false;
+    }
+  }
+
+  static Future<int> syncWorkspaceScheduledTasks(
+    List<Map<String, dynamic>> tasks,
+  ) async {
+    try {
+      final result = await assistCore.invokeMethod<Map<dynamic, dynamic>>(
+        'syncWorkspaceScheduledTasks',
+        {'tasks': tasks},
+      );
+      if (result == null) return 0;
+      final count = result['count'];
+      if (count is int) return count;
+      if (count is String) return int.tryParse(count) ?? 0;
+      return 0;
+    } on PlatformException catch (e) {
+      print('同步原生定时任务失败: ${e.message}');
+      return 0;
     }
   }
 
