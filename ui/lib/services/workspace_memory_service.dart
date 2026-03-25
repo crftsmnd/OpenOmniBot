@@ -64,6 +64,38 @@ class WorkspaceMemoryRollupStatus {
   }
 }
 
+class WorkspaceShortMemoryItem {
+  final String id;
+  final String date;
+  final String time;
+  final String content;
+  final int timestampMillis;
+
+  const WorkspaceShortMemoryItem({
+    required this.id,
+    required this.date,
+    required this.time,
+    required this.content,
+    required this.timestampMillis,
+  });
+
+  factory WorkspaceShortMemoryItem.fromMap(Map<dynamic, dynamic> raw) {
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is String) return int.tryParse(value) ?? 0;
+      return 0;
+    }
+
+    return WorkspaceShortMemoryItem(
+      id: (raw['id'] ?? '').toString(),
+      date: (raw['date'] ?? '').toString(),
+      time: (raw['time'] ?? '').toString(),
+      content: (raw['content'] ?? '').toString(),
+      timestampMillis: parseInt(raw['timestampMillis']),
+    );
+  }
+}
+
 class WorkspaceMemoryService {
   static const MethodChannel _channel = MethodChannel(
     'cn.com.omnimind.bot/AssistCoreEvent',
@@ -97,6 +129,21 @@ class WorkspaceMemoryService {
       {'content': content},
     );
     return (result?['content'] ?? '').toString();
+  }
+
+  static Future<List<WorkspaceShortMemoryItem>> getShortMemories({
+    int days = 14,
+    int limit = 240,
+  }) async {
+    final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getWorkspaceShortMemories',
+      {'days': days, 'limit': limit},
+    );
+    final rawItems = (result?['items'] as List?) ?? const [];
+    return rawItems
+        .whereType<Map>()
+        .map((item) => WorkspaceShortMemoryItem.fromMap(item))
+        .toList();
   }
 
   static Future<WorkspaceMemoryEmbeddingConfig> getEmbeddingConfig() async {

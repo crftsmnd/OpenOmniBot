@@ -112,6 +112,9 @@ class AssistsCoreChannel {
                 "getWorkspaceLongMemory" -> {
                     assistsCoreManager!!.getWorkspaceLongMemory(call, result)
                 }
+                "getWorkspaceShortMemories" -> {
+                    assistsCoreManager!!.getWorkspaceShortMemories(call, result)
+                }
                 "saveWorkspaceLongMemory" -> {
                     assistsCoreManager!!.saveWorkspaceLongMemory(call, result)
                 }

@@ -84,6 +84,11 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.collections.mapOf
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -2051,6 +2056,89 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                 }
             }
         }
+    }
+
+    fun getWorkspaceShortMemories(call: MethodCall, result: MethodChannel.Result) {
+        val days = (call.argument<Int>("days") ?: 14).coerceIn(1, 90)
+        val limit = (call.argument<Int>("limit") ?: 240).coerceIn(1, 1000)
+        workJob.launch {
+            try {
+                val service = WorkspaceMemoryService(context)
+                val now = LocalDate.now()
+                val timePattern = Regex("^\\[([0-2]\\d:[0-5]\\d:[0-5]\\d)]\\s*(.*)$")
+                val zoneId = ZoneId.systemDefault()
+                val payload = mutableListOf<Map<String, Any?>>()
+
+                for (offset in 0 until days) {
+                    val date = now.minusDays(offset.toLong())
+                    val dateText = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    val content = service.readDailyMemory(date)
+                    if (content.isBlank()) {
+                        continue
+                    }
+                    var lineIndex = 0
+                    content.lineSequence().forEach { raw ->
+                        val line = raw.trim()
+                        if (!line.startsWith("- ")) {
+                            return@forEach
+                        }
+                        val item = line.removePrefix("- ").trim()
+                        if (item.isEmpty()) {
+                            return@forEach
+                        }
+                        val match = timePattern.find(item)
+                        val timeText = match?.groupValues?.getOrNull(1)?.trim()
+                        val body = (match?.groupValues?.getOrNull(2) ?: item).trim()
+                        if (body.isEmpty() || isWorkspaceRollupMetadataLine(body)) {
+                            return@forEach
+                        }
+                        val localTime = runCatching {
+                            LocalTime.parse(timeText ?: "00:00:00")
+                        }.getOrNull() ?: LocalTime.MIDNIGHT
+                        val timestampMillis = LocalDateTime.of(date, localTime)
+                            .atZone(zoneId)
+                            .toInstant()
+                            .toEpochMilli()
+                        val stableKey = "$dateText|$lineIndex|$body"
+                        payload += mapOf(
+                            "id" to stableKey.hashCode().toString(),
+                            "date" to dateText,
+                            "time" to (timeText ?: "00:00:00"),
+                            "content" to body,
+                            "timestampMillis" to timestampMillis
+                        )
+                        lineIndex += 1
+                    }
+                }
+
+                val sorted = payload.sortedWith(
+                    compareByDescending<Map<String, Any?>> {
+                        (it["timestampMillis"] as? Long) ?: 0L
+                    }.thenByDescending {
+                        (it["id"] as? String) ?: ""
+                    }
+                ).take(limit)
+                withContext(Dispatchers.Main) {
+                    result.success(
+                        mapOf(
+                            "items" to sorted
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    result.error("GET_WORKSPACE_SHORT_MEMORY_ERROR", e.message, null)
+                }
+            }
+        }
+    }
+
+    private fun isWorkspaceRollupMetadataLine(item: String): Boolean {
+        val lower = item.lowercase()
+        return lower.startsWith("source:") ||
+            lower.startsWith("inputlines:") ||
+            (item.startsWith("已整理") && item.contains("条短期记忆")) ||
+            (item.contains("沉淀") && item.contains("长期记忆"))
     }
 
     fun saveWorkspaceLongMemory(call: MethodCall, result: MethodChannel.Result) {
