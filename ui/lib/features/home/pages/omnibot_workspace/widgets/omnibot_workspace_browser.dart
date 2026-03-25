@@ -30,10 +30,10 @@ class OmnibotWorkspaceBrowser extends StatefulWidget {
 
   @override
   State<OmnibotWorkspaceBrowser> createState() =>
-      _OmnibotWorkspaceBrowserState();
+      OmnibotWorkspaceBrowserState();
 }
 
-class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
+class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
   static const String _folderIconAsset =
       'assets/home/workspace_folder_icon.svg';
   static const String _folderOpenIconAsset =
@@ -105,8 +105,10 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     });
   }
 
-  void _openParentDirectory() {
-    if (_directory.path == _rootDirectory.path) return;
+  bool get canGoUp => _directory.path != _rootDirectory.path;
+
+  void openParentDirectory() {
+    if (!canGoUp) return;
     setState(() {
       _directory = _directory.parent;
       _expandedDirectoryPaths.clear();
@@ -173,63 +175,72 @@ class _OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     final canGoUp = _directory.path != _rootDirectory.path;
     final itemCount = _entries.length + (canGoUp ? 1 : 0);
 
-    return Column(
-      children: [
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: () async => _refresh(),
-            child: !exists
-                ? _buildStatusList(message: '工作区不存在')
-                : itemCount == 0
-                ? _buildStatusList(message: '当前目录为空')
-                : ListView.separated(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                    itemCount: itemCount,
-                    separatorBuilder: (_, __) => const Divider(
-                      height: 1,
-                      thickness: 1,
-                      indent: 12,
-                      endIndent: 12,
+    return PopScope(
+      canPop: !canGoUp,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        openParentDirectory();
+      },
+      child: Column(
+        children: [
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async => _refresh(),
+              child: !exists
+                  ? _buildStatusList(message: '工作区不存在')
+                  : itemCount == 0
+                  ? _buildStatusList(message: '当前目录为空')
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      itemCount: itemCount,
+                      separatorBuilder: (_, __) => const Divider(
+                        height: 1,
+                        thickness: 1,
+                        indent: 12,
+                        endIndent: 12,
+                      ),
+                      itemBuilder: (context, index) {
+                        final isFirst = index == 0;
+                        final isLast = index == itemCount - 1;
+                        final borderRadius = BorderRadius.vertical(
+                          top: isFirst ? const Radius.circular(4) : Radius.zero,
+                          bottom: isLast
+                              ? const Radius.circular(4)
+                              : Radius.zero,
+                        );
+
+                        if (canGoUp && index == 0) {
+                          final parentRow = _buildWorkspaceItem(
+                            title: '..',
+                            leading: Icon(
+                              Icons.arrow_upward_rounded,
+                              size: 20,
+                              color: AppColors.text.withValues(alpha: 0.8),
+                            ),
+                            borderRadius: borderRadius,
+                            onTap: openParentDirectory,
+                          );
+                          return _buildDirectoryDropTarget(
+                            child: parentRow,
+                            borderRadius: borderRadius,
+                            targetDirectoryPath: _directory.parent.path,
+                          );
+                        }
+
+                        final entry = _entries[index - (canGoUp ? 1 : 0)];
+                        return _buildEntryNode(
+                          entry: entry,
+                          depth: 0,
+                          currentShellPath: currentShellPath,
+                          borderRadius: borderRadius,
+                        );
+                      },
                     ),
-                    itemBuilder: (context, index) {
-                      final isFirst = index == 0;
-                      final isLast = index == itemCount - 1;
-                      final borderRadius = BorderRadius.vertical(
-                        top: isFirst ? const Radius.circular(4) : Radius.zero,
-                        bottom: isLast ? const Radius.circular(4) : Radius.zero,
-                      );
-
-                      if (canGoUp && index == 0) {
-                        final parentRow = _buildWorkspaceItem(
-                          title: '..',
-                          leading: Icon(
-                            Icons.arrow_upward_rounded,
-                            size: 20,
-                            color: AppColors.text.withValues(alpha: 0.8),
-                          ),
-                          borderRadius: borderRadius,
-                          onTap: _openParentDirectory,
-                        );
-                        return _buildDirectoryDropTarget(
-                          child: parentRow,
-                          borderRadius: borderRadius,
-                          targetDirectoryPath: _directory.parent.path,
-                        );
-                      }
-
-                      final entry = _entries[index - (canGoUp ? 1 : 0)];
-                      return _buildEntryNode(
-                        entry: entry,
-                        depth: 0,
-                        currentShellPath: currentShellPath,
-                        borderRadius: borderRadius,
-                      );
-                    },
-                  ),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

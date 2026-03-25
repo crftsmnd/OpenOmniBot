@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:simple_gradient_text/simple_gradient_text.dart';
 import 'package:ui/core/mixins/page_lifecycle_mixin.dart';
 import 'package:ui/features/memory/models/mem0_memory_item.dart';
@@ -15,14 +14,13 @@ import 'package:ui/features/memory/pages/memory_center/widgets/memory_card.dart'
 import 'package:ui/features/memory/services/mem0_memory_service.dart';
 import 'package:ui/theme/app_colors.dart';
 import 'package:ui/utils/cache_util.dart';
-import 'package:ui/utils/image_util.dart';
 import 'package:ui/widgets/selection_bottom_bar.dart';
 import 'package:ui/services/assists_core_service.dart';
+import 'package:ui/services/workspace_memory_service.dart' as workspace_memory;
 
 import '../../models/memory_model.dart';
 import 'package:ui/utils/ui.dart';
 import 'package:ui/features/memory/pages/memory_center/widgets/memory_card_list.dart';
-import 'package:ui/features/memory/pages/memory_detail/memory_detail_page.dart';
 import 'package:ui/theme/app_text_styles.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:ui/services/storage_service.dart';
@@ -194,6 +192,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
     setState(fn);
   }
 
+  // ignore: unused_element
   void _onTagSelectionChanged(Set<String> next, String triggerId) {
     _safeSetState(() {
       if (next.contains('all')) {
@@ -259,10 +258,8 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
     }
 
     try {
-      await _loadSystemAppTags();
       await _loadFavoriteRecords();
       await _loadMem0Memories(forceRefresh: forceMem0Refresh);
-      await _loadAppTags();
       await _loadMemorySuggestion();
 
       _safeSetState(() {
@@ -364,11 +361,11 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
     for (final card in favoritesCards) {
       final sortTs = card.updatedAt > 0 ? card.updatedAt : card.createdAt;
       candidates.add({
-        'id': 'local:${card.id}',
+        'id': 'short:${card.id}',
         'sortTs': sortTs,
         'title': _normalizeSuggestionText(card.title),
         'description': _normalizeSuggestionText(card.description ?? ''),
-        'appName': _normalizeSuggestionText(card.appName ?? '本地识图记忆'),
+        'appName': _normalizeSuggestionText(card.appName ?? '短期记忆'),
       });
     }
 
@@ -380,7 +377,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
         'sortTs': item.displayTime?.millisecondsSinceEpoch ?? 0,
         'title': _clipSuggestionText(memory, maxLength: 24),
         'description': memory,
-        'appName': 'Workspace 长期记忆',
+        'appName': '长期记忆',
       });
     }
 
@@ -513,53 +510,42 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
   // 加载收藏记录
   Future<void> _loadFavoriteRecords() async {
     try {
-      final favoriteRecords = await CacheUtil.getAllFavoriteRecords();
-
-      // 收集所有非空的包名用于批量加载图标
-      packageNames = favoriteRecords
-          .where((r) => r.packageName.isNotEmpty)
-          .map((r) => r.packageName)
-          .toSet();
-
-      // 批量加载应用图标
-      if (packageNames.isNotEmpty && mounted) {
-        appIconMap = await ImageUtil.batchLoadAppIcons(packageNames, context);
-        for (final pkg in packageNames) {
-          final raw = await CacheUtil.getAppIconByPackageName(pkg);
-          if (raw != null) {
-            appNameMap[pkg] = raw.appName;
-          }
-        }
-      }
-
-      final cards = favoriteRecords.map((record) {
-        final systemConfig = _getSystemAppConfig(record.packageName);
-        final bool hasImage = (record.imagePath as String?)?.isNotEmpty == true;
-        final bool hasPackage =
-            (record.packageName as String?)?.isNotEmpty == true;
-
+      final items = await workspace_memory
+          .WorkspaceMemoryService.getShortMemories(days: 14, limit: 300);
+      final cards = items.map((item) {
+        final text = item.content.trim();
+        final title = text.length <= 26 ? text : '${text.substring(0, 26)}...';
+        final timestamp = item.timestampMillis > 0
+            ? item.timestampMillis
+            : DateTime.now().millisecondsSinceEpoch;
         return MemoryCardModel(
-          id: record.id,
-          title: record.title,
-          description: record.desc,
-          createdAt: record.createdAt,
-          updatedAt: record.updatedAt,
-          imagePath: hasImage ? record.imagePath : null,
-          packageName: hasPackage ? record.packageName : null,
-          appName:
-              systemConfig?.displayName ??
-              (hasPackage ? appNameMap[record.packageName] : null),
-          appIcon: hasPackage ? appIconMap[record.packageName] : null,
-          appSvgPath: systemConfig?.svgIcon,
-          tags: [],
+          id: item.id.hashCode,
+          title: title,
+          description: text,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          appName: '短期记忆',
+          appSvgPath: 'assets/memory/memory_context_icon.svg',
+          tags: const [],
         );
-      }).toList();
+      }).toList()..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
       _safeSetState(() {
         favoritesCards = cards;
+        favoriteTags = const [
+          AppTag(
+            id: 'all',
+            label: '全部',
+            count: 0,
+            svgPath: 'assets/common/all_icon.svg',
+            iconBgColor: Colors.black,
+            iconColor: Colors.white,
+          ),
+        ];
+        selectedTagIds = {'all'};
       });
     } catch (e) {
-      print('Error loading favorite records: $e');
+      print('Error loading short memories: $e');
     }
   }
 
@@ -682,6 +668,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
   }
 
   // 删除收藏卡片
+  // ignore: unused_element
   Future<bool> _deleteFavoriteCard(int cardId) async {
     final completer = Completer<bool>();
 
@@ -736,6 +723,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
   }
 
   // 编辑卡片
+  // ignore: unused_element
   void _editFavoriteCard(String cardTitle, int cardId) {
     showModalBottomSheet(
       context: context,
@@ -794,6 +782,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
     return success;
   }
 
+  // ignore: unused_element
   void _enterSelectionMode(MemoryCardModel vm) async {
     // 进入选择模式，选中当前卡片
     _safeSetState(() {
@@ -881,26 +870,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
         .where((id) => favoriteTags.any((t) => t.id == id))
         .toSet();
 
-    final filteredCards =
-        selectedTagIds.contains('all') || selectedTagIds.isEmpty
-        ? favoritesCards
-        : favoritesCards.where((card) {
-            final pkg = card.packageName;
-
-            // 构建卡片的应用标识
-            String? cardAppId;
-            if (pkg != null && pkg.isNotEmpty) {
-              final systemConfig = _getSystemAppConfig(pkg);
-              if (systemConfig != null) {
-                cardAppId = systemConfig.id;
-              } else {
-                cardAppId = 'app:$pkg'.toLowerCase();
-              }
-            }
-
-            // 检查是否匹配选中的应用标签
-            return cardAppId != null && selectedTagIds.contains(cardAppId);
-          }).toList();
+    final filteredCards = favoritesCards;
     final hasMem0Section = _mem0Snapshot.shouldShowSection || _isMem0Loading;
 
     return Scaffold(
@@ -1175,7 +1145,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
             ),
             Row(
               children: [
-                _buildMemoryTabButton(label: '本地记忆', tabIndex: _localMemoryTab),
+                _buildMemoryTabButton(label: '短期记忆', tabIndex: _localMemoryTab),
                 _buildMemoryTabButton(label: '长期记忆', tabIndex: _cloudMemoryTab),
               ],
             ),
@@ -1230,7 +1200,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
               child: Row(
                 children: [
                   const Text(
-                    '本地识图记忆',
+                    '短期记忆',
                     style: TextStyle(
                       color: AppColors.text,
                       fontSize: AppTextStyles.fontSizeMain,
@@ -1240,7 +1210,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    '${filteredCards.length}/${favoritesCards.length}',
+                    '${filteredCards.length}',
                     style: TextStyle(
                       color: AppColors.text50,
                       fontSize: AppTextStyles.fontSizeSmall,
@@ -1250,39 +1220,16 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
                 ],
               ),
             ),
-          if (favoriteTags.isNotEmpty && hasLocalMemories) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              child: TagSection(
-                items: favoriteTags,
-                selectedIds: selectedTagIds,
-                onSelectionChanged: _onTagSelectionChanged,
-                maxCollapsedRows: 1,
-              ),
-            ),
-            const SizedBox(height: 12),
-          ],
         ],
       ),
-      emptyState: hasLocalMemories
-          ? _buildLocalFilterEmptyState()
-          : _buildLocalMemoryPlaceholder(),
+      emptyState: _buildLocalMemoryPlaceholder(),
       onRefresh: () => _loadData(silent: true, forceMem0Refresh: true),
-      onEdit: _editFavoriteCard,
-      onDelete: _deleteFavoriteCard,
+      onEdit: _editShortMemoryUnsupported,
+      onDelete: _deleteShortMemoryUnsupported,
       isSelectionMode: _isSelectionMode,
       selectedCardIds: _selectedCardIds,
       onToggleSelection: _toggleCardSelection,
-      onCardTap: (MemoryCardModel card) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                MemoryDetailPage(memory: card, onDelete: _deleteFavoriteCard),
-          ),
-        );
-      },
-      onLongPress: _enterSelectionMode,
+      onLongPress: (_) {},
     );
   }
 
@@ -1385,7 +1332,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
           ),
           SizedBox(height: 6),
           Text(
-            'workspace 记忆启用后，你的跨会话长期记忆会在这里持续沉淀。',
+            '记忆能力启用后，你的跨会话长期记忆会在这里持续沉淀。',
             style: TextStyle(
               color: AppColors.text70,
               fontSize: AppTextStyles.fontSizeSmall,
@@ -1410,7 +1357,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
           Text(
-            '还没有本地记忆',
+            '还没有短期记忆',
             style: TextStyle(
               color: AppColors.text,
               fontSize: AppTextStyles.fontSizeMain,
@@ -1419,7 +1366,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
           ),
           SizedBox(height: 6),
           Text(
-            '长按小万并点击“学习”后，手动保存的内容会继续沉淀在这里。',
+            '会话中的过程性信息会沉淀到短期记忆，并在后续整理后转入长期记忆。',
             style: TextStyle(
               color: AppColors.text70,
               fontSize: AppTextStyles.fontSizeSmall,
@@ -1431,6 +1378,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
     );
   }
 
+  // ignore: unused_element
   Widget _buildLocalFilterEmptyState() {
     return Container(
       width: double.infinity,
@@ -1444,7 +1392,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: const [
           Text(
-            '当前筛选下还没有本地记忆',
+            '当前筛选下还没有短期记忆',
             style: TextStyle(
               color: AppColors.text,
               fontSize: AppTextStyles.fontSizeMain,
@@ -1453,7 +1401,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
           ),
           SizedBox(height: 6),
           Text(
-            '试试切换上方标签，或者继续手动保存新的内容。',
+            '稍后再来看看，新的短期记忆会逐步出现。',
             style: TextStyle(
               color: AppColors.text70,
               fontSize: AppTextStyles.fontSizeSmall,
@@ -1502,7 +1450,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Workspace 长期记忆',
+                        '长期记忆',
                         style: TextStyle(
                           color: AppColors.buttonPrimary,
                           fontSize: AppTextStyles.fontSizeSmall,
@@ -1582,13 +1530,6 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
                       if (item.categories.isNotEmpty)
                         const SizedBox(height: 18),
                       _buildMem0DetailRow('记忆 ID', item.id),
-                      if (item.displayTime != null)
-                        _buildMem0DetailRow(
-                          '更新时间',
-                          DateFormat(
-                            'yyyy/MM/dd HH:mm',
-                          ).format(item.displayTime!),
-                        ),
                       if ((item.userId ?? '').isNotEmpty)
                         _buildMem0DetailRow('用户', item.userId!),
                       if ((item.agentId ?? '').isNotEmpty)
@@ -1746,6 +1687,15 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
         _isMem0Mutating = false;
       });
     }
+  }
+
+  void _editShortMemoryUnsupported(String cardTitle, int cardId) {
+    showToast('短期记忆暂不支持编辑', type: ToastType.warning);
+  }
+
+  Future<bool> _deleteShortMemoryUnsupported(int cardId) async {
+    showToast('短期记忆暂不支持删除', type: ToastType.warning);
+    return false;
   }
 
   String _clipMem0Memory(String memory, {int maxLength = 36}) {

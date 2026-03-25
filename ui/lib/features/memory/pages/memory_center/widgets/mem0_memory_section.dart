@@ -31,7 +31,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
   static const String _allCategory = 'all';
 
   String _selectedCategory = _allCategory;
-  bool _showAll = false;
 
   @override
   void didUpdateWidget(covariant Mem0MemorySection oldWidget) {
@@ -42,7 +41,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
     );
     if (!hasSelectedCategory) {
       _selectedCategory = _allCategory;
-      _showAll = false;
     }
   }
 
@@ -54,9 +52,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
 
     final categories = _buildCategories();
     final filteredItems = _buildFilteredItems();
-    final visibleItems = _showAll
-        ? filteredItems
-        : filteredItems.take(4).toList();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
@@ -64,8 +59,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildHeader(filteredCount: filteredItems.length),
-          const SizedBox(height: 12),
-          _buildStatusLine(),
           if (categories.length > 1) ...[
             const SizedBox(height: 12),
             Wrap(
@@ -77,7 +70,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
                   onTap: () {
                     setState(() {
                       _selectedCategory = category.$1;
-                      _showAll = false;
                     });
                   },
                   child: TagChip(
@@ -96,8 +88,8 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
           else if (!widget.snapshot.configured)
             _buildPlaceholder(
               icon: Icons.cloud_off_outlined,
-              title: 'workspace 长期记忆未就绪',
-              subtitle: '完成 workspace 记忆初始化后，这里会展示跨会话沉淀的偏好与事实。',
+              title: '长期记忆未就绪',
+              subtitle: '完成记忆初始化后，这里会展示跨会话沉淀的偏好与事实。',
             )
           else if (widget.snapshot.errorMessage != null &&
               !widget.snapshot.hasData)
@@ -115,30 +107,12 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
           else
             Column(
               children: [
-                ...visibleItems.map(
+                ...filteredItems.map(
                   (item) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
                     child: _buildMemoryCard(item),
                   ),
                 ),
-                if (filteredItems.length > 4)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton(
-                      onPressed: () {
-                        setState(() {
-                          _showAll = !_showAll;
-                        });
-                      },
-                      style: TextButton.styleFrom(
-                        foregroundColor: AppColors.buttonPrimary,
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 32),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(_showAll ? '收起部分长期记忆' : '查看更多长期记忆'),
-                    ),
-                  ),
               ],
             ),
         ],
@@ -151,7 +125,7 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
     return Row(
       children: [
         const Text(
-          'Workspace 长期记忆',
+          '长期记忆',
           style: TextStyle(
             color: AppColors.text,
             fontSize: AppTextStyles.fontSizeMain,
@@ -202,23 +176,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
             tooltip: '刷新长期记忆',
           ),
       ],
-    );
-  }
-
-  Widget _buildStatusLine() {
-    final statusText = _buildStatusText();
-    final statusColor =
-        widget.snapshot.errorMessage != null && !widget.snapshot.hasData
-        ? AppColors.alertRed
-        : AppColors.text70;
-
-    return Text(
-      statusText,
-      style: TextStyle(
-        color: statusColor,
-        fontSize: AppTextStyles.fontSizeSmall,
-        height: AppTextStyles.lineHeightH2,
-      ),
     );
   }
 
@@ -409,32 +366,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
     );
   }
 
-  String _buildStatusText() {
-    if (widget.isMutating) {
-      return '正在同步长期记忆变更...';
-    }
-    if (widget.isLoading && !widget.snapshot.hasData) {
-      return '正在同步 workspace 长期记忆...';
-    }
-    if (!widget.snapshot.configured) {
-      return 'workspace 长期记忆未启用';
-    }
-    if (widget.snapshot.errorMessage != null && !widget.snapshot.hasData) {
-      return widget.snapshot.errorMessage!;
-    }
-    if (widget.snapshot.infoMessage != null &&
-        widget.snapshot.infoMessage!.isNotEmpty) {
-      return widget.snapshot.infoMessage!;
-    }
-    if (widget.snapshot.fromCache && widget.snapshot.isStale) {
-      return '已展示上次缓存，等待下一次成功同步';
-    }
-    if (widget.snapshot.fetchedAt != null) {
-      return '最近同步 ${_formatSyncTime(widget.snapshot.fetchedAt!)}';
-    }
-    return '已接入 workspace 记忆';
-  }
-
   List<(String, int, String)> _buildCategories() {
     final countMap = <String, int>{};
     for (final item in widget.snapshot.items) {
@@ -459,21 +390,6 @@ class _Mem0MemorySectionState extends State<Mem0MemorySection> {
     return widget.snapshot.items
         .where((item) => item.categories.contains(_selectedCategory))
         .toList();
-  }
-
-  String _formatSyncTime(DateTime dateTime) {
-    final now = DateTime.now();
-    final diff = now.difference(dateTime);
-    if (diff.inMinutes < 1) {
-      return '刚刚';
-    }
-    if (diff.inHours < 1) {
-      return '${diff.inMinutes} 分钟前';
-    }
-    if (diff.inDays < 1) {
-      return '${diff.inHours} 小时前';
-    }
-    return DateFormat('MM/dd HH:mm').format(dateTime);
   }
 
   String _formatTime(DateTime? dateTime) {

@@ -81,20 +81,27 @@ class MemoryCardList extends StatelessWidget {
                                     imagePath: card.imagePath,
                                     isSelectionMode: isSelectionMode,
                                     isSelected: isSelected,
-                                    onFavoriteToggle: () => onToggleFavorite
-                                        ?.call(card.id, !card.isFavorite),
+                                    onFavoriteToggle: onToggleFavorite == null
+                                        ? null
+                                        : () => onToggleFavorite!(
+                                            card.id,
+                                            !card.isFavorite,
+                                          ),
                                     onEdit: () => onEdit(card.title, card.id),
                                     onDelete: () => onDelete(card.id),
                                     onLongPress: () {
                                       onLongPress(card);
                                     },
-                                    onTap: () {
-                                      if (isSelectionMode) {
-                                        onToggleSelection?.call(card.id);
-                                      } else if (onCardTap != null) {
-                                        onCardTap!(card);
-                                      }
-                                    },
+                                    onTap:
+                                        isSelectionMode || onCardTap != null
+                                        ? () {
+                                            if (isSelectionMode) {
+                                              onToggleSelection?.call(card.id);
+                                            } else if (onCardTap != null) {
+                                              onCardTap!(card);
+                                            }
+                                          }
+                                        : null,
                                   ),
                                   const SizedBox(height: 8),
                                 ],
