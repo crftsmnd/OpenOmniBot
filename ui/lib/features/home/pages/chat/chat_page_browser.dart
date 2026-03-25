@@ -196,6 +196,10 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
         _activeSurfaceMode != ChatSurfaceMode.normal) {
       return;
     }
+    if (ToolCardDetailGestureGate.containsPointer(event.pointer)) {
+      _resetNewConversationPullGesture(clearPointer: true);
+      return;
+    }
     _pageVerticalDragDelta += event.delta.dy;
     if (_isNewConversationPullTracking) {
       _updateNewConversationPullDistance(-_pageVerticalDragDelta);
@@ -205,6 +209,10 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
   @override
   void _handlePagePointerUp(PointerUpEvent event) {
     if (event.pointer != _pageGesturePointerId) {
+      return;
+    }
+    if (ToolCardDetailGestureGate.containsPointer(event.pointer)) {
+      _resetNewConversationPullGesture(clearPointer: true);
       return;
     }
     if (_isNewConversationPullTracking) {

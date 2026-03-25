@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_math_fork/flutter_math.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:ui/services/omnibot_resource_service.dart';
@@ -32,10 +33,16 @@ class OmnibotMarkdownBody extends StatelessWidget {
         if (href == null) return;
         OmnibotResourceService.handleLinkTap(href);
       },
-      inlineSyntaxes: <md.InlineSyntax>[OmnibotInlineLinkSyntax()],
+      blockSyntaxes: <md.BlockSyntax>[OmnibotMathBlockSyntax()],
+      inlineSyntaxes: <md.InlineSyntax>[
+        OmnibotInlineMathSyntax(),
+        OmnibotInlineLinkSyntax(),
+      ],
       builders: <String, MarkdownElementBuilder>{
         'code': OmnibotInlineCodeBuilder(onCopy: codeTapHandler.copy),
         'pre': OmnibotCodeBlockBuilder(onCopy: codeTapHandler.copy),
+        'math-inline': OmnibotInlineMathBuilder(baseStyle: baseStyle),
+        'math-block': OmnibotBlockMathBuilder(baseStyle: baseStyle),
         'omnibot-link': OmnibotInlineLinkBuilder(
           inlineResourcePlainStyle: inlineResourcePlainStyle,
         ),
@@ -107,6 +114,80 @@ class OmnibotInlineLinkSyntax extends md.InlineSyntax {
       label.isEmpty ? href : label,
     )..attributes['href'] = href;
     parser.addNode(element);
+    return true;
+  }
+}
+
+class OmnibotMathBlockSyntax extends md.BlockSyntax {
+  @override
+  RegExp get pattern => RegExp(r'^\s*\$\$');
+
+  @override
+  bool canParse(md.BlockParser parser) {
+    return pattern.hasMatch(parser.current.content);
+  }
+
+  @override
+  md.Node parse(md.BlockParser parser) {
+    final firstLineTrimmed = parser.current.content.trim();
+    if (firstLineTrimmed.startsWith(r'$$') &&
+        firstLineTrimmed.endsWith(r'$$') &&
+        firstLineTrimmed.length > 4) {
+      final inlineExpression = firstLineTrimmed
+          .substring(2, firstLineTrimmed.length - 2)
+          .trim();
+      parser.advance();
+      return md.Element.text('math-block', inlineExpression);
+    }
+
+    final expressionBuffer = StringBuffer();
+    final firstRemainder = firstLineTrimmed.substring(2).trimRight();
+    if (firstRemainder.isNotEmpty) {
+      expressionBuffer.write(firstRemainder);
+    }
+    parser.advance();
+
+    while (!parser.isDone) {
+      final line = parser.current.content;
+      final lineTrimmedRight = line.trimRight();
+      final normalized = lineTrimmedRight.trim();
+
+      if (normalized == r'$$') {
+        parser.advance();
+        break;
+      }
+
+      if (normalized.endsWith(r'$$')) {
+        final closeIndex = lineTrimmedRight.lastIndexOf(r'$$');
+        final contentBeforeClose = lineTrimmedRight.substring(0, closeIndex);
+        if (expressionBuffer.isNotEmpty) {
+          expressionBuffer.writeln();
+        }
+        expressionBuffer.write(contentBeforeClose.trimRight());
+        parser.advance();
+        break;
+      }
+
+      if (expressionBuffer.isNotEmpty) {
+        expressionBuffer.writeln();
+      }
+      expressionBuffer.write(lineTrimmedRight);
+      parser.advance();
+    }
+
+    return md.Element.text('math-block', expressionBuffer.toString().trim());
+  }
+}
+
+class OmnibotInlineMathSyntax extends md.InlineSyntax {
+  OmnibotInlineMathSyntax() : super(_pattern);
+
+  static const String _pattern = r'(?<!\\)(?<!\$)\$([^\$\n]+?)\$(?!\$)';
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    final expression = match[1] ?? '';
+    parser.addNode(md.Element.text('math-inline', expression));
     return true;
   }
 }
@@ -217,60 +298,11 @@ class OmnibotCodeBlockBuilder extends MarkdownElementBuilder {
         child: InkWell(
           borderRadius: borderRadius,
           onTap: canCopy ? () => onCopy(code) : null,
-          child: Ink(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.96,
-                  ),
-                  theme.colorScheme.surfaceContainerHigh.withValues(
-                    alpha: 0.90,
-                  ),
-                ],
-              ),
-              borderRadius: borderRadius,
-              border: Border.all(
-                color: theme.colorScheme.outlineVariant.withValues(alpha: 0.42),
-                width: 0.9,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.content_copy_rounded,
-                        size: 14,
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: canCopy ? 0.9 : 0.35,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        canCopy ? '点击复制代码' : '代码块',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: theme.colorScheme.onSurfaceVariant.withValues(
-                            alpha: 0.74,
-                          ),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  child: Text(code, style: codeStyle, softWrap: false),
-                ),
-              ],
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Text(code, style: codeStyle, softWrap: false),
             ),
           ),
         ),
@@ -283,6 +315,81 @@ class OmnibotCodeBlockBuilder extends MarkdownElementBuilder {
       return value.substring(0, value.length - 1);
     }
     return value;
+  }
+}
+
+class OmnibotInlineMathBuilder extends MarkdownElementBuilder {
+  OmnibotInlineMathBuilder({required this.baseStyle});
+
+  final TextStyle baseStyle;
+
+  @override
+  Widget visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final expression = element.textContent.trim();
+    if (expression.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final style = (preferredStyle ?? parentStyle ?? baseStyle).copyWith(
+      color: Theme.of(context).colorScheme.onSurface,
+      height: 1.4,
+    );
+    return Text.rich(
+      WidgetSpan(
+        alignment: PlaceholderAlignment.middle,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 1),
+          child: Math.tex(
+            expression,
+            mathStyle: MathStyle.text,
+            textStyle: style,
+            onErrorFallback: (error) => Text('\$$expression\$', style: style),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class OmnibotBlockMathBuilder extends MarkdownElementBuilder {
+  OmnibotBlockMathBuilder({required this.baseStyle});
+
+  final TextStyle baseStyle;
+
+  @override
+  bool isBlockElement() => true;
+
+  @override
+  Widget visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final expression = element.textContent.trim();
+    if (expression.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final style = (preferredStyle ?? parentStyle ?? baseStyle).copyWith(
+      color: Theme.of(context).colorScheme.onSurface,
+      height: 1.4,
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Math.tex(
+          expression,
+          mathStyle: MathStyle.display,
+          textStyle: style,
+          onErrorFallback: (error) => Text('\$\$$expression\$\$', style: style),
+        ),
+      ),
+    );
   }
 }
 

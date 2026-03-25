@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:ui/core/router/go_router_manager.dart';
+import 'package:ui/features/home/pages/command_overlay/services/tool_card_detail_gesture_gate.dart';
 import 'package:ui/features/home/pages/command_overlay/widgets/cards/terminal_output_utils.dart';
 import 'package:ui/services/omnibot_resource_service.dart';
 import 'package:ui/theme/app_colors.dart';
@@ -83,10 +84,7 @@ class _AgentToolSummaryCardState extends State<AgentToolSummaryCard> {
       );
     } else if (wasRunning && isFinished) {
       _terminalAutoExpandSuppressed = false;
-      _setExpandedState(
-        false,
-        parentScrollPosition: parentScrollPosition,
-      );
+      _setExpandedState(false, parentScrollPosition: parentScrollPosition);
     } else if (!isRunning && isFinished) {
       _terminalAutoExpandSuppressed = false;
     }
@@ -207,111 +205,129 @@ class _AgentToolSummaryCardState extends State<AgentToolSummaryCard> {
                               notification,
                               parentScrollPosition,
                             ),
-                        child: SingleChildScrollView(
-                          key: _toolCardDetailScrollViewKey,
-                          controller: _detailScrollController,
-                          physics: const ClampingScrollPhysics(),
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (summary.isNotEmpty)
-                                  _DetailBlock(title: '摘要', content: summary),
-                                if (argsJson.isNotEmpty) ...[
-                                  const SizedBox(height: 10),
-                                  _DetailBlock(
-                                    title: '参数',
-                                    content: isTerminal
-                                        ? _formatTerminalArgs(argsJson)
-                                        : _formatJson(argsJson),
-                                    monospace: true,
-                                  ),
-                                ],
-                                if (isTerminal) ...[
-                                  const SizedBox(height: 10),
-                                  _TerminalOutputBlock(
-                                    content: terminalOutput,
-                                    streamState: terminalStreamState,
-                                  ),
-                                ] else if (detailResultJson.isNotEmpty) ...[
-                                  const SizedBox(height: 10),
-                                  _DetailBlock(
-                                    title: rawResultJson.isNotEmpty
-                                        ? '原始结果'
-                                        : '结果摘要',
-                                    content: _formatJson(detailResultJson),
-                                    monospace: true,
-                                  ),
-                                ],
-                                if (artifacts.isNotEmpty) ...[
-                                  const SizedBox(height: 10),
-                                  _ArtifactBlock(
-                                    artifacts: artifacts,
-                                    onPreview: _handleArtifactPreview,
-                                    onSave: _handleArtifactSave,
-                                  ),
-                                ],
-                                if ((workspaceId?.isNotEmpty ?? false) ||
-                                    actions.isNotEmpty) ...[
-                                  const SizedBox(height: 10),
-                                  _ActionBlock(
-                                    workspaceId: workspaceId,
-                                    actions: actions,
-                                    onOpenWorkspace: _handleOpenWorkspace,
-                                    onRunAction: _handleAction,
-                                  ),
-                                ],
-                                if (widget.cardData['showScheduleAction'] ==
-                                    true) ...[
-                                  const SizedBox(height: 10),
-                                  TextButton(
-                                    onPressed: () => GoRouterManager.push(
-                                      '/task/scheduled_tasks',
+                        child: Listener(
+                          behavior: HitTestBehavior.translucent,
+                          onPointerDown: (event) {
+                            ToolCardDetailGestureGate.holdPointer(
+                              event.pointer,
+                            );
+                          },
+                          onPointerUp: (event) {
+                            ToolCardDetailGestureGate.releasePointer(
+                              event.pointer,
+                            );
+                          },
+                          onPointerCancel: (event) {
+                            ToolCardDetailGestureGate.releasePointer(
+                              event.pointer,
+                            );
+                          },
+                          child: SingleChildScrollView(
+                            key: _toolCardDetailScrollViewKey,
+                            controller: _detailScrollController,
+                            physics: const ClampingScrollPhysics(),
+                            child: Padding(
+                              padding: const EdgeInsets.only(left: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (summary.isNotEmpty)
+                                    _DetailBlock(title: '摘要', content: summary),
+                                  if (argsJson.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    _DetailBlock(
+                                      title: '参数',
+                                      content: isTerminal
+                                          ? _formatTerminalArgs(argsJson)
+                                          : _formatJson(argsJson),
+                                      monospace: true,
                                     ),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: AppColors.primaryBlue,
-                                      textStyle: const TextStyle(
-                                        fontSize: _detailFontSize,
-                                        fontFamily: 'PingFang SC',
-                                        fontWeight: FontWeight.w400,
-                                        height: 1.50,
-                                        letterSpacing: 0.33,
+                                  ],
+                                  if (isTerminal) ...[
+                                    const SizedBox(height: 10),
+                                    _TerminalOutputBlock(
+                                      content: terminalOutput,
+                                      streamState: terminalStreamState,
+                                    ),
+                                  ] else if (detailResultJson.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    _DetailBlock(
+                                      title: rawResultJson.isNotEmpty
+                                          ? '原始结果'
+                                          : '结果摘要',
+                                      content: _formatJson(detailResultJson),
+                                      monospace: true,
+                                    ),
+                                  ],
+                                  if (artifacts.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    _ArtifactBlock(
+                                      artifacts: artifacts,
+                                      onPreview: _handleArtifactPreview,
+                                      onSave: _handleArtifactSave,
+                                    ),
+                                  ],
+                                  if ((workspaceId?.isNotEmpty ?? false) ||
+                                      actions.isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    _ActionBlock(
+                                      workspaceId: workspaceId,
+                                      actions: actions,
+                                      onOpenWorkspace: _handleOpenWorkspace,
+                                      onRunAction: _handleAction,
+                                    ),
+                                  ],
+                                  if (widget.cardData['showScheduleAction'] ==
+                                      true) ...[
+                                    const SizedBox(height: 10),
+                                    TextButton(
+                                      onPressed: () => GoRouterManager.push(
+                                        '/task/scheduled_tasks',
                                       ),
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: const Size(0, 32),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
-                                    ),
-                                    child: const Text('查看定时任务'),
-                                  ),
-                                ],
-                                if (widget.cardData['showAlarmAction'] ==
-                                    true) ...[
-                                  const SizedBox(height: 10),
-                                  TextButton(
-                                    onPressed: () => GoRouterManager.push(
-                                      '/task/scheduled_tasks',
-                                      queryParams: const {'tab': 'alarm'},
-                                    ),
-                                    style: TextButton.styleFrom(
-                                      foregroundColor: AppColors.primaryBlue,
-                                      textStyle: const TextStyle(
-                                        fontSize: _detailFontSize,
-                                        fontFamily: 'PingFang SC',
-                                        fontWeight: FontWeight.w400,
-                                        height: 1.50,
-                                        letterSpacing: 0.33,
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: AppColors.primaryBlue,
+                                        textStyle: const TextStyle(
+                                          fontSize: _detailFontSize,
+                                          fontFamily: 'PingFang SC',
+                                          fontWeight: FontWeight.w400,
+                                          height: 1.50,
+                                          letterSpacing: 0.33,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        minimumSize: const Size(0, 32),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
                                       ),
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: const Size(0, 32),
-                                      tapTargetSize:
-                                          MaterialTapTargetSize.shrinkWrap,
+                                      child: const Text('查看定时任务'),
                                     ),
-                                    child: const Text('查看闹钟列表'),
-                                  ),
+                                  ],
+                                  if (widget.cardData['showAlarmAction'] ==
+                                      true) ...[
+                                    const SizedBox(height: 10),
+                                    TextButton(
+                                      onPressed: () => GoRouterManager.push(
+                                        '/task/scheduled_tasks',
+                                        queryParams: const {'tab': 'alarm'},
+                                      ),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: AppColors.primaryBlue,
+                                        textStyle: const TextStyle(
+                                          fontSize: _detailFontSize,
+                                          fontFamily: 'PingFang SC',
+                                          fontWeight: FontWeight.w400,
+                                          height: 1.50,
+                                          letterSpacing: 0.33,
+                                        ),
+                                        padding: EdgeInsets.zero,
+                                        minimumSize: const Size(0, 32),
+                                        tapTargetSize:
+                                            MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      child: const Text('查看闹钟列表'),
+                                    ),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ),
                         ),
@@ -450,9 +466,7 @@ class _AgentToolSummaryCardState extends State<AgentToolSummaryCard> {
     }
 
     final status = (cardData['status'] ?? 'running').toString();
-    return status == 'success' ||
-        status == 'error' ||
-        status == 'interrupted';
+    return status == 'success' || status == 'error' || status == 'interrupted';
   }
 
   void _handleToggleExpanded() {
