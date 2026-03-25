@@ -907,7 +907,7 @@ class MemoryCenterPageState extends State<MemoryCenterPage>
       backgroundColor: AppColors.background,
       appBar: _isSelectionMode
           ? _buildSelectionAppBar(filteredCards)
-          : const CommonAppBar(title: '记忆中心', showAiBadge: true, primary: true),
+          : const CommonAppBar(title: '记忆中心', primary: true),
       body: Stack(
         children: [
           // 主内容区域
