@@ -1,6 +1,7 @@
 package cn.com.omnimind.bot.agent
 
 import android.content.Context
+import cn.com.omnimind.assists.controller.http.HttpController
 import cn.com.omnimind.baselib.llm.ModelProviderConfigStore
 import cn.com.omnimind.baselib.llm.ModelSceneRegistry
 import cn.com.omnimind.baselib.llm.SceneModelBindingStore
@@ -20,10 +21,10 @@ import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.runBlocking
 import kotlin.math.sqrt
 
 data class WorkspaceMemoryEmbeddingConfig(
@@ -80,6 +81,11 @@ private data class MemoryIndexEntry(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+private data class RollupInference(
+    val summary: String?,
+    val longTermCandidates: List<String>
+)
+
 class WorkspaceMemoryService(
     private val context: Context,
     private val workspaceManager: AgentWorkspaceManager = AgentWorkspaceManager(context)
@@ -93,6 +99,7 @@ class WorkspaceMemoryService(
         private const val KEY_ROLLUP_ENABLED = "workspace_memory_rollup_enabled_v1"
         private const val KEY_ROLLUP_LAST_RUN_AT = "workspace_memory_rollup_last_run_at_v1"
         private const val KEY_ROLLUP_LAST_SUMMARY = "workspace_memory_rollup_last_summary_v1"
+        private const val MAX_ROLLUP_LONG_TERM_CANDIDATES = 8
     }
 
     private val gson = Gson()
@@ -258,11 +265,7 @@ class WorkspaceMemoryService(
             )
         }
         val content = dailyFile.readText()
-        val lines = content.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .filterNot { it.startsWith("#") }
-            .toList()
+        val lines = extractDailyLinesForRollup(content)
 
         if (lines.isEmpty()) {
             saveRollupStatus("当日短期记忆为空，跳过整理。")
@@ -274,28 +277,40 @@ class WorkspaceMemoryService(
             )
         }
 
-        val longTermCandidates = lines.map { it.removePrefix("- ").trim() }
-            .filter { it.isNotEmpty() }
-            .filter { candidate ->
-                val lower = candidate.lowercase(Locale.getDefault())
-                lower.startsWith("长期:") ||
-                    lower.startsWith("long-term:") ||
-                    candidate.length >= 18
-            }
-            .take(8)
+        val longTermSnapshot = truncateText(readLongTermMemory().trim(), 2400)
+        val rollupInference = inferRollupByLlm(
+            date = date,
+            dailyLines = lines,
+            longTermMemory = longTermSnapshot
+        )
+        val longTermCandidates = (
+            rollupInference?.longTermCandidates
+                ?.take(MAX_ROLLUP_LONG_TERM_CANDIDATES)
+                ?.takeIf { it.isNotEmpty() }
+                ?: selectHeuristicLongTermCandidates(lines)
+            ).distinct()
 
         var writes = 0
         longTermCandidates.forEach { item ->
-            val normalized = item.removePrefix("长期:").removePrefix("long-term:").trim()
+            val normalized = sanitizeLongTermCandidate(item)
             if (normalized.isNotEmpty() && upsertLongTermMemory(normalized)) {
                 writes += 1
             }
         }
 
         val rollupAt = Instant.now().toString()
-        val rollupSummary = "已整理 ${lines.size} 条短期记忆，沉淀 $writes 条长期记忆。"
+        val aiSummary = rollupInference?.summary?.trim()?.takeIf { it.isNotEmpty() }
+        val rollupSummary = if (aiSummary != null) {
+            "$aiSummary（沉淀 $writes 条长期记忆）"
+        } else {
+            "已整理 ${lines.size} 条短期记忆，沉淀 $writes 条长期记忆。"
+        }
+        val rollupSource = if (rollupInference != null) "scene.memory.rollup" else "heuristic"
         dailyFile.appendText(
-            "\n## Nightly Rollup @ $rollupAt\n- $rollupSummary\n"
+            "\n## Nightly Rollup @ $rollupAt\n" +
+                "- source: $rollupSource\n" +
+                "- inputLines: ${lines.size}\n" +
+                "- $rollupSummary\n"
         )
         refreshAndLoadIndex(collectChunks(), resolveEmbeddingConfig())
         saveRollupStatus(rollupSummary)
@@ -303,7 +318,11 @@ class WorkspaceMemoryService(
             "success" to true,
             "date" to date.toString(),
             "summary" to rollupSummary,
-            "longTermWrites" to writes
+            "longTermWrites" to writes,
+            "usedAi" to (rollupInference != null),
+            "fallbackHeuristic" to (rollupInference == null),
+            "sourceScene" to SCENE_MEMORY_ROLLUP,
+            "dailyLineCount" to lines.size
         )
     }
 
@@ -367,6 +386,227 @@ class WorkspaceMemoryService(
             .take(maxItems)
             .toList()
         return if (lines.isEmpty()) "（今日短期记忆为空）" else lines.joinToString("\n")
+    }
+
+    private fun extractDailyLinesForRollup(content: String): List<String> {
+        val lines = mutableListOf<String>()
+        content.lineSequence().forEach { raw ->
+            val line = raw.trim()
+            if (!line.startsWith("- ")) {
+                return@forEach
+            }
+            val item = line.removePrefix("- ").trim()
+            if (item.isEmpty() || isRollupMetadataLine(item)) {
+                return@forEach
+            }
+            val normalized = normalizeRollupLine(item)
+            if (normalized.isNotEmpty()) {
+                lines += normalized
+            }
+        }
+        return lines.take(220)
+    }
+
+    private fun isRollupMetadataLine(item: String): Boolean {
+        val lower = item.lowercase(Locale.getDefault())
+        return lower.startsWith("source:") ||
+            lower.startsWith("inputlines:") ||
+            (item.startsWith("已整理") && item.contains("条短期记忆")) ||
+            (item.contains("沉淀") && item.contains("长期记忆"))
+    }
+
+    private fun normalizeRollupLine(raw: String): String {
+        return raw
+            .replace(Regex("^\\[[0-2]\\d:[0-5]\\d:[0-5]\\d]\\s*"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun selectHeuristicLongTermCandidates(lines: List<String>): List<String> {
+        return lines
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .filter { raw ->
+                val lower = raw.lowercase(Locale.getDefault())
+                lower.startsWith("长期:") ||
+                    lower.startsWith("long-term:") ||
+                    raw.length >= 18
+            }
+            .map(::sanitizeLongTermCandidate)
+            .filter { it.isNotEmpty() }
+            .take(MAX_ROLLUP_LONG_TERM_CANDIDATES)
+    }
+
+    private fun inferRollupByLlm(
+        date: LocalDate,
+        dailyLines: List<String>,
+        longTermMemory: String
+    ): RollupInference? {
+        if (dailyLines.isEmpty()) {
+            return null
+        }
+        val prompt = buildRollupPrompt(
+            date = date,
+            dailyLines = dailyLines,
+            longTermMemory = longTermMemory
+        )
+        val responseText = runCatching {
+            runBlocking {
+                HttpController.postLLMRequest(SCENE_MEMORY_ROLLUP, prompt).message
+            }
+        }.onFailure {
+            OmniLog.w(TAG, "rollup llm request failed: ${it.message}")
+        }.getOrNull()?.trim().orEmpty()
+        if (responseText.isEmpty()) {
+            return null
+        }
+        val parsed = parseRollupInference(responseText)
+        if (parsed == null) {
+            OmniLog.w(TAG, "rollup llm parse failed, fallback heuristic")
+        }
+        return parsed
+    }
+
+    private fun buildRollupPrompt(
+        date: LocalDate,
+        dailyLines: List<String>,
+        longTermMemory: String
+    ): String {
+        val dailyBlock = truncateText(
+            dailyLines.joinToString("\n") { "- $it" },
+            12_000
+        )
+        val longTermBlock = longTermMemory.ifBlank { "（暂无长期记忆）" }
+        return """
+            你是 Workspace 记忆整理助手。请基于当日短期记忆，为用户生成当日总结，并筛选可沉淀为长期记忆的信息。
+
+            规则：
+            1. 只保留长期稳定且对未来任务有帮助的信息（偏好、长期约束、稳定事实）。
+            2. 忽略一次性临时细节、随机聊天内容、瞬时状态。
+            3. 候选长期记忆每条一句话，中文为主，最多 ${MAX_ROLLUP_LONG_TERM_CANDIDATES} 条，避免重复。
+            4. 如果没有可沉淀内容，longTermCandidates 返回空数组。
+            5. 只能输出 JSON，不要输出 Markdown 代码块或解释。
+
+            输出格式：
+            {
+              "dailySummary": "一句话总结（不超过80字）",
+              "longTermCandidates": ["候选1", "候选2"]
+            }
+
+            日期：$date
+
+            当日短期记忆原文：
+            $dailyBlock
+
+            现有长期记忆（用于避免重复）：
+            ${truncateText(longTermBlock, 2600)}
+        """.trimIndent()
+    }
+
+    private fun parseRollupInference(raw: String): RollupInference? {
+        val jsonText = extractFirstJsonObject(raw) ?: return null
+        val payload = runCatching { JSONObject(jsonText) }
+            .onFailure { OmniLog.w(TAG, "rollup parse json failed: ${it.message}") }
+            .getOrNull() ?: return null
+        val summary = firstNonBlank(payload, listOf("dailySummary", "summary", "todaySummary"))
+        val candidates = extractLongTermCandidates(payload)
+        return RollupInference(
+            summary = summary?.take(120),
+            longTermCandidates = candidates
+        )
+    }
+
+    private fun extractLongTermCandidates(payload: JSONObject): List<String> {
+        val candidateArray = listOf(
+            "longTermCandidates",
+            "long_term_candidates",
+            "longTermMemories",
+            "long_term_memories",
+            "memoryCandidates"
+        ).asSequence()
+            .mapNotNull { key -> payload.optJSONArray(key) }
+            .firstOrNull()
+            ?: JSONArray()
+
+        val items = mutableListOf<String>()
+        for (index in 0 until candidateArray.length()) {
+            val raw = candidateArray.opt(index)
+            val value = when (raw) {
+                is JSONObject -> firstNonBlank(raw, listOf("text", "memory", "content", "fact"))
+                else -> raw?.toString()
+            }.orEmpty()
+            val normalized = sanitizeLongTermCandidate(value)
+            if (normalized.isNotEmpty()) {
+                items += normalized
+            }
+        }
+        return items.distinct().take(MAX_ROLLUP_LONG_TERM_CANDIDATES)
+    }
+
+    private fun firstNonBlank(payload: JSONObject, keys: List<String>): String? {
+        keys.forEach { key ->
+            val value = payload.optString(key).trim()
+            if (value.isNotEmpty() && !value.equals("null", ignoreCase = true)) {
+                return value
+            }
+        }
+        return null
+    }
+
+    private fun extractFirstJsonObject(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) {
+            return null
+        }
+        val fence = Regex("```(?:json)?\\s*([\\s\\S]*?)\\s*```", RegexOption.IGNORE_CASE)
+            .find(trimmed)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.trim()
+        if (!fence.isNullOrBlank()) {
+            return extractFirstJsonObject(fence)
+        }
+        val start = trimmed.indexOf('{')
+        if (start < 0) {
+            return null
+        }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (index in start until trimmed.length) {
+            val ch = trimmed[index]
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (ch == '\\') {
+                    escaped = true
+                } else if (ch == '"') {
+                    inString = false
+                }
+                continue
+            }
+            when (ch) {
+                '"' -> inString = true
+                '{' -> depth += 1
+                '}' -> {
+                    depth -= 1
+                    if (depth == 0) {
+                        return trimmed.substring(start, index + 1)
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun sanitizeLongTermCandidate(raw: String): String {
+        return raw.trim()
+            .replace(Regex("^(?:[-*]|\\d+[.)、])\\s*"), "")
+            .replace(Regex("^长期[:：]\\s*"), "")
+            .replace(Regex("^long[- ]?term[:：]\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(140)
     }
 
     private fun resolveEmbeddingConfig(): WorkspaceMemoryEmbeddingConfig {

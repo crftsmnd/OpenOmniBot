@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import cn.com.omnimind.baselib.util.OmniLog
 import com.tencent.mmkv.MMKV
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -55,6 +56,31 @@ class WorkspaceMemoryRollupScheduler(
         val triggerAt = computeNextTriggerAtMillis()
         val pendingIntent = buildPendingIntent()
         alarmManager.cancel(pendingIntent)
+        val scheduled = runCatching {
+            scheduleExact(alarmManager, triggerAt, pendingIntent)
+            true
+        }.recoverCatching { throwable ->
+            OmniLog.w(
+                "WorkspaceMemoryRollupScheduler",
+                "exact alarm unavailable, fallback to inexact: ${throwable.message}"
+            )
+            scheduleInexact(alarmManager, triggerAt, pendingIntent)
+            false
+        }.getOrElse { throwable ->
+            throw throwable
+        }
+        mmkv?.encode(KEY_ROLLUP_NEXT_RUN_AT, triggerAt)
+        OmniLog.i(
+            "WorkspaceMemoryRollupScheduler",
+            "rollup scheduled at=$triggerAt exact=$scheduled"
+        )
+    }
+
+    private fun scheduleExact(
+        alarmManager: AlarmManager,
+        triggerAt: Long,
+        pendingIntent: PendingIntent
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             alarmManager.setExactAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
@@ -68,7 +94,26 @@ class WorkspaceMemoryRollupScheduler(
                 pendingIntent
             )
         }
-        mmkv?.encode(KEY_ROLLUP_NEXT_RUN_AT, triggerAt)
+    }
+
+    private fun scheduleInexact(
+        alarmManager: AlarmManager,
+        triggerAt: Long,
+        pendingIntent: PendingIntent
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAt,
+                pendingIntent
+            )
+        } else {
+            alarmManager.set(
+                AlarmManager.RTC_WAKEUP,
+                triggerAt,
+                pendingIntent
+            )
+        }
     }
 
     private fun cancel() {

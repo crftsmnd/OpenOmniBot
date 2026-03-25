@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ui/core/router/go_router_manager.dart';
 import 'package:ui/services/workspace_memory_service.dart';
 import 'package:ui/theme/app_colors.dart';
@@ -137,8 +138,13 @@ class _WorkspaceMemorySettingPageState extends State<WorkspaceMemorySettingPage>
       if (!mounted) return;
       showToast((result?['summary'] ?? '整理完成').toString());
       await _loadAll();
+    } on PlatformException catch (e) {
+      final message = e.message?.trim();
+      final errorText =
+          (message == null || message.isEmpty) ? '立即整理失败' : '立即整理失败：$message';
+      showToast(errorText, type: ToastType.error);
     } catch (e) {
-      showToast('立即整理失败', type: ToastType.error);
+      showToast('立即整理失败：$e', type: ToastType.error);
     }
   }
 
