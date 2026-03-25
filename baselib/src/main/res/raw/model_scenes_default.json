@@ -1,6 +1,6 @@
 {
   "scene.dispatch.model": {
-    "model": "qwen3.5-plus-2026-02-15",
+    "model": "qwen3.5-plus",
     "prompt": null,
     "description": "可执行任务三段式分流（decision/app-scope/task-match）默认模型（Flutter 侧）"
   },
@@ -34,7 +34,7 @@
     "description": "Workspace 记忆向量检索（embedding）模型"
   },
   "scene.memory.rollup": {
-    "model": "qwen3.5-plus-2026-02-15",
+    "model": "qwen3.5-plus",
     "transport": "openai_compatible",
     "response_parser": "text_content",
     "prompt": "该场景用于 Workspace Memory 夜间整理策略模型配置。仅用于记忆整理，不参与普通聊天回复。",
