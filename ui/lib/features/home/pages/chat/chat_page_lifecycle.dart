@@ -312,18 +312,20 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       await _initializeHalfScreenEngineIfNeeded();
       final deviceInfo = await DeviceService.getDeviceInfo();
       final brand = (deviceInfo?['brand'] as String?)?.toLowerCase() ?? 'other';
-      final missingSpecs = await PermissionService.getMissingByLevel(
+      final checkedSpecs = PermissionRegistry.getPermissionsByLevel(
         brand: brand,
-        level: PermissionLevel.companionAutomation,
+        level: PermissionLevel.fullExecution,
+      );
+      final permissionDataList = PermissionService.specsToPermissionData(
+        checkedSpecs,
+        context: context,
+      );
+      await PermissionService.checkPermissions(permissionDataList);
+      final allAuthorized = PermissionService.checkAllAuthorized(
+        permissionDataList,
       );
 
-      if (missingSpecs.isNotEmpty) {
-        if (!mounted) return;
-        final permissionDataList = PermissionService.specsToPermissionData(
-          missingSpecs,
-          context: context,
-        );
-        await PermissionService.checkPermissions(permissionDataList);
+      if (!allAuthorized) {
         if (!mounted) return;
         setState(() {
           _isCompanionToggleLoading = false;

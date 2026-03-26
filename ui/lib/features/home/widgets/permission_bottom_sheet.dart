@@ -114,7 +114,7 @@ class _PermissionBottomSheetState extends State<PermissionBottomSheet>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                '下列权限被关闭',
+                '请检查下列权限',
                 style: TextStyle(
                   color: AppColors.text,
                   fontSize: 20,
