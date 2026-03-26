@@ -108,7 +108,9 @@ class EmbeddedTerminalSetupManager(
             command = "RUST_INSTALL_COMMAND",
             categoryId = "rust"
         ),
-        PackageDefinition(id = "go", command = "golang-go", categoryId = "go")
+        PackageDefinition(id = "go", command = "golang-go", categoryId = "go"),
+        PackageDefinition(id = "git", command = "git", categoryId = "tools"),
+        PackageDefinition(id = "ffmpeg", command = "ffmpeg", categoryId = "tools")
     )
 
     suspend fun getPackageInstallStatus(): Map<String, Boolean> = withContext(Dispatchers.IO) {
@@ -185,9 +187,13 @@ class EmbeddedTerminalSetupManager(
             val refreshedStatus = getPackageInstallStatus()
             val remaining = installIds.filter { refreshedStatus[it] != true }
             if (remaining.isNotEmpty()) {
+                val diagnostics = buildPostInstallDiagnostics(remaining)
                 return@withContext InstallResult(
                     success = false,
-                    message = "以下组件安装后仍未通过校验：${remaining.joinToString(", ")}",
+                    message = buildInstallValidationFailureMessage(
+                        remaining = remaining,
+                        diagnostics = diagnostics
+                    ),
                     output = output.toString().trim()
                 )
             }
@@ -317,6 +323,11 @@ class EmbeddedTerminalSetupManager(
         val commands = mutableListOf<String>()
         commands += "dpkg --configure -a"
         commands += "apt install -f -y"
+        if (selectedIdSet.contains("nodejs")) {
+            // 旧初始化链路可能留下低版本或来源不一致的 Node.js，
+            // 这里在重装前先清理掉未通过当前检测标准的历史安装。
+            commands += buildNodejsReinstallCleanupCommand()
+        }
         commands += "apt update -y"
         commands += "apt upgrade -y"
         commands += "mkdir -p ~/.config/pip"
@@ -389,6 +400,64 @@ class EmbeddedTerminalSetupManager(
         return commands
     }
 
+    private fun buildNodejsReinstallCleanupCommand(): String = """
+        rm -f /etc/apt/sources.list.d/nodesource.list
+        rm -f /etc/apt/preferences.d/nodesource
+        rm -f /usr/share/keyrings/nodesource.gpg /etc/apt/keyrings/nodesource.gpg
+        for pkg in nodejs npm nodejs-doc libnode-dev; do
+          if dpkg -s "${'$'}pkg" >/dev/null 2>&1; then
+            apt purge -y "${'$'}pkg"
+          fi
+        done
+        rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm
+        rm -f "${'$'}HOME/.local/bin/node" "${'$'}HOME/.local/bin/npm" "${'$'}HOME/.local/bin/npx" "${'$'}HOME/.local/bin/corepack" "${'$'}HOME/.local/bin/pnpm"
+        rm -rf /usr/local/lib/node_modules
+        rm -rf "${'$'}HOME/.npm" "${'$'}HOME/.cache/node-gyp"
+        apt autoremove -y || true
+        hash -r || true
+    """.trimIndent()
+
+    private suspend fun buildPostInstallDiagnostics(remainingIds: List<String>): String {
+        if (!remainingIds.contains("nodejs")) {
+            return ""
+        }
+        return withLocalTerminalManager { manager ->
+            val result = manager.executeHiddenCommand(
+                command = """
+                    echo "node_path=${'$'}(command -v node 2>/dev/null || echo missing)"
+                    echo "node_realpath=${'$'}(readlink -f "${'$'}(command -v node 2>/dev/null)" 2>/dev/null || echo missing)"
+                    echo "node_version=${'$'}(node -v 2>&1 || echo missing)"
+                    echo "npm_path=${'$'}(command -v npm 2>/dev/null || echo missing)"
+                    echo "npm_version=${'$'}(npm -v 2>&1 || echo missing)"
+                """.trimIndent(),
+                executorKey = "embedded-terminal-setup-nodejs-diagnostics",
+                timeoutMs = 20_000L
+            )
+            EmbeddedTerminalRuntime.trimTerminalOutput(
+                EmbeddedTerminalRuntime.sanitizeTerminalNoise(
+                    result.output.ifBlank { result.rawOutputPreview }
+                )
+            ).trim()
+        }
+    }
+
+    private fun buildInstallValidationFailureMessage(
+        remaining: List<String>,
+        diagnostics: String,
+        tailOutput: String = ""
+    ): String {
+        val message = StringBuilder("以下组件安装后仍未通过校验：${remaining.joinToString(", ")}")
+        if (diagnostics.isNotBlank()) {
+            message.append("\n")
+            message.append(diagnostics)
+        }
+        if (tailOutput.isNotBlank()) {
+            message.append("\n")
+            message.append(tailOutput)
+        }
+        return message.toString()
+    }
+
     private suspend fun runInstallSession(
         sessionId: String,
         installIds: List<String>,
@@ -409,17 +478,18 @@ class EmbeddedTerminalSetupManager(
                 val details = EmbeddedTerminalRuntime.trimTerminalOutput(
                     EmbeddedTerminalRuntime.sanitizeTerminalNoise(output)
                 ).takeLast(1200).trim()
+                val diagnostics = buildPostInstallDiagnostics(remaining)
                 updateInstallSessionSnapshot(
                     InstallSessionSnapshot(
                         sessionId = sessionId,
                         running = false,
                         completed = true,
                         success = false,
-                        message = if (details.isNotBlank()) {
-                            "以下组件安装后仍未通过校验：${remaining.joinToString(", ")}\n$details"
-                        } else {
-                            "以下组件安装后仍未通过校验：${remaining.joinToString(", ")}"
-                        },
+                        message = buildInstallValidationFailureMessage(
+                            remaining = remaining,
+                            diagnostics = diagnostics,
+                            tailOutput = details
+                        ),
                         selectedPackageIds = installIds
                     )
                 )
@@ -485,6 +555,8 @@ class EmbeddedTerminalSetupManager(
             "nodejs" -> "node -v 2>/dev/null"
             "pnpm" -> "test -f \"\$(npm prefix -g)/bin/pnpm\" && echo FOUND_PNPM"
             "go" -> "command -v go"
+            "git" -> "command -v git"
+            "ffmpeg" -> "command -v ffmpeg"
             "ssh" -> "command -v ssh"
             "sshpass" -> "command -v sshpass"
             "openssh-server" -> "command -v sshd"
@@ -513,7 +585,7 @@ class EmbeddedTerminalSetupManager(
                 }
             }
 
-            "rust", "uv", "go", "ssh", "sshpass", "openssh-server", "gradle" -> {
+            "rust", "uv", "go", "git", "ffmpeg", "ssh", "sshpass", "openssh-server", "gradle" -> {
                 output.isNotBlank() && !output.contains("not found")
             }
 

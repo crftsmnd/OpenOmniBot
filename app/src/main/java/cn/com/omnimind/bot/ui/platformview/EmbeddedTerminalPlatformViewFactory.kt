@@ -43,16 +43,19 @@ class EmbeddedTerminalPlatformViewFactory : PlatformViewFactory(StandardMessageC
     ): PlatformView {
         val params = args as? Map<*, *>
         val sessionId = params?.get("sessionId")?.toString()?.trim().orEmpty()
+        val transcript = params?.get("transcript")?.toString().orEmpty()
         return EmbeddedTerminalPlatformView(
             hostContext = context,
-            sessionId = sessionId
+            sessionId = sessionId,
+            transcript = transcript
         )
     }
 }
 
 private class EmbeddedTerminalPlatformView(
     hostContext: Context,
-    private val sessionId: String
+    private val sessionId: String,
+    private val transcript: String
 ) : PlatformView {
     private val terminalManager = TerminalManager.getInstance(hostContext.applicationContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -78,6 +81,15 @@ private class EmbeddedTerminalPlatformView(
         }
     }
 
+    private fun renderTranscriptFallback() {
+        val emulator = AnsiTerminalEmulator()
+        if (transcript.isNotBlank()) {
+            emulator.parse(transcript)
+        }
+        terminalView.setEmulator(emulator)
+        terminalView.setPty(null)
+    }
+
     init {
         scope.launch {
             terminalManager.terminalState.collectLatest { state ->
@@ -86,8 +98,7 @@ private class EmbeddedTerminalPlatformView(
                     terminalView.setEmulator(session.ansiParser)
                     terminalView.setPty(session.pty)
                 } else {
-                    terminalView.setEmulator(AnsiTerminalEmulator())
-                    terminalView.setPty(null)
+                    renderTranscriptFallback()
                 }
             }
         }

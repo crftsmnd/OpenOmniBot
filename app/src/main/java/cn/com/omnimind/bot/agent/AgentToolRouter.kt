@@ -8,21 +8,30 @@ import cn.com.omnimind.bot.mcp.RemoteMcpClient
 import cn.com.omnimind.bot.mcp.RemoteMcpConfigStore
 import cn.com.omnimind.bot.mcp.RemoteMcpToolDescriptor
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
+import com.ai.assistance.operit.terminal.TerminalManager
+import com.ai.assistance.operit.terminal.data.TerminalSessionData
+import com.ai.assistance.operit.terminal.provider.type.TerminalType
 import cn.com.omnimind.bot.termux.TermuxCommandResult
-import cn.com.omnimind.bot.termux.TermuxCommandRunner
 import cn.com.omnimind.bot.termux.TermuxCommandSpec
 import cn.com.omnimind.bot.termux.TermuxCommandBuilder
 import cn.com.omnimind.bot.util.AssistsUtil
 import cn.com.omnimind.bot.workspace.WorkspaceStorageAccess
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -74,6 +83,9 @@ class AgentToolRouter(
     private val calendarToolService = AgentCalendarToolService(context)
     private val skillIndexService = SkillIndexService(context, workspaceManager)
     private val skillLoader = SkillLoader(workspaceManager)
+    private val terminalEnvKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+    private val terminalSessionOwnershipLock = Any()
+    private val ownedTerminalSessionIds = mutableSetOf<String>()
     companion object {
         private const val DEFAULT_CONTEXT_QUERY_LIMIT = 20
         private const val MAX_TERMINAL_AUTO_RETRIES = 3
@@ -134,6 +146,24 @@ class AgentToolRouter(
     private data class TerminalSessionReadArgs(
         val sessionId: String,
         val maxChars: Int
+    )
+
+    private data class DirectTerminalSessionSnapshot(
+        val sessionId: String,
+        val transcript: String,
+        val currentDirectory: String,
+        val commandRunning: Boolean
+    )
+
+    private data class DirectTerminalCommandResult(
+        val sessionId: String,
+        val completed: Boolean,
+        val timedOut: Boolean,
+        val output: String,
+        val transcript: String,
+        val currentDirectory: String,
+        val commandRunning: Boolean,
+        val errorMessage: String? = null
     )
 
     suspend fun execute(
@@ -261,6 +291,7 @@ class AgentToolRouter(
     }
 
     suspend fun dispose() {
+        closeOwnedTerminalSessions()
         LiveAgentBrowserSessionManager.releaseRunOwnership()
     }
 
@@ -510,26 +541,29 @@ class AgentToolRouter(
                     ?.let { workspaceManager.resolveShellPath(it, workspace, allowRootDirectories = true) }
                     ?: workspace.currentCwd
             )
-            val commandResult = TermuxCommandRunner.execute(
-                context = context,
-                spec = TermuxCommandSpec(
-                    command = parsedArgs.command,
-                    executionMode = parsedArgs.executionMode,
-                    prootDistro = parsedArgs.prootDistro,
-                    workingDirectory = parsedArgs.workingDirectory,
-                    timeoutSeconds = parsedArgs.timeoutSeconds,
-                    environment = terminalEnvironment
-                ),
-                onLiveUpdate = { update ->
+            val commandResult = executeDirectTerminalCommand(
+                command = parsedArgs.command,
+                workingDirectory = parsedArgs.workingDirectory,
+                timeoutSeconds = parsedArgs.timeoutSeconds,
+                environment = terminalEnvironment,
+                onLiveUpdate = { sessionId, outputDelta, streamState ->
                     reportToolProgress(
                         callback,
                         toolName,
-                        update.summary,
+                        if (outputDelta.isBlank()) {
+                            "正在调用内嵌 Ubuntu 终端执行命令"
+                        } else {
+                            "终端输出更新中"
+                        },
                         mapOf(
-                            "summary" to update.summary,
-                            "terminalSessionId" to update.sessionId,
-                            "terminalOutputDelta" to update.outputDelta,
-                            "terminalStreamState" to update.streamState
+                            "summary" to if (outputDelta.isBlank()) {
+                                "正在调用内嵌 Ubuntu 终端执行命令"
+                            } else {
+                                "终端输出更新中"
+                            },
+                            "terminalSessionId" to sessionId,
+                            "terminalOutputDelta" to outputDelta,
+                            "terminalStreamState" to streamState
                         )
                     )
                 }
@@ -576,15 +610,14 @@ class AgentToolRouter(
             requireWorkspaceStorageAccess(callback)?.let { return it }
             reportToolProgress(callback, toolName, "正在启动内嵌终端会话")
             val parsedArgs = parseTerminalSessionStartArgs(args)
-            val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionName)
             val workingDirectory = resolveShellWorkingDirectory(parsedArgs.workingDirectory, workspace)
-            terminalSessionDirectory(workspace, sessionId).mkdirs()
-            val result = EmbeddedTerminalRuntime.startSession(
-                context = context,
-                requestedSessionId = sessionId,
+            val result = startDirectTerminalSession(
+                sessionTitle = parsedArgs.sessionName,
                 workingDirectory = workingDirectory,
                 environment = terminalEnvironment
             )
+            val sessionId = result.sessionId
+            terminalSessionDirectory(workspace, sessionId).mkdirs()
             val logArtifact = persistTerminalSessionTranscript(workspace, sessionId, result.transcript, toolName)
             val payload = linkedMapOf<String, Any?>(
                 "sessionId" to sessionId,
@@ -637,24 +670,35 @@ class AgentToolRouter(
         return try {
             requireWorkspaceStorageAccess(callback)?.let { return it }
             val parsedArgs = parseTerminalSessionExecArgs(args)
-            val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionId)
+            val sessionId = parsedArgs.sessionId.trim()
             val shellWorkingDirectory = parsedArgs.workingDirectory?.let {
                 resolveShellWorkingDirectory(it, workspace)
             }
             reportToolProgress(callback, toolName, "正在向终端会话发送命令")
-            val result = EmbeddedTerminalRuntime.executeSessionCommand(
-                context = context,
+            val result = executeDirectTerminalSessionCommand(
                 sessionId = sessionId,
                 command = parsedArgs.command,
                 workingDirectory = shellWorkingDirectory,
                 timeoutSeconds = parsedArgs.timeoutSeconds,
-                environment = terminalEnvironment
+                environment = terminalEnvironment,
+                onLiveUpdate = { outputDelta ->
+                    reportToolProgress(
+                        callback,
+                        toolName,
+                        if (outputDelta.isBlank()) "终端会话命令执行中" else "终端输出更新中",
+                        mapOf(
+                            "summary" to if (outputDelta.isBlank()) "终端会话命令执行中" else "终端输出更新中",
+                            "terminalSessionId" to sessionId,
+                            "terminalOutputDelta" to outputDelta,
+                            "terminalStreamState" to "running"
+                        )
+                    )
+                }
             )
-            val terminalStreamState = if (result.completed) {
-                "completed"
-            } else {
-                val commandRunning = EmbeddedTerminalRuntime.readSession(context, sessionId).commandRunning
-                if (commandRunning) "running" else "error"
+            val terminalStreamState = when {
+                result.timedOut || result.commandRunning -> "running"
+                result.errorMessage != null -> "error"
+                else -> "completed"
             }
             val logArtifact = persistTerminalSessionTranscript(workspace, sessionId, result.transcript, toolName)
             val rawResult = linkedMapOf<String, Any?>(
@@ -662,7 +706,7 @@ class AgentToolRouter(
                 "workingDirectory" to shellWorkingDirectory,
                 "currentDirectory" to result.currentDirectory,
                 "command" to parsedArgs.command,
-                "exitCode" to result.exitCode,
+                "exitCode" to null,
                 "completed" to result.completed,
                 "logPath" to logArtifact.workspacePath,
                 "androidLogPath" to logArtifact.androidPath,
@@ -672,22 +716,22 @@ class AgentToolRouter(
                     if (result.completed) result.output else result.transcript,
                     12000
                 ),
-                "success" to (result.completed && result.success),
+                "success" to (result.completed && !result.timedOut && result.errorMessage == null),
                 "errorMessage" to result.errorMessage,
                 "terminalStreamState" to terminalStreamState
             )
             ToolExecutionResult.TerminalResult(
                 toolName = toolName,
-                summaryText = if (!result.completed) {
+                summaryText = if (result.timedOut || !result.completed) {
                     result.errorMessage ?: "会话命令仍在运行，请先读取输出确认状态"
-                } else if (result.success) {
+                } else if (result.errorMessage == null) {
                     "会话命令执行完成"
                 } else {
-                    result.errorMessage ?: "会话命令执行失败（exit=${result.exitCode}）"
+                    result.errorMessage
                 },
                 previewJson = json.encodeToString(mapToJsonElement(rawResult)),
                 rawResultJson = json.encodeToString(mapToJsonElement(rawResult)),
-                success = result.completed && result.success,
+                success = result.completed && !result.timedOut && result.errorMessage == null,
                 terminalOutput = if (result.completed) result.output else result.transcript,
                 terminalSessionId = sessionId,
                 terminalStreamState = terminalStreamState,
@@ -711,11 +755,11 @@ class AgentToolRouter(
         return try {
             requireWorkspaceStorageAccess(callback)?.let { return it }
             val parsedArgs = parseTerminalSessionReadArgs(args)
-            val sessionId = sanitizeTerminalSessionId(parsedArgs.sessionId)
-            val readResult = EmbeddedTerminalRuntime.readSession(context, sessionId)
+            val sessionId = parsedArgs.sessionId.trim()
+            val readResult = readDirectTerminalSession(sessionId)
             val artifact = persistTerminalSessionTranscript(workspace, sessionId, readResult.transcript, toolName)
             val content = truncateText(
-                TermuxCommandRunner.sanitizeTerminalNoise(readResult.transcript),
+                EmbeddedTerminalRuntime.sanitizeTerminalNoise(readResult.transcript),
                 parsedArgs.maxChars
             )
             val payload = linkedMapOf<String, Any?>(
@@ -757,10 +801,9 @@ class AgentToolRouter(
         return try {
             requireWorkspaceStorageAccess(callback)?.let { return it }
             reportToolProgress(callback, toolName, "正在结束终端会话")
-            val sessionId = sanitizeTerminalSessionId(
-                args["sessionId"]?.jsonPrimitive?.content?.trim().orEmpty()
-            )
-            val result = EmbeddedTerminalRuntime.stopSession(context, sessionId)
+            val sessionId = args["sessionId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            require(sessionId.isNotEmpty()) { "缺少 sessionId" }
+            val result = stopDirectTerminalSession(sessionId)
             val payload = linkedMapOf<String, Any?>(
                 "sessionId" to sessionId,
                 "success" to result
@@ -2000,21 +2043,424 @@ class AgentToolRouter(
         return rawLimit?.coerceIn(1, 100) ?: DEFAULT_CONTEXT_QUERY_LIMIT
     }
 
-    private suspend fun executeTerminalCommand(
+    private fun rememberOwnedTerminalSession(sessionId: String) {
+        synchronized(terminalSessionOwnershipLock) {
+            ownedTerminalSessionIds.add(sessionId)
+        }
+    }
+
+    private fun isOwnedTerminalSession(sessionId: String): Boolean {
+        return synchronized(terminalSessionOwnershipLock) {
+            ownedTerminalSessionIds.contains(sessionId)
+        }
+    }
+
+    private fun forgetOwnedTerminalSession(sessionId: String) {
+        synchronized(terminalSessionOwnershipLock) {
+            ownedTerminalSessionIds.remove(sessionId)
+        }
+    }
+
+    private fun snapshotOwnedTerminalSessions(): List<String> {
+        return synchronized(terminalSessionOwnershipLock) {
+            ownedTerminalSessionIds.toList()
+        }
+    }
+
+    private suspend fun closeOwnedTerminalSessions() {
+        val sessionIds = snapshotOwnedTerminalSessions()
+        if (sessionIds.isEmpty()) {
+            return
+        }
+        withLocalTerminalManager { manager ->
+            sessionIds.forEach { sessionId ->
+                runCatching {
+                    manager.closeSession(sessionId)
+                }
+                forgetOwnedTerminalSession(sessionId)
+            }
+        }
+    }
+
+    private suspend fun <T> withLocalTerminalManager(
+        block: suspend (TerminalManager) -> T
+    ): T {
+        val manager = TerminalManager.getInstance(context)
+        val previousType = manager.getPreferredTerminalType()
+        manager.setPreferredTerminalType(TerminalType.LOCAL)
+        return try {
+            block(manager)
+        } finally {
+            manager.setPreferredTerminalType(previousType)
+        }
+    }
+
+    private suspend fun executeDirectTerminalCommand(
         command: String,
-        workingDirectory: String,
-        timeoutSeconds: Int
+        workingDirectory: String?,
+        timeoutSeconds: Int,
+        environment: Map<String, String>,
+        onLiveUpdate: suspend (sessionId: String, outputDelta: String, streamState: String) -> Unit = { _, _, _ -> }
     ): TermuxCommandResult {
-        return TermuxCommandRunner.execute(
-            context = context,
-            spec = TermuxCommandSpec(
-                command = command,
-                executionMode = TermuxCommandSpec.EXECUTION_MODE_PROOT,
-                prootDistro = TermuxCommandSpec.DEFAULT_PROOT_DISTRO,
-                workingDirectory = workingDirectory,
-                timeoutSeconds = timeoutSeconds
+        val createdSession = withLocalTerminalManager { manager ->
+            createLocalTerminalSession(manager, "Agent Terminal")
+        }
+        rememberOwnedTerminalSession(createdSession.id)
+        onLiveUpdate(createdSession.id, "", "running")
+
+        return try {
+            val execution = withLocalTerminalManager { manager ->
+                executeDirectCommandInSession(
+                    manager = manager,
+                    sessionId = createdSession.id,
+                    command = buildDirectShellCommand(command, workingDirectory, environment),
+                    timeoutSeconds = timeoutSeconds,
+                    onLiveOutput = { outputDelta ->
+                        onLiveUpdate(createdSession.id, outputDelta, "running")
+                    }
+                )
+            }
+            if (!execution.timedOut) {
+                stopDirectTerminalSession(createdSession.id)
+            }
+
+            val terminalOutput = execution.transcript.ifBlank { execution.output }
+            val completedSuccessfully =
+                execution.completed && !execution.timedOut && execution.errorMessage.isNullOrBlank()
+            TermuxCommandResult(
+                success = completedSuccessfully,
+                timedOut = execution.timedOut,
+                resultCode = null,
+                errorCode = null,
+                errorMessage = execution.errorMessage,
+                stdout = if (completedSuccessfully) execution.output else "",
+                stderr = if (completedSuccessfully) "" else execution.output.ifBlank { terminalOutput },
+                rawExtras = mapOf(
+                    "executionPath" to "terminal_manager_session",
+                    "currentDirectory" to execution.currentDirectory
+                ),
+                terminalOutput = terminalOutput,
+                liveSessionId = createdSession.id,
+                liveStreamState = when {
+                    execution.timedOut || execution.commandRunning -> "running"
+                    execution.errorMessage != null -> "error"
+                    else -> "completed"
+                },
+                liveFallbackReason = null
             )
+        } catch (error: Exception) {
+            val fallbackSnapshot = runCatching {
+                withLocalTerminalManager { manager ->
+                    captureDirectTerminalSessionSnapshot(manager, createdSession.id)
+                }
+            }.getOrNull()
+            runCatching { stopDirectTerminalSession(createdSession.id) }
+            TermuxCommandResult(
+                success = false,
+                timedOut = false,
+                resultCode = null,
+                errorCode = null,
+                errorMessage = error.message ?: "终端命令执行失败",
+                stdout = "",
+                stderr = fallbackSnapshot?.transcript.orEmpty(),
+                rawExtras = mapOf("executionPath" to "terminal_manager_session"),
+                terminalOutput = fallbackSnapshot?.transcript.orEmpty(),
+                liveSessionId = createdSession.id,
+                liveStreamState = "error",
+                liveFallbackReason = null
+            )
+        }
+    }
+
+    private suspend fun startDirectTerminalSession(
+        sessionTitle: String?,
+        workingDirectory: String?,
+        environment: Map<String, String>
+    ): DirectTerminalSessionSnapshot {
+        val safeTitle = sanitizeTerminalSessionId(sessionTitle)
+        val session = withLocalTerminalManager { manager ->
+            createLocalTerminalSession(manager, safeTitle)
+        }
+        rememberOwnedTerminalSession(session.id)
+
+        return try {
+            val setupCommand = buildSessionSetupCommand(
+                workingDirectory = workingDirectory,
+                environment = environment
+            )
+            if (setupCommand.isNotBlank()) {
+                val setupResult = withLocalTerminalManager { manager ->
+                    executeDirectCommandInSession(
+                        manager = manager,
+                        sessionId = session.id,
+                        command = setupCommand,
+                        timeoutSeconds = 30
+                    )
+                }
+                if (!setupResult.completed || setupResult.timedOut || !setupResult.errorMessage.isNullOrBlank()) {
+                    stopDirectTerminalSession(session.id)
+                    throw IllegalStateException(
+                        setupResult.errorMessage ?: "终端会话初始化超时，可能仍在后台继续运行。"
+                    )
+                }
+            }
+
+            withLocalTerminalManager { manager ->
+                captureDirectTerminalSessionSnapshot(manager, session.id)
+            }
+        } catch (error: Exception) {
+            runCatching { stopDirectTerminalSession(session.id) }
+            throw error
+        }
+    }
+
+    private suspend fun executeDirectTerminalSessionCommand(
+        sessionId: String,
+        command: String,
+        workingDirectory: String?,
+        timeoutSeconds: Int,
+        environment: Map<String, String>,
+        onLiveUpdate: suspend (String) -> Unit = {}
+    ): DirectTerminalCommandResult {
+        require(sessionId.isNotBlank()) { "缺少 sessionId" }
+        require(isOwnedTerminalSession(sessionId)) { "终端会话不存在或不属于当前 agent：$sessionId" }
+        return withLocalTerminalManager { manager ->
+            val preSnapshot = captureDirectTerminalSessionSnapshot(manager, sessionId)
+            if (preSnapshot.commandRunning) {
+                return@withLocalTerminalManager DirectTerminalCommandResult(
+                    sessionId = sessionId,
+                    completed = false,
+                    timedOut = false,
+                    output = "",
+                    transcript = preSnapshot.transcript,
+                    currentDirectory = preSnapshot.currentDirectory,
+                    commandRunning = true,
+                    errorMessage = "当前会话仍有命令在执行，请先读取输出或停止会话。"
+                )
+            }
+            executeDirectCommandInSession(
+                manager = manager,
+                sessionId = sessionId,
+                command = buildDirectShellCommand(command, workingDirectory, environment),
+                timeoutSeconds = timeoutSeconds,
+                onLiveOutput = onLiveUpdate
+            )
+        }
+    }
+
+    private suspend fun readDirectTerminalSession(sessionId: String): DirectTerminalSessionSnapshot {
+        require(sessionId.isNotBlank()) { "缺少 sessionId" }
+        require(isOwnedTerminalSession(sessionId)) { "终端会话不存在或不属于当前 agent：$sessionId" }
+        return withLocalTerminalManager { manager ->
+            captureDirectTerminalSessionSnapshot(manager, sessionId)
+        }
+    }
+
+    private suspend fun stopDirectTerminalSession(sessionId: String): Boolean {
+        if (sessionId.isBlank() || !isOwnedTerminalSession(sessionId)) {
+            return false
+        }
+        return withLocalTerminalManager { manager ->
+            val exists = findTerminalSession(manager, sessionId) != null
+            if (exists) {
+                manager.closeSession(sessionId)
+            }
+            forgetOwnedTerminalSession(sessionId)
+            exists
+        }
+    }
+
+    private suspend fun createLocalTerminalSession(
+        manager: TerminalManager,
+        title: String
+    ): TerminalSessionData {
+        val previousSessionId = manager.terminalState.value.currentSessionId
+        val session = manager.createNewSession(title, TerminalType.LOCAL)
+        if (!previousSessionId.isNullOrBlank() && previousSessionId != session.id) {
+            runCatching { manager.switchToSession(previousSessionId) }
+        }
+        return session
+    }
+
+    private suspend fun executeDirectCommandInSession(
+        manager: TerminalManager,
+        sessionId: String,
+        command: String,
+        timeoutSeconds: Int,
+        onLiveOutput: suspend (String) -> Unit = {}
+    ): DirectTerminalCommandResult = coroutineScope {
+        val session = findTerminalSession(manager, sessionId)
+            ?: throw IllegalStateException("终端会话不存在：$sessionId")
+        if (session.currentExecutingCommand?.isExecuting == true) {
+            val snapshot = captureDirectTerminalSessionSnapshot(manager, sessionId)
+            return@coroutineScope DirectTerminalCommandResult(
+                sessionId = sessionId,
+                completed = false,
+                timedOut = false,
+                output = "",
+                transcript = snapshot.transcript,
+                currentDirectory = snapshot.currentDirectory,
+                commandRunning = true,
+                errorMessage = "当前会话仍有命令在执行，请先读取输出或停止会话。"
+            )
+        }
+
+        val commandId = UUID.randomUUID().toString()
+        val completionOutput = CompletableDeferred<String?>()
+        val collectorReady = CompletableDeferred<Unit>()
+        val collectorJob = launch {
+            manager.commandExecutionEvents
+                .filter { event ->
+                    event.sessionId == sessionId && event.commandId == commandId
+                }
+                .onStart { collectorReady.complete(Unit) }
+                .collect { event ->
+                    if (event.isCompleted) {
+                        if (!completionOutput.isCompleted) {
+                            completionOutput.complete(event.outputChunk)
+                        }
+                        return@collect
+                    }
+                    val normalizedDelta = normalizeTerminalOutputDelta(event.outputChunk)
+                    if (normalizedDelta.isNotBlank()) {
+                        onLiveOutput(normalizedDelta)
+                    }
+                }
+        }
+
+        collectorReady.await()
+        manager.sendCommandToSession(
+            sessionId = sessionId,
+            command = command,
+            commandId = commandId
         )
+
+        val completedOutput = withTimeoutOrNull(timeoutSeconds * 1000L) {
+            completionOutput.await()
+        }
+        collectorJob.cancelAndJoin()
+
+        val snapshot = captureDirectTerminalSessionSnapshot(manager, sessionId)
+        val normalizedOutput = EmbeddedTerminalRuntime.trimTerminalOutput(
+            EmbeddedTerminalRuntime.sanitizeTerminalNoise(completedOutput.orEmpty())
+        )
+        if (completedOutput == null) {
+            return@coroutineScope DirectTerminalCommandResult(
+                sessionId = sessionId,
+                completed = false,
+                timedOut = true,
+                output = normalizedOutput.ifBlank { snapshot.transcript },
+                transcript = snapshot.transcript,
+                currentDirectory = snapshot.currentDirectory,
+                commandRunning = snapshot.commandRunning,
+                errorMessage = "终端命令等待超时，可能仍在后台继续运行。"
+            )
+        }
+
+        DirectTerminalCommandResult(
+            sessionId = sessionId,
+            completed = true,
+            timedOut = false,
+            output = normalizedOutput,
+            transcript = snapshot.transcript,
+            currentDirectory = snapshot.currentDirectory,
+            commandRunning = snapshot.commandRunning,
+            errorMessage = null
+        )
+    }
+
+    private fun buildDirectShellCommand(
+        command: String,
+        workingDirectory: String?,
+        environment: Map<String, String>
+    ): String {
+        val normalizedCommand = command.trim()
+        require(normalizedCommand.isNotEmpty()) { "command 不能为空" }
+        val segments = buildSessionSetupSegments(workingDirectory, environment).toMutableList()
+        segments += normalizedCommand
+        return segments.joinToString(separator = " && ")
+    }
+
+    private fun buildSessionSetupCommand(
+        workingDirectory: String?,
+        environment: Map<String, String>
+    ): String {
+        return buildSessionSetupSegments(workingDirectory, environment)
+            .joinToString(separator = " && ")
+    }
+
+    private fun buildSessionSetupSegments(
+        workingDirectory: String?,
+        environment: Map<String, String>
+    ): List<String> {
+        val segments = mutableListOf<String>()
+        environment.forEach { (rawKey, rawValue) ->
+            val key = rawKey.trim()
+            if (key.isEmpty() || !terminalEnvKeyPattern.matches(key)) {
+                return@forEach
+            }
+            segments += "export $key=${quoteShell(rawValue)}"
+        }
+        if (!workingDirectory.isNullOrBlank()) {
+            segments += "cd ${quoteShell(workingDirectory)}"
+        }
+        return segments
+    }
+
+    private fun normalizeTerminalOutputDelta(outputChunk: String): String {
+        val cleaned = EmbeddedTerminalRuntime.sanitizeTerminalNoise(outputChunk)
+        if (cleaned.isBlank()) {
+            return ""
+        }
+        return if (cleaned.endsWith("\n")) cleaned else "$cleaned\n"
+    }
+
+    private fun captureDirectTerminalSessionSnapshot(
+        manager: TerminalManager,
+        sessionId: String
+    ): DirectTerminalSessionSnapshot {
+        val session = findTerminalSession(manager, sessionId)
+            ?: throw IllegalStateException("终端会话不存在：$sessionId")
+        return DirectTerminalSessionSnapshot(
+            sessionId = sessionId,
+            transcript = buildDirectTerminalTranscript(session),
+            currentDirectory = normalizeTerminalCurrentDirectory(session.currentDirectory),
+            commandRunning = session.currentExecutingCommand?.isExecuting == true
+        )
+    }
+
+    private fun findTerminalSession(
+        manager: TerminalManager,
+        sessionId: String
+    ): TerminalSessionData? {
+        return manager.terminalState.value.sessions.find { session ->
+            session.id == sessionId
+        }
+    }
+
+    private fun buildDirectTerminalTranscript(session: TerminalSessionData): String {
+        val lines = session.ansiParser.getFullContent().map { row ->
+            buildString(row.size) {
+                row.forEach { terminalChar ->
+                    append(terminalChar.char)
+                }
+            }.trimEnd()
+        }.toMutableList()
+        while (lines.isNotEmpty() && lines.last().isBlank()) {
+            lines.removeAt(lines.lastIndex)
+        }
+        return EmbeddedTerminalRuntime.trimTerminalOutput(
+            EmbeddedTerminalRuntime.sanitizeTerminalNoise(lines.joinToString("\n").trim('\n'))
+        )
+    }
+
+    private fun normalizeTerminalCurrentDirectory(prompt: String): String {
+        val cleaned = prompt.trim().replace(Regex("""\s+[#$]\s*$"""), "")
+        return if (cleaned.isBlank() || cleaned == "$") {
+            "~"
+        } else {
+            cleaned
+        }
     }
 
     private fun resolveShellWorkingDirectory(
@@ -2063,40 +2509,6 @@ class AgentToolRouter(
             File(workspaceManager.offloadsDirectory(workspace.id), "terminal_sessions"),
             sessionId
         )
-    }
-
-    private suspend fun waitForCommandLog(
-        logFile: File,
-        markerPrefix: String,
-        timeoutSeconds: Int,
-        callback: AgentCallback,
-        toolName: String
-    ): String {
-        val maxAttempts = (timeoutSeconds * 4).coerceAtLeast(4)
-        var lastContent = ""
-        repeat(maxAttempts) { index ->
-            ensureRunActive()
-            if (logFile.exists()) {
-                lastContent = runCatching { logFile.readText() }.getOrDefault(lastContent)
-                if (lastContent.contains(markerPrefix)) {
-                    return lastContent
-                }
-            }
-            if (index % 8 == 0) {
-                reportToolProgress(
-                    callback,
-                    toolName,
-                    "终端会话命令执行中",
-                    mapOf(
-                        "summary" to "终端会话命令执行中",
-                        "terminalOutputDelta" to "",
-                        "terminalStreamState" to "running"
-                    )
-                )
-            }
-            delay(250)
-        }
-        return lastContent
     }
 
     private fun persistTerminalSessionTranscript(
@@ -2327,7 +2739,7 @@ class AgentToolRouter(
                 "终端命令执行成功（exit=0）$suffix$liveNote"
 
             result.success ->
-                "内嵌终端返回成功结果$suffix$liveNote"
+                "终端命令执行完成$suffix$liveNote"
 
             result.resultCode != null ->
                 "终端命令执行失败（exit=${result.resultCode}）$suffix$liveNote"
@@ -2358,10 +2770,10 @@ class AgentToolRouter(
         if (rawExtras.isEmpty()) return emptyMap()
         return rawExtras.entries.associate { (key, value) ->
             key to when (value) {
-                is String -> truncateText(TermuxCommandRunner.sanitizeTerminalNoise(value), outputLimit)
+                is String -> truncateText(EmbeddedTerminalRuntime.sanitizeTerminalNoise(value), outputLimit)
                 is List<*> -> value.map { item ->
                     if (item is String) {
-                        truncateText(TermuxCommandRunner.sanitizeTerminalNoise(item), outputLimit)
+                        truncateText(EmbeddedTerminalRuntime.sanitizeTerminalNoise(item), outputLimit)
                     } else {
                         item
                     }

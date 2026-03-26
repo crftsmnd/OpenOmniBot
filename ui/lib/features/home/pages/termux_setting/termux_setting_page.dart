@@ -143,6 +143,23 @@ const List<_SetupCategoryDefinition> _kSetupCategories =
           _SetupPackageDefinition(id: 'go', name: 'Go', description: 'Go 编程语言'),
         ],
       ),
+      _SetupCategoryDefinition(
+        id: 'tools',
+        name: '常用工具',
+        description: 'Git 版本控制与 FFmpeg 音视频处理工具',
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(
+            id: 'git',
+            name: 'Git',
+            description: '分布式版本控制工具',
+          ),
+          _SetupPackageDefinition(
+            id: 'ffmpeg',
+            name: 'FFmpeg',
+            description: '音视频编解码与处理工具',
+          ),
+        ],
+      ),
     ];
 
 class TermuxSettingPage extends StatefulWidget {
@@ -174,10 +191,6 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         selectedPackageIds: <String>[],
       );
   final Map<String, bool> _selectedSetupPackages = <String, bool>{};
-  final Map<String, bool> _expandedSetupCategories = <String, bool>{
-    for (final category in _kSetupCategories)
-      category.id: category.id == 'nodejs' || category.id == 'python',
-  };
 
   bool _isLoadingGatewayStatus = true;
   bool _isUpdatingGatewayAutoStart = false;
@@ -302,7 +315,9 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _runtimeStatusMessage = status.message;
         _setupSessionSnapshot = setupSessionSnapshot;
         if (setupStatus != null) {
-          _installedSetupPackages = Map<String, bool>.from(setupStatus.packages);
+          _installedSetupPackages = Map<String, bool>.from(
+            setupStatus.packages,
+          );
           _selectedSetupPackages.removeWhere(
             (packageId, _) => _installedSetupPackages[packageId] == true,
           );
@@ -441,12 +456,17 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
           snapshot.hasSession &&
           snapshot.sessionId != _lastCompletedSetupSessionId) {
         _lastCompletedSetupSessionId = snapshot.sessionId;
-        showToast(
-          snapshot.message.isNotEmpty
-              ? snapshot.message
-              : (snapshot.success == true ? '环境配置完成' : '环境配置失败'),
-          type: snapshot.success == true ? ToastType.success : ToastType.error,
+        final completionToastMessage = _buildSetupCompletionToastMessage(
+          snapshot,
         );
+        if (completionToastMessage != null) {
+          showToast(
+            completionToastMessage,
+            type: snapshot.success == true
+                ? ToastType.success
+                : ToastType.error,
+          );
+        }
       }
       if (shouldRefreshInstalledStatus) {
         await _refreshStatus();
@@ -629,7 +649,9 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     });
 
     try {
-      final snapshot = await startEmbeddedTerminalSetupSession(selectedPackageIds);
+      final snapshot = await startEmbeddedTerminalSetupSession(
+        selectedPackageIds,
+      );
       if (!mounted) {
         return;
       }
@@ -643,9 +665,12 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         return;
       }
       _stopSetupSessionPolling();
-      if (snapshot.message.isNotEmpty) {
+      final completionToastMessage = _buildSetupCompletionToastMessage(
+        snapshot,
+      );
+      if (completionToastMessage != null) {
         showToast(
-          snapshot.message,
+          completionToastMessage,
           type: snapshot.success == true ? ToastType.success : ToastType.error,
         );
       }
@@ -696,18 +721,49 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     }
   }
 
-  void _toggleCategorySelection(
-    _SetupCategoryDefinition category,
-    bool selected,
-  ) {
+  Future<void> _handleReturnToSetupList() async {
+    if (_setupSessionSnapshot.running || _isInstallingPackages) {
+      return;
+    }
     setState(() {
-      for (final pkg in category.packages) {
-        if (_installedSetupPackages[pkg.id] == true) {
-          continue;
-        }
-        _selectedSetupPackages[pkg.id] = selected;
-      }
+      _showSetupTerminal = false;
     });
+    await _refreshStatus();
+  }
+
+  String? _buildSetupCompletionToastMessage(
+    EmbeddedTerminalSetupSessionSnapshot snapshot,
+  ) {
+    if (!snapshot.completed) {
+      return null;
+    }
+    if (snapshot.success == true) {
+      final rawMessage = snapshot.message.trim();
+      if (rawMessage == '所选组件均已安装。') {
+        return rawMessage;
+      }
+      return '环境配置完成';
+    }
+    if (!snapshot.hasSession) {
+      return '环境配置失败，请稍后重试';
+    }
+    return null;
+  }
+
+  String _buildSetupTerminalMessage() {
+    if (_isInstallingPackages && !_setupSessionSnapshot.hasSession) {
+      return '正在启动环境配置终端...';
+    }
+    if (_setupSessionSnapshot.running) {
+      return '环境配置进行中，请在下方终端查看实时输出。';
+    }
+    if (_setupSessionSnapshot.completed) {
+      if (_setupSessionSnapshot.success == true) {
+        return '环境配置已完成，返回配置项后会自动刷新安装状态。';
+      }
+      return '环境配置已结束，请查看下方终端输出确认安装结果。';
+    }
+    return '终端会话已准备就绪。';
   }
 
   String _buildSetupRuntimeMessage() {
@@ -787,69 +843,37 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                 ],
               ],
             ),
-          Row(
-            children: [
-              Expanded(
-                child: _showSetupTerminal
-                    ? OutlinedButton.icon(
-                        onPressed:
-                            (_setupSessionSnapshot.running || _isInstallingPackages)
-                            ? null
-                            : () {
-                                setState(() {
-                                  _showSetupTerminal = false;
-                                });
-                              },
-                        icon: const Icon(Icons.view_list_rounded),
-                        label: const Text('返回配置项'),
-                      )
-                    : OutlinedButton.icon(
-                        onPressed:
-                            (_isLoadingStatus ||
-                                _isLoadingSetupStatus ||
-                                _isInstallingPackages ||
-                                _setupSessionSnapshot.running)
-                            ? null
-                            : _refreshStatus,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('刷新状态'),
-                      ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _showSetupTerminal
-                    ? FilledButton.icon(
-                        onPressed:
-                            (_setupSessionSnapshot.running || _isInstallingPackages)
-                            ? null
-                            : _refreshStatus,
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: Text(
-                          _setupSessionSnapshot.running ? '配置中...' : '刷新状态',
-                        ),
-                      )
-                    : FilledButton(
-                        onPressed:
-                            (_isInstallingPackages ||
-                                _isLoadingSetupStatus ||
-                                _setupSessionSnapshot.running ||
-                                !_isDeviceSupported ||
-                                !hasPendingSelection)
-                            ? null
-                            : _handleInstallPackages,
-                        child: _isInstallingPackages
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text('开始配置'),
-                      ),
-              ),
-            ],
+          SizedBox(
+            width: double.infinity,
+            child: _showSetupTerminal
+                ? OutlinedButton.icon(
+                    onPressed:
+                        (_setupSessionSnapshot.running || _isInstallingPackages)
+                        ? null
+                        : _handleReturnToSetupList,
+                    icon: const Icon(Icons.view_list_rounded),
+                    label: const Text('返回配置项'),
+                  )
+                : FilledButton(
+                    onPressed:
+                        (_isInstallingPackages ||
+                            _isLoadingSetupStatus ||
+                            _setupSessionSnapshot.running ||
+                            !_isDeviceSupported ||
+                            !hasPendingSelection)
+                        ? null
+                        : _handleInstallPackages,
+                    child: _isInstallingPackages
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text('开始配置'),
+                  ),
           ),
         ],
       ),
@@ -857,9 +881,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   }
 
   Widget _buildSetupTerminalPanel() {
-    final message = _setupSessionSnapshot.message.isNotEmpty
-        ? _setupSessionSnapshot.message
-        : (_isInstallingPackages ? '正在启动环境配置终端...' : '终端会话已准备就绪。');
+    final message = _buildSetupTerminalMessage();
     final sessionId = _setupSessionSnapshot.sessionId?.trim();
 
     return Column(
@@ -881,13 +903,17 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                     ? Icons.terminal_rounded
                     : (_setupSessionSnapshot.success == true
                           ? Icons.check_circle_rounded
-                          : Icons.info_outline_rounded),
+                          : (_setupSessionSnapshot.completed
+                                ? Icons.error_outline_rounded
+                                : Icons.info_outline_rounded)),
                 size: 18,
                 color: _setupSessionSnapshot.running
                     ? AppColors.buttonPrimary
                     : (_setupSessionSnapshot.success == true
                           ? const Color(0xFF1E9E63)
-                          : const Color(0xFF64748B)),
+                          : (_setupSessionSnapshot.completed
+                                ? const Color(0xFFB45309)
+                                : const Color(0xFF64748B))),
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -938,9 +964,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                   )
                 : AndroidView(
                     viewType: 'cn.com.omnimind.bot/embedded_terminal_view',
-                    creationParams: <String, Object>{
-                      'sessionId': sessionId,
-                    },
+                    creationParams: <String, Object>{'sessionId': sessionId},
                     creationParamsCodec: const StandardMessageCodec(),
                   ),
           ),
@@ -988,12 +1012,6 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   }
 
   Widget _buildSetupCategoryCard(_SetupCategoryDefinition category) {
-    final expanded = _expandedSetupCategories[category.id] ?? false;
-    final allSelected = category.packages.every(
-      (pkg) =>
-          _installedSetupPackages[pkg.id] == true ||
-          _selectedSetupPackages[pkg.id] == true,
-    );
     final installedCount = category.packages
         .where((pkg) => _installedSetupPackages[pkg.id] == true)
         .length;
@@ -1004,128 +1022,69 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0x14000000)),
       ),
-      child: Column(
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              setState(() {
-                _expandedSetupCategories[category.id] = !expanded;
-              });
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                category.name,
-                                style: const TextStyle(
-                                  color: AppColors.text,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            if (category.operitRequired) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0x14F59E0B),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: const Text(
-                                  'Operit 必须',
-                                  style: TextStyle(
-                                    color: Color(0xFFB45309),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          category.description,
-                          style: const TextStyle(
-                            color: Color(0xFF64748B),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '已安装 $installedCount / ${category.packages.length}',
-                          style: const TextStyle(
-                            color: AppColors.text70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Checkbox(
-                        value: allSelected,
-                        onChanged:
-                            (_isInstallingPackages || _isLoadingSetupStatus)
-                            ? null
-                            : (value) {
-                                _toggleCategorySelection(
-                                  category,
-                                  value == true,
-                                );
-                              },
-                      ),
-                      const Text(
-                        '全选',
-                        style: TextStyle(
+                      Text(
+                        category.name,
+                        style: const TextStyle(
                           color: AppColors.text,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        expanded ? Icons.expand_less : Icons.expand_more,
-                        color: const Color(0xFF64748B),
-                      ),
+                      if (category.operitRequired)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0x14F59E0B),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'Operit 必须',
+                            style: TextStyle(
+                              color: Color(0xFFB45309),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  '已安装 $installedCount / ${category.packages.length}',
+                  style: const TextStyle(
+                    color: AppColors.text70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-          ),
-          if (expanded) ...[
-            const Divider(height: 1, color: Color(0x14000000)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              child: Column(
-                children: [
-                  for (final pkg in category.packages)
-                    _buildSetupPackageTile(pkg),
-                ],
-              ),
-            ),
+            const SizedBox(height: 12),
+            for (var index = 0; index < category.packages.length; index++) ...[
+              _buildSetupPackageTile(category.packages[index]),
+              if (index != category.packages.length - 1)
+                const Divider(height: 1, color: Color(0x14000000)),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1133,6 +1092,13 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   Widget _buildSetupPackageTile(_SetupPackageDefinition pkg) {
     final installed = _installedSetupPackages[pkg.id] == true;
     final selected = installed || _selectedSetupPackages[pkg.id] == true;
+    final statusLabel = installed ? 'ready' : 'lost';
+    final statusBackgroundColor = installed
+        ? const Color(0x141E9E63)
+        : const Color(0x140F62FE);
+    final statusForegroundColor = installed
+        ? const Color(0xFF1E9E63)
+        : const Color(0xFF0F62FE);
     return InkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: (installed || _isInstallingPackages)
@@ -1143,55 +1109,69 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
               });
             },
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Checkbox(
-              value: selected,
-              onChanged: (installed || _isInstallingPackages)
-                  ? null
-                  : (value) {
-                      setState(() {
-                        _selectedSetupPackages[pkg.id] = value == true;
-                      });
-                    },
+            Theme(
+              data: Theme.of(context).copyWith(
+                checkboxTheme: CheckboxThemeData(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              child: Checkbox(
+                value: selected,
+                onChanged: (installed || _isInstallingPackages)
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _selectedSetupPackages[pkg.id] = value == true;
+                        });
+                      },
+                activeColor: installed
+                    ? const Color(0xFF1E9E63)
+                    : const Color(0xFF0F62FE),
+                checkColor: Colors.white,
+                side: BorderSide(
+                  color: installed
+                      ? const Color(0xFF1E9E63)
+                      : const Color(0xFF0F62FE),
+                  width: 1.4,
+                ),
+              ),
             ),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          pkg.name,
-                          style: const TextStyle(
-                            color: AppColors.text,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                  Expanded(
+                    child: Text(
+                      pkg.name,
+                      style: const TextStyle(
+                        color: AppColors.text,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                       ),
-                      if (installed) ...[
-                        const SizedBox(width: 6),
-                        const Text(
-                          '(已安装)',
-                          style: TextStyle(
-                            color: Color(0xFF1E9E63),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    pkg.description,
-                    style: const TextStyle(
-                      color: Color(0xFF64748B),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusBackgroundColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: statusForegroundColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
                     ),
                   ),
                 ],
