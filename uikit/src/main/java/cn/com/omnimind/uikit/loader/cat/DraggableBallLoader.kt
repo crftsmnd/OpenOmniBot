@@ -263,7 +263,7 @@ class DraggableBallLoader(
         if (isStartInCatDialogShowInfoRange || isEndInCatDialogShowInfoRange) {
             val currentY = catDialogShowInfoParams.y
             // 如果高度为0，尝试使用 measuredHeight
-            val targetY = max(0, currentY - 68.dpToPx())
+            val targetY = max(0, currentY - 78.dpToPx())
 
             OmniLog.d(TAG, "Moving catDialogShowInfoView: currentY=$currentY, targetY=$targetY")
 
