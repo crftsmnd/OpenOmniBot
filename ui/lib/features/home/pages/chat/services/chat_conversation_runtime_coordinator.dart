@@ -94,6 +94,7 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
       <String, String>{
         '无障碍权限': kAccessibilityPermissionId,
         '悬浮窗权限': kOverlayPermissionId,
+        '应用列表读取权限': kInstalledAppsPermissionId,
       };
 
   final Map<String, ChatConversationRuntimeState> _runtimes =

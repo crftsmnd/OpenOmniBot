@@ -267,6 +267,11 @@ class AgentToolRouter(
     ): ToolExecutionResult {
         val toolName = "context_apps_query"
         return try {
+            if (!AssistsUtil.Setting.isInstalledAppsPermissionGranted(context)) {
+                val missing = listOf("应用列表读取权限")
+                callback.onPermissionRequired(missing)
+                return ToolExecutionResult.PermissionRequired(missing)
+            }
             reportToolProgress(callback, toolName, "正在查询已安装应用")
             ensureRunActive()
             val query = args["query"]?.jsonPrimitive?.contentOrNull?.trim()
