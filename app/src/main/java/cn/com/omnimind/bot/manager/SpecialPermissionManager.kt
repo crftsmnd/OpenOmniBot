@@ -15,6 +15,7 @@ import cn.com.omnimind.bot.openclaw.OpenClawDeployManager
 import cn.com.omnimind.bot.openclaw.OpenClawGatewayManager
 import cn.com.omnimind.bot.activity.TerminalActivity
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
+import cn.com.omnimind.bot.terminal.EmbeddedTerminalSetupManager
 import cn.com.omnimind.bot.termux.TermuxCommandRunner
 import cn.com.omnimind.bot.util.AssistsUtil
 import cn.com.omnimind.bot.workspace.WorkspaceStorageAccess
@@ -63,6 +64,7 @@ class SpecialPermissionManager(private val context: Context) {
     private val embeddedTerminalInitLock = Any()
     private var embeddedTerminalInitState = EmbeddedTerminalInitState()
     private val openClawDeployManager = OpenClawDeployManager(context)
+    private val embeddedTerminalSetupManager = EmbeddedTerminalSetupManager(context)
     var onEmbeddedTerminalInitProgress: ((Map<String, Any?>) -> Unit)? = null
 
     fun isAccessibilityServiceEnabled(result: MethodChannel.Result) {
@@ -386,6 +388,85 @@ class SpecialPermissionManager(private val context: Context) {
                     result.error(
                         "CHECK_FAILED",
                         "Failed to check embedded terminal runtime status.",
+                        e.message
+                    )
+                }
+            }
+        }
+    }
+
+    fun getEmbeddedTerminalSetupStatus(result: MethodChannel.Result) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val packageStatus = embeddedTerminalSetupManager.getPackageInstallStatus()
+                withContext(Dispatchers.Main) {
+                    result.success(
+                        mapOf(
+                            "packages" to packageStatus
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                OmniLog.e(TAG, "Error reading embedded terminal setup status", e)
+                withContext(Dispatchers.Main) {
+                    result.error(
+                        "READ_SETUP_STATUS_FAILED",
+                        "Failed to read embedded terminal setup status.",
+                        e.message
+                    )
+                }
+            }
+        }
+    }
+
+    fun installEmbeddedTerminalPackages(call: MethodCall, result: MethodChannel.Result) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val packageIds = call.argument<List<String>>("packageIds").orEmpty()
+                val installResult = embeddedTerminalSetupManager.installPackages(packageIds)
+                withContext(Dispatchers.Main) {
+                    result.success(installResult.toMap())
+                }
+            } catch (e: Exception) {
+                OmniLog.e(TAG, "Error installing embedded terminal packages", e)
+                withContext(Dispatchers.Main) {
+                    result.error(
+                        "INSTALL_SETUP_PACKAGES_FAILED",
+                        "Failed to install embedded terminal packages.",
+                        e.message
+                    )
+                }
+            }
+        }
+    }
+
+    fun getEmbeddedTerminalSetupSessionSnapshot(result: MethodChannel.Result) {
+        try {
+            result.success(embeddedTerminalSetupManager.getInstallSessionSnapshot().toMap())
+        } catch (e: Exception) {
+            OmniLog.e(TAG, "Error reading embedded terminal setup session snapshot", e)
+            result.error(
+                "READ_SETUP_SESSION_FAILED",
+                "Failed to read embedded terminal setup session snapshot.",
+                e.message
+            )
+        }
+    }
+
+    fun startEmbeddedTerminalSetupSession(call: MethodCall, result: MethodChannel.Result) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val packageIds = call.argument<List<String>>("packageIds").orEmpty()
+                val snapshot = embeddedTerminalSetupManager.startInstallSession(packageIds)
+                withContext(Dispatchers.Main) {
+                    result.success(snapshot.toMap())
+                }
+            } catch (e: Exception) {
+                OmniLog.e(TAG, "Error starting embedded terminal setup session", e)
+                withContext(Dispatchers.Main) {
+                    result.error(
+                        "START_SETUP_SESSION_FAILED",
+                        "Failed to start embedded terminal setup session.",
                         e.message
                     )
                 }

@@ -118,6 +118,82 @@ class EmbeddedTerminalRuntimeStatus {
   }
 }
 
+class EmbeddedTerminalSetupStatus {
+  const EmbeddedTerminalSetupStatus({required this.packages});
+
+  final Map<String, bool> packages;
+
+  factory EmbeddedTerminalSetupStatus.fromMap(Map<dynamic, dynamic>? map) {
+    final rawPackages = map?['packages'];
+    final packages = <String, bool>{};
+    if (rawPackages is Map) {
+      for (final entry in rawPackages.entries) {
+        packages[entry.key.toString()] = entry.value == true;
+      }
+    }
+    return EmbeddedTerminalSetupStatus(packages: packages);
+  }
+}
+
+class EmbeddedTerminalSetupResult {
+  const EmbeddedTerminalSetupResult({
+    required this.success,
+    required this.message,
+    required this.output,
+  });
+
+  final bool success;
+  final String message;
+  final String output;
+
+  factory EmbeddedTerminalSetupResult.fromMap(Map<dynamic, dynamic>? map) {
+    return EmbeddedTerminalSetupResult(
+      success: map?['success'] == true,
+      message: (map?['message'] as String? ?? '').trim(),
+      output: (map?['output'] as String? ?? '').trim(),
+    );
+  }
+}
+
+class EmbeddedTerminalSetupSessionSnapshot {
+  const EmbeddedTerminalSetupSessionSnapshot({
+    required this.sessionId,
+    required this.running,
+    required this.completed,
+    required this.success,
+    required this.message,
+    required this.selectedPackageIds,
+  });
+
+  final String? sessionId;
+  final bool running;
+  final bool completed;
+  final bool? success;
+  final String message;
+  final List<String> selectedPackageIds;
+
+  bool get hasSession => (sessionId ?? '').trim().isNotEmpty;
+
+  factory EmbeddedTerminalSetupSessionSnapshot.fromMap(
+    Map<dynamic, dynamic>? map,
+  ) {
+    final rawSelectedPackageIds = map?['selectedPackageIds'];
+    return EmbeddedTerminalSetupSessionSnapshot(
+      sessionId: (map?['sessionId'] as String?)?.trim(),
+      running: map?['running'] == true,
+      completed: map?['completed'] == true,
+      success: map?['success'] as bool?,
+      message: (map?['message'] as String? ?? '').trim(),
+      selectedPackageIds: rawSelectedPackageIds is List
+          ? rawSelectedPackageIds
+                .map((item) => item.toString())
+                .where((item) => item.trim().isNotEmpty)
+                .toList(growable: false)
+          : const <String>[],
+    );
+  }
+}
+
 class OpenClawDeployRequest {
   const OpenClawDeployRequest({
     required this.providerBaseUrl,
@@ -264,6 +340,41 @@ Future<EmbeddedTerminalRuntimeStatus> getEmbeddedTerminalRuntimeStatus() async {
     'getEmbeddedTerminalRuntimeStatus',
   );
   return EmbeddedTerminalRuntimeStatus.fromMap(result ?? const {});
+}
+
+Future<EmbeddedTerminalSetupStatus> getEmbeddedTerminalSetupStatus() async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'getEmbeddedTerminalSetupStatus',
+  );
+  return EmbeddedTerminalSetupStatus.fromMap(result ?? const {});
+}
+
+Future<EmbeddedTerminalSetupSessionSnapshot>
+getEmbeddedTerminalSetupSessionSnapshot() async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'getEmbeddedTerminalSetupSessionSnapshot',
+  );
+  return EmbeddedTerminalSetupSessionSnapshot.fromMap(result ?? const {});
+}
+
+Future<EmbeddedTerminalSetupResult> installEmbeddedTerminalPackages(
+  List<String> packageIds,
+) async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'installEmbeddedTerminalPackages',
+    {'packageIds': packageIds},
+  );
+  return EmbeddedTerminalSetupResult.fromMap(result ?? const {});
+}
+
+Future<EmbeddedTerminalSetupSessionSnapshot> startEmbeddedTerminalSetupSession(
+  List<String> packageIds,
+) async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'startEmbeddedTerminalSetupSession',
+    {'packageIds': packageIds},
+  );
+  return EmbeddedTerminalSetupSessionSnapshot.fromMap(result ?? const {});
 }
 
 Future<OpenClawDeployResult> startOpenClawDeploy(

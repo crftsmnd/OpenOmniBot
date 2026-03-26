@@ -8,6 +8,143 @@ import 'package:ui/utils/ui.dart';
 import 'package:ui/widgets/common_app_bar.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+class _SetupPackageDefinition {
+  const _SetupPackageDefinition({
+    required this.id,
+    required this.name,
+    required this.description,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+}
+
+class _SetupCategoryDefinition {
+  const _SetupCategoryDefinition({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.packages,
+    this.operitRequired = false,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final bool operitRequired;
+  final List<_SetupPackageDefinition> packages;
+}
+
+const List<_SetupCategoryDefinition> _kSetupCategories =
+    <_SetupCategoryDefinition>[
+      _SetupCategoryDefinition(
+        id: 'nodejs',
+        name: 'Node.js 环境',
+        description: 'Node.js 和前端开发环境',
+        operitRequired: true,
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(
+            id: 'nodejs',
+            name: 'Node.js',
+            description: 'JavaScript 运行时',
+          ),
+          _SetupPackageDefinition(
+            id: 'pnpm',
+            name: 'PNPM',
+            description: '快速的包管理器和 TypeScript',
+          ),
+        ],
+      ),
+      _SetupCategoryDefinition(
+        id: 'python',
+        name: 'Python 环境',
+        description: 'Python 开发环境',
+        operitRequired: true,
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(
+            id: 'python-is-python3',
+            name: 'Python 链接',
+            description: '将python命令链接到python3',
+          ),
+          _SetupPackageDefinition(
+            id: 'python3-venv',
+            name: '虚拟环境',
+            description: 'Python 虚拟环境支持',
+          ),
+          _SetupPackageDefinition(
+            id: 'python3-pip',
+            name: 'Pip',
+            description: 'Python 包管理器',
+          ),
+          _SetupPackageDefinition(
+            id: 'uv',
+            name: 'uv',
+            description: '一个用 Rust 编写的极速 Python 包安装器',
+          ),
+        ],
+      ),
+      _SetupCategoryDefinition(
+        id: 'ssh',
+        name: 'SSH 工具',
+        description: 'SSH 客户端和密码认证工具',
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(
+            id: 'ssh',
+            name: 'SSH 客户端',
+            description: 'SSH 连接客户端',
+          ),
+          _SetupPackageDefinition(
+            id: 'sshpass',
+            name: 'sshpass',
+            description: 'SSH 密码认证工具',
+          ),
+          _SetupPackageDefinition(
+            id: 'openssh-server',
+            name: 'OpenSSH 服务器',
+            description: '用于反向隧道挂载本地文件系统',
+          ),
+        ],
+      ),
+      _SetupCategoryDefinition(
+        id: 'java',
+        name: 'Java 环境',
+        description: 'Java 开发环境',
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(
+            id: 'openjdk-17',
+            name: 'OpenJDK 17',
+            description: 'Java 17 开发环境',
+          ),
+          _SetupPackageDefinition(
+            id: 'gradle',
+            name: 'Gradle',
+            description: '现代化的构建自动化工具',
+          ),
+        ],
+      ),
+      _SetupCategoryDefinition(
+        id: 'rust',
+        name: 'Rust (Cargo) 环境',
+        description: 'Rust 开发环境和包管理器',
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(
+            id: 'rust',
+            name: 'Rust & Cargo',
+            description: '通过 rustup 安装 Rust 工具链',
+          ),
+        ],
+      ),
+      _SetupCategoryDefinition(
+        id: 'go',
+        name: 'Go 环境',
+        description: 'Go 语言开发环境',
+        packages: <_SetupPackageDefinition>[
+          _SetupPackageDefinition(id: 'go', name: 'Go', description: 'Go 编程语言'),
+        ],
+      ),
+    ];
+
 class TermuxSettingPage extends StatefulWidget {
   const TermuxSettingPage({super.key});
 
@@ -18,18 +155,30 @@ class TermuxSettingPage extends StatefulWidget {
 class _TermuxSettingPageState extends State<TermuxSettingPage>
     with WidgetsBindingObserver {
   bool _isLoadingStatus = true;
+  bool _isLoadingSetupStatus = true;
+  bool _isInstallingPackages = false;
+  bool _showSetupTerminal = false;
   bool _isDeviceSupported = false;
   bool _isRuntimeReady = false;
   bool _isBasePackagesReady = false;
   List<String> _missingCommands = const <String>[];
   String _runtimeStatusMessage = '';
-  bool _nodeReady = false;
-  String? _nodeVersion;
-  int _nodeMinMajor = 22;
-  bool _pnpmReady = false;
-  String? _pnpmVersion;
+  Map<String, bool> _installedSetupPackages = const <String, bool>{};
+  EmbeddedTerminalSetupSessionSnapshot _setupSessionSnapshot =
+      const EmbeddedTerminalSetupSessionSnapshot(
+        sessionId: null,
+        running: false,
+        completed: false,
+        success: null,
+        message: '',
+        selectedPackageIds: <String>[],
+      );
+  final Map<String, bool> _selectedSetupPackages = <String, bool>{};
+  final Map<String, bool> _expandedSetupCategories = <String, bool>{
+    for (final category in _kSetupCategories)
+      category.id: category.id == 'nodejs' || category.id == 'python',
+  };
 
-  bool _isPreparingWrapper = false;
   bool _isLoadingGatewayStatus = true;
   bool _isUpdatingGatewayAutoStart = false;
   bool _isStartingGateway = false;
@@ -38,8 +187,10 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
 
   Timer? _gatewayStatusPoller;
   Timer? _gatewayUptimeTicker;
+  Timer? _setupSessionPoller;
   OpenClawGatewayStatus? _gatewayStatus;
   DateTime? _gatewayStatusSnapshotAt;
+  String? _lastCompletedSetupSessionId;
 
   @override
   void initState() {
@@ -54,6 +205,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   void dispose() {
     _gatewayStatusPoller?.cancel();
     _gatewayUptimeTicker?.cancel();
+    _setupSessionPoller?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -63,6 +215,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     if (state == AppLifecycleState.resumed) {
       _startGatewayStatusPolling();
       _startGatewayUptimeTicker();
+      _startSetupSessionPollingIfNeeded();
       _refreshStatus();
       return;
     }
@@ -73,6 +226,8 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       _gatewayStatusPoller = null;
       _gatewayUptimeTicker?.cancel();
       _gatewayUptimeTicker = null;
+      _setupSessionPoller?.cancel();
+      _setupSessionPoller = null;
     }
   }
 
@@ -97,6 +252,20 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     });
   }
 
+  void _startSetupSessionPollingIfNeeded() {
+    if (!_setupSessionSnapshot.running || _setupSessionPoller != null) {
+      return;
+    }
+    _setupSessionPoller = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(_refreshSetupSessionSnapshot());
+    });
+  }
+
+  void _stopSetupSessionPolling() {
+    _setupSessionPoller?.cancel();
+    _setupSessionPoller = null;
+  }
+
   Future<void> _refreshStatus() async {
     if (!mounted) {
       return;
@@ -104,16 +273,24 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
 
     setState(() {
       _isLoadingStatus = true;
+      _isLoadingSetupStatus = true;
       _isLoadingGatewayStatus = true;
     });
 
     try {
-      final results = await Future.wait<dynamic>([
+      final initialResults = await Future.wait<dynamic>([
         getEmbeddedTerminalRuntimeStatus(),
+        getEmbeddedTerminalSetupSessionSnapshot(),
         getOpenClawGatewayStatus(),
       ]);
-      final status = results[0] as EmbeddedTerminalRuntimeStatus;
-      final gatewayStatus = results[1] as OpenClawGatewayStatus;
+      final status = initialResults[0] as EmbeddedTerminalRuntimeStatus;
+      final setupSessionSnapshot =
+          initialResults[1] as EmbeddedTerminalSetupSessionSnapshot;
+      final gatewayStatus = initialResults[2] as OpenClawGatewayStatus;
+      EmbeddedTerminalSetupStatus? setupStatus;
+      if (!setupSessionSnapshot.running) {
+        setupStatus = await getEmbeddedTerminalSetupStatus();
+      }
       if (!mounted) {
         return;
       }
@@ -123,23 +300,40 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _isBasePackagesReady = status.basePackagesReady;
         _missingCommands = status.missingCommands;
         _runtimeStatusMessage = status.message;
-        _nodeReady = status.nodeReady;
-        _nodeVersion = status.nodeVersion;
-        _nodeMinMajor = status.nodeMinMajor;
-        _pnpmReady = status.pnpmReady;
-        _pnpmVersion = status.pnpmVersion;
+        _setupSessionSnapshot = setupSessionSnapshot;
+        if (setupStatus != null) {
+          _installedSetupPackages = Map<String, bool>.from(setupStatus.packages);
+          _selectedSetupPackages.removeWhere(
+            (packageId, _) => _installedSetupPackages[packageId] == true,
+          );
+        }
         _gatewayStatus = gatewayStatus;
         _gatewayStatusSnapshotAt = DateTime.now();
         _isLoadingStatus = false;
+        _isLoadingSetupStatus = false;
         _isLoadingGatewayStatus = false;
+        if (setupSessionSnapshot.running || _isInstallingPackages) {
+          _showSetupTerminal = true;
+        }
       });
+      if (setupSessionSnapshot.running) {
+        _startSetupSessionPollingIfNeeded();
+      } else {
+        _stopSetupSessionPolling();
+      }
     } on PlatformException {
       final supported = await isTermuxInstalled();
       OpenClawGatewayStatus? gatewayStatus;
+      EmbeddedTerminalSetupSessionSnapshot? setupSessionSnapshot;
       try {
         gatewayStatus = await getOpenClawGatewayStatus();
       } catch (_) {
         gatewayStatus = null;
+      }
+      try {
+        setupSessionSnapshot = await getEmbeddedTerminalSetupSessionSnapshot();
+      } catch (_) {
+        setupSessionSnapshot = null;
       }
       if (!mounted) {
         return;
@@ -150,25 +344,40 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _isBasePackagesReady = false;
         _missingCommands = const <String>[];
         _runtimeStatusMessage = '状态探测失败，请尝试初始化。';
-        _nodeReady = false;
-        _nodeVersion = null;
-        _nodeMinMajor = 22;
-        _pnpmReady = false;
-        _pnpmVersion = null;
+        _installedSetupPackages = const <String, bool>{};
+        if (setupSessionSnapshot != null) {
+          _setupSessionSnapshot = setupSessionSnapshot;
+          if (setupSessionSnapshot.running || _isInstallingPackages) {
+            _showSetupTerminal = true;
+          }
+        }
+        _selectedSetupPackages.clear();
         _isLoadingStatus = false;
+        _isLoadingSetupStatus = false;
         _gatewayStatus = gatewayStatus;
         _gatewayStatusSnapshotAt = gatewayStatus == null
             ? null
             : DateTime.now();
         _isLoadingGatewayStatus = false;
       });
+      if (setupSessionSnapshot?.running == true) {
+        _startSetupSessionPollingIfNeeded();
+      } else {
+        _stopSetupSessionPolling();
+      }
     } catch (_) {
       final supported = await isTermuxInstalled();
       OpenClawGatewayStatus? gatewayStatus;
+      EmbeddedTerminalSetupSessionSnapshot? setupSessionSnapshot;
       try {
         gatewayStatus = await getOpenClawGatewayStatus();
       } catch (_) {
         gatewayStatus = null;
+      }
+      try {
+        setupSessionSnapshot = await getEmbeddedTerminalSetupSessionSnapshot();
+      } catch (_) {
+        setupSessionSnapshot = null;
       }
       if (!mounted) {
         return;
@@ -179,19 +388,70 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         _isBasePackagesReady = false;
         _missingCommands = const <String>[];
         _runtimeStatusMessage = '状态探测失败，请尝试初始化。';
-        _nodeReady = false;
-        _nodeVersion = null;
-        _nodeMinMajor = 22;
-        _pnpmReady = false;
-        _pnpmVersion = null;
+        _installedSetupPackages = const <String, bool>{};
+        if (setupSessionSnapshot != null) {
+          _setupSessionSnapshot = setupSessionSnapshot;
+          if (setupSessionSnapshot.running || _isInstallingPackages) {
+            _showSetupTerminal = true;
+          }
+        }
+        _selectedSetupPackages.clear();
         _isLoadingStatus = false;
+        _isLoadingSetupStatus = false;
         _gatewayStatus = gatewayStatus;
         _gatewayStatusSnapshotAt = gatewayStatus == null
             ? null
             : DateTime.now();
         _isLoadingGatewayStatus = false;
       });
+      if (setupSessionSnapshot?.running == true) {
+        _startSetupSessionPollingIfNeeded();
+      } else {
+        _stopSetupSessionPolling();
+      }
     }
+  }
+
+  Future<void> _refreshSetupSessionSnapshot() async {
+    if (!mounted) {
+      return;
+    }
+    try {
+      final snapshot = await getEmbeddedTerminalSetupSessionSnapshot();
+      if (!mounted) {
+        return;
+      }
+      final shouldRefreshInstalledStatus =
+          _setupSessionSnapshot.running &&
+          !snapshot.running &&
+          snapshot.completed;
+      setState(() {
+        _setupSessionSnapshot = snapshot;
+        _isInstallingPackages = false;
+        if (snapshot.running || snapshot.hasSession) {
+          _showSetupTerminal = true;
+        }
+      });
+      if (snapshot.running) {
+        _startSetupSessionPollingIfNeeded();
+        return;
+      }
+      _stopSetupSessionPolling();
+      if (snapshot.completed &&
+          snapshot.hasSession &&
+          snapshot.sessionId != _lastCompletedSetupSessionId) {
+        _lastCompletedSetupSessionId = snapshot.sessionId;
+        showToast(
+          snapshot.message.isNotEmpty
+              ? snapshot.message
+              : (snapshot.success == true ? '环境配置完成' : '环境配置失败'),
+          type: snapshot.success == true ? ToastType.success : ToastType.error,
+        );
+      }
+      if (shouldRefreshInstalledStatus) {
+        await _refreshStatus();
+      }
+    } catch (_) {}
   }
 
   Future<void> _refreshGatewayStatusOnly({bool showLoading = false}) async {
@@ -302,8 +562,20 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     }
   }
 
-  Future<void> _handlePrepareWrapper() async {
-    if (_isPreparingWrapper) {
+  List<String> get _selectedPendingPackageIds {
+    return _kSetupCategories
+        .expand((category) => category.packages)
+        .map((pkg) => pkg.id)
+        .where(
+          (packageId) =>
+              _selectedSetupPackages[packageId] == true &&
+              _installedSetupPackages[packageId] != true,
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> _handleInstallPackages() async {
+    if (_isInstallingPackages || _isLoadingSetupStatus) {
       return;
     }
     if (!_isDeviceSupported) {
@@ -311,45 +583,624 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       return;
     }
 
+    final selectedPackageIds = _selectedPendingPackageIds;
+    if (selectedPackageIds.isEmpty) {
+      showToast('请先选择需要安装的环境组件', type: ToastType.warning);
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('开始环境配置'),
+          content: const Text(
+            '即将开始环境配置，这可能需要一些时间。请尽量保持应用在前台或小窗运行以确保配置顺利进行。\n\n如果配置意外中断，不必担心。下次回到本页面再次开始配置时，会自动从上次的进度继续。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('开始配置'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
     setState(() {
-      _isPreparingWrapper = true;
+      _isInstallingPackages = true;
+      _showSetupTerminal = true;
+      _setupSessionSnapshot = const EmbeddedTerminalSetupSessionSnapshot(
+        sessionId: null,
+        running: true,
+        completed: false,
+        success: null,
+        message: '正在启动环境配置终端...',
+        selectedPackageIds: <String>[],
+      );
     });
+
     try {
-      await openNativeTerminal(openSetup: true);
+      final snapshot = await startEmbeddedTerminalSetupSession(selectedPackageIds);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _setupSessionSnapshot = snapshot;
+        _isInstallingPackages = false;
+        _showSetupTerminal = snapshot.running || snapshot.hasSession;
+      });
+      if (snapshot.running) {
+        _startSetupSessionPollingIfNeeded();
+        return;
+      }
+      _stopSetupSessionPolling();
+      if (snapshot.message.isNotEmpty) {
+        showToast(
+          snapshot.message,
+          type: snapshot.success == true ? ToastType.success : ToastType.error,
+        );
+      }
+      if (!snapshot.hasSession) {
+        setState(() {
+          _showSetupTerminal = false;
+        });
+      }
+      await _refreshStatus();
     } on PlatformException catch (e) {
-      showToast(e.message ?? '打开终端环境配置失败', type: ToastType.error);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showSetupTerminal = false;
+        _setupSessionSnapshot = const EmbeddedTerminalSetupSessionSnapshot(
+          sessionId: null,
+          running: false,
+          completed: false,
+          success: null,
+          message: '',
+          selectedPackageIds: <String>[],
+        );
+      });
+      showToast(e.message ?? '环境配置失败', type: ToastType.error);
     } catch (_) {
-      showToast('打开终端环境配置失败', type: ToastType.error);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showSetupTerminal = false;
+        _setupSessionSnapshot = const EmbeddedTerminalSetupSessionSnapshot(
+          sessionId: null,
+          running: false,
+          completed: false,
+          success: null,
+          message: '',
+          selectedPackageIds: <String>[],
+        );
+      });
+      showToast('环境配置失败', type: ToastType.error);
     } finally {
       if (mounted) {
         setState(() {
-          _isPreparingWrapper = false;
+          _isInstallingPackages = false;
         });
       }
     }
   }
 
-  String _buildRuntimeSubtitle() {
+  void _toggleCategorySelection(
+    _SetupCategoryDefinition category,
+    bool selected,
+  ) {
+    setState(() {
+      for (final pkg in category.packages) {
+        if (_installedSetupPackages[pkg.id] == true) {
+          continue;
+        }
+        _selectedSetupPackages[pkg.id] = selected;
+      }
+    });
+  }
+
+  String _buildSetupRuntimeMessage() {
+    if (_isInstallingPackages && !_setupSessionSnapshot.hasSession) {
+      return '正在启动原生终端并准备环境配置会话...';
+    }
+    if (_setupSessionSnapshot.running) {
+      return '环境配置进行中，请在下方终端查看实时输出。';
+    }
     if (_isLoadingStatus) {
-      return '正在检查 Ubuntu 运行时与环境工具状态';
+      return '正在检查 Ubuntu 运行时状态...';
     }
     if (!_isDeviceSupported) {
-      return '当前设备 ABI 不受支持，仅支持 arm64-v8a';
+      return '当前设备 ABI 不受支持，仅支持 arm64-v8a。';
     }
     if (!_isRuntimeReady) {
-      return _runtimeStatusMessage.isNotEmpty
-          ? _runtimeStatusMessage
-          : '内嵌 Ubuntu 运行时未就绪，请打开终端环境配置完成初始化。';
-    }
-    if (!_isBasePackagesReady) {
-      if (_missingCommands.isNotEmpty) {
-        return 'Ubuntu 已就绪，可前往终端“环境配置”按需安装 Node.js、Python、SSH、Java 等工具。当前探测缺少：${_missingCommands.join(", ")}';
+      final runtimeMessage = _runtimeStatusMessage.trim();
+      if (runtimeMessage.isNotEmpty) {
+        return '$runtimeMessage\n首次开始配置时会自动初始化 Ubuntu 运行时。';
       }
-      return _runtimeStatusMessage.isNotEmpty
-          ? _runtimeStatusMessage
-          : 'Ubuntu 已就绪，可前往终端“环境配置”按需安装 Node.js、Python、SSH、Java 等工具。';
+      return 'Ubuntu 运行时尚未初始化，首次开始配置时会自动初始化。';
     }
-    return 'Ubuntu 运行时已就绪，可继续在终端“环境配置”中管理 Node.js、Python、SSH、Java 等工具。';
+
+    final totalCount = _kSetupCategories.fold<int>(
+      0,
+      (sum, category) => sum + category.packages.length,
+    );
+    final installedCount = _installedSetupPackages.values
+        .where((installed) => installed)
+        .length;
+    if (_isLoadingSetupStatus) {
+      return 'Ubuntu 运行时已就绪，正在检查环境组件安装状态...';
+    }
+    if (_isBasePackagesReady) {
+      return 'Ubuntu 运行时与常用 CLI 已就绪，已安装 $installedCount / $totalCount 个环境组件。';
+    }
+    if (_missingCommands.isNotEmpty) {
+      return 'Ubuntu 运行时已就绪，已安装 $installedCount / $totalCount 个环境组件。当前仍探测到缺少：${_missingCommands.join(", ")}';
+    }
+    if (installedCount == 0) {
+      return 'Ubuntu 运行时已就绪，尚未安装任何开发环境组件。';
+    }
+    return 'Ubuntu 运行时已就绪，已安装 $installedCount / $totalCount 个环境组件。';
+  }
+
+  Widget _buildEnvironmentSetupCard() {
+    final hasPendingSelection = _selectedPendingPackageIds.isNotEmpty;
+    return _buildSectionCard(
+      title: '环境配置',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '选择需要安装的开发环境和工具（支持并行安装）',
+            style: TextStyle(
+              color: Color(0xFF64748B),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSetupStatusBanner(),
+          const SizedBox(height: 14),
+          if (_showSetupTerminal)
+            _buildSetupTerminalPanel()
+          else if (_isLoadingSetupStatus)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2.4)),
+            )
+          else
+            Column(
+              children: [
+                for (final category in _kSetupCategories) ...[
+                  _buildSetupCategoryCard(category),
+                  const SizedBox(height: 12),
+                ],
+              ],
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: _showSetupTerminal
+                    ? OutlinedButton.icon(
+                        onPressed:
+                            (_setupSessionSnapshot.running || _isInstallingPackages)
+                            ? null
+                            : () {
+                                setState(() {
+                                  _showSetupTerminal = false;
+                                });
+                              },
+                        icon: const Icon(Icons.view_list_rounded),
+                        label: const Text('返回配置项'),
+                      )
+                    : OutlinedButton.icon(
+                        onPressed:
+                            (_isLoadingStatus ||
+                                _isLoadingSetupStatus ||
+                                _isInstallingPackages ||
+                                _setupSessionSnapshot.running)
+                            ? null
+                            : _refreshStatus,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('刷新状态'),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _showSetupTerminal
+                    ? FilledButton.icon(
+                        onPressed:
+                            (_setupSessionSnapshot.running || _isInstallingPackages)
+                            ? null
+                            : _refreshStatus,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: Text(
+                          _setupSessionSnapshot.running ? '配置中...' : '刷新状态',
+                        ),
+                      )
+                    : FilledButton(
+                        onPressed:
+                            (_isInstallingPackages ||
+                                _isLoadingSetupStatus ||
+                                _setupSessionSnapshot.running ||
+                                !_isDeviceSupported ||
+                                !hasPendingSelection)
+                            ? null
+                            : _handleInstallPackages,
+                        child: _isInstallingPackages
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text('开始配置'),
+                      ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSetupTerminalPanel() {
+    final message = _setupSessionSnapshot.message.isNotEmpty
+        ? _setupSessionSnapshot.message
+        : (_isInstallingPackages ? '正在启动环境配置终端...' : '终端会话已准备就绪。');
+    final sessionId = _setupSessionSnapshot.sessionId?.trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFD),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x14000000)),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                _setupSessionSnapshot.running
+                    ? Icons.terminal_rounded
+                    : (_setupSessionSnapshot.success == true
+                          ? Icons.check_circle_rounded
+                          : Icons.info_outline_rounded),
+                size: 18,
+                color: _setupSessionSnapshot.running
+                    ? AppColors.buttonPrimary
+                    : (_setupSessionSnapshot.success == true
+                          ? const Color(0xFF1E9E63)
+                          : const Color(0xFF64748B)),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    color: AppColors.text,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            height: 420,
+            width: double.infinity,
+            color: const Color(0xFF111827),
+            child: (sessionId == null || sessionId.isEmpty)
+                ? const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 26,
+                          height: 26,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          '正在创建原生终端...',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : AndroidView(
+                    viewType: 'cn.com.omnimind.bot/embedded_terminal_view',
+                    creationParams: <String, Object>{
+                      'sessionId': sessionId,
+                    },
+                    creationParamsCodec: const StandardMessageCodec(),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSetupStatusBanner() {
+    final message = _buildSetupRuntimeMessage();
+    final Color backgroundColor;
+    final Color foregroundColor;
+
+    if (_isLoadingStatus || _isLoadingSetupStatus) {
+      backgroundColor = const Color(0x140F62FE);
+      foregroundColor = const Color(0xFF0F62FE);
+    } else if (!_isDeviceSupported) {
+      backgroundColor = const Color(0x14EF6B5F);
+      foregroundColor = const Color(0xFFB34A40);
+    } else if (!_isRuntimeReady) {
+      backgroundColor = const Color(0x14F59E0B);
+      foregroundColor = const Color(0xFFB45309);
+    } else {
+      backgroundColor = const Color(0x141E9E63);
+      foregroundColor = const Color(0xFF1E9E63);
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        message,
+        style: TextStyle(
+          color: foregroundColor,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          height: 1.55,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSetupCategoryCard(_SetupCategoryDefinition category) {
+    final expanded = _expandedSetupCategories[category.id] ?? false;
+    final allSelected = category.packages.every(
+      (pkg) =>
+          _installedSetupPackages[pkg.id] == true ||
+          _selectedSetupPackages[pkg.id] == true,
+    );
+    final installedCount = category.packages
+        .where((pkg) => _installedSetupPackages[pkg.id] == true)
+        .length;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFD),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0x14000000)),
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              setState(() {
+                _expandedSetupCategories[category.id] = !expanded;
+              });
+            },
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                category.name,
+                                style: const TextStyle(
+                                  color: AppColors.text,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            if (category.operitRequired) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0x14F59E0B),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: const Text(
+                                  'Operit 必须',
+                                  style: TextStyle(
+                                    color: Color(0xFFB45309),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          category.description,
+                          style: const TextStyle(
+                            color: Color(0xFF64748B),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '已安装 $installedCount / ${category.packages.length}',
+                          style: const TextStyle(
+                            color: AppColors.text70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Checkbox(
+                        value: allSelected,
+                        onChanged:
+                            (_isInstallingPackages || _isLoadingSetupStatus)
+                            ? null
+                            : (value) {
+                                _toggleCategorySelection(
+                                  category,
+                                  value == true,
+                                );
+                              },
+                      ),
+                      const Text(
+                        '全选',
+                        style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        expanded ? Icons.expand_less : Icons.expand_more,
+                        color: const Color(0xFF64748B),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (expanded) ...[
+            const Divider(height: 1, color: Color(0x14000000)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Column(
+                children: [
+                  for (final pkg in category.packages)
+                    _buildSetupPackageTile(pkg),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSetupPackageTile(_SetupPackageDefinition pkg) {
+    final installed = _installedSetupPackages[pkg.id] == true;
+    final selected = installed || _selectedSetupPackages[pkg.id] == true;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: (installed || _isInstallingPackages)
+          ? null
+          : () {
+              setState(() {
+                _selectedSetupPackages[pkg.id] = !selected;
+              });
+            },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Checkbox(
+              value: selected,
+              onChanged: (installed || _isInstallingPackages)
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _selectedSetupPackages[pkg.id] = value == true;
+                      });
+                    },
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          pkg.name,
+                          style: const TextStyle(
+                            color: AppColors.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (installed) ...[
+                        const SizedBox(width: 6),
+                        const Text(
+                          '(已安装)',
+                          style: TextStyle(
+                            color: Color(0xFF1E9E63),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    pkg.description,
+                    style: const TextStyle(
+                      color: Color(0xFF64748B),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -367,216 +1218,10 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildStatusAndActionsCard(),
+                _buildEnvironmentSetupCard(),
                 const SizedBox(height: 12),
                 _buildGatewayCard(),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusAndActionsCard() {
-    final runtimeActionText = _isLoadingStatus
-        ? '检测中'
-        : (!_isDeviceSupported
-              ? '不支持'
-              : (_isPreparingWrapper ? '打开中...' : '去配置'));
-    final runtimeActionColor = _isLoadingStatus
-        ? AppColors.text50
-        : (!_isDeviceSupported
-              ? const Color(0xFFB34A40)
-              : (_isPreparingWrapper
-                    ? const Color(0xFFD08A00)
-                    : const Color(0xFF1E9E63)));
-    final runtimeActionEnabled =
-        !_isLoadingStatus && _isDeviceSupported && !_isPreparingWrapper;
-
-    return _buildSectionCard(
-      title: '当前状态与操作',
-      child: Column(
-        children: [
-          _StatusActionRow(
-            title: 'Ubuntu 运行时与环境配置',
-            subtitle: _buildRuntimeSubtitle(),
-            actionText: runtimeActionText,
-            actionColor: runtimeActionColor,
-            onTap: runtimeActionEnabled ? _handlePrepareWrapper : null,
-          ),
-          const SizedBox(height: 14),
-          _buildPrepareActionButton(),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFD),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0x14000000)),
-            ),
-            child: const Text(
-              '点击后会直接进入终端内的“环境配置”页面，按分类安装 Node.js、Python、SSH 工具、Java 环境等组件。',
-              style: TextStyle(
-                color: AppColors.text70,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                height: 1.55,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildNodeAndPnpmStatusPanel(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNodeAndPnpmStatusPanel() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFD),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x14000000)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Node.js / PNPM 状态',
-            style: TextStyle(
-              color: AppColors.text,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _buildRuntimeToolStatusTile(
-            name: 'Node.js',
-            ready: _nodeReady,
-            detail: _nodeVersion?.isNotEmpty == true
-                ? 'v$_nodeVersion'
-                : '未检测到',
-            notReadyReason: _nodeVersion?.isNotEmpty == true
-                ? '版本过低，最低要求 v$_nodeMinMajor'
-                : '未安装或不可用',
-          ),
-          const SizedBox(height: 8),
-          _buildRuntimeToolStatusTile(
-            name: 'PNPM',
-            ready: _pnpmReady,
-            detail: _pnpmVersion?.isNotEmpty == true ? _pnpmVersion! : '未检测到',
-            notReadyReason: '未安装或不可用',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRuntimeToolStatusTile({
-    required String name,
-    required bool ready,
-    required String detail,
-    required String notReadyReason,
-  }) {
-    final badgeColor = ready
-        ? const Color(0x141E9E63)
-        : const Color(0x14EF6B5F);
-    final badgeTextColor = ready
-        ? const Color(0xFF1E9E63)
-        : const Color(0xFFB34A40);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '$name：$detail',
-                style: const TextStyle(
-                  color: AppColors.text,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: badgeColor,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                ready ? 'ready' : 'not ready',
-                style: TextStyle(
-                  color: badgeTextColor,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        if (!ready)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              notReadyReason,
-              style: const TextStyle(
-                color: Color(0xFFB34A40),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildPrepareActionButton() {
-    final bool disabled =
-        _isLoadingStatus || _isPreparingWrapper || !_isDeviceSupported;
-    final buttonText = _isPreparingWrapper
-        ? '正在打开环境配置...'
-        : (!_isDeviceSupported ? '当前设备不支持（仅 arm64-v8a）' : '打开终端环境配置');
-    final gradientColors = _isPreparingWrapper
-        ? const [Color(0xFF1930D9), Color(0xFF2DA5F0)]
-        : (!_isDeviceSupported
-              ? const [Color(0xFFBFC7D5), Color(0xFFA6AFBE)]
-              : const [Color(0xFF1E9E63), Color(0xFF45C07B)]);
-
-    return Material(
-      color: Colors.transparent,
-      child: Ink(
-        decoration: ShapeDecoration(
-          gradient: LinearGradient(
-            begin: const Alignment(0.14, -1.09),
-            end: const Alignment(1.10, 1.26),
-            colors: gradientColors,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: disabled ? null : _handlePrepareWrapper,
-          child: SizedBox(
-            width: double.infinity,
-            height: 46,
-            child: Center(
-              child: Text(
-                buttonText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
             ),
           ),
         ),
@@ -890,101 +1535,6 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
           ),
           const SizedBox(height: 14),
           child,
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusActionRow extends StatelessWidget {
-  static const double _subtitleSlotHeight = 36;
-  static const double _actionButtonMinWidth = 72;
-
-  const _StatusActionRow({
-    required this.title,
-    required this.subtitle,
-    required this.actionText,
-    required this.actionColor,
-    this.onTap,
-  });
-
-  final String title;
-  final String subtitle;
-  final String actionText;
-  final Color actionColor;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFD),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0x14000000)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: AppColors.text,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                SizedBox(
-                  height: _subtitleSlotHeight,
-                  child: Align(
-                    alignment: Alignment.topLeft,
-                    child: Text(
-                      subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppColors.text.withValues(alpha: 0.66),
-                        fontSize: 12,
-                        height: 1.5,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: onTap,
-            child: Container(
-              height: 36,
-              constraints: const BoxConstraints(
-                minWidth: _actionButtonMinWidth,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              decoration: BoxDecoration(
-                color: actionColor.withValues(alpha: enabled ? 0.14 : 0.10),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                actionText,
-                style: TextStyle(
-                  color: enabled
-                      ? actionColor
-                      : actionColor.withValues(alpha: 0.88),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

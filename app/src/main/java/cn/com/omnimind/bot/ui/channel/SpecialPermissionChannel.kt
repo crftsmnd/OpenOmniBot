@@ -102,6 +102,14 @@ class SpecialPermissionChannel {
                         .getWorkspacePathSnapshot(result)
                     "getEmbeddedTerminalRuntimeStatus" -> specialPermissionManager!!
                         .getEmbeddedTerminalRuntimeStatus(result)
+                    "getEmbeddedTerminalSetupStatus" -> specialPermissionManager!!
+                        .getEmbeddedTerminalSetupStatus(result)
+                    "getEmbeddedTerminalSetupSessionSnapshot" -> specialPermissionManager!!
+                        .getEmbeddedTerminalSetupSessionSnapshot(result)
+                    "installEmbeddedTerminalPackages" -> specialPermissionManager!!
+                        .installEmbeddedTerminalPackages(call, result)
+                    "startEmbeddedTerminalSetupSession" -> specialPermissionManager!!
+                        .startEmbeddedTerminalSetupSession(call, result)
                     "startOpenClawDeploy" -> specialPermissionManager!!
                         .startOpenClawDeploy(call, result)
                     "getOpenClawDeploySnapshot" -> specialPermissionManager!!
