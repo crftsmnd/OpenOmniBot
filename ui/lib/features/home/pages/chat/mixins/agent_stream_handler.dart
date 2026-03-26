@@ -27,6 +27,7 @@ mixin AgentStreamHandler<T extends StatefulWidget> on State<T> {
       <String, String>{
         '无障碍权限': kAccessibilityPermissionId,
         '悬浮窗权限': kOverlayPermissionId,
+        '应用列表读取权限': kInstalledAppsPermissionId,
       };
 
   String? _lastAgentTaskId;
