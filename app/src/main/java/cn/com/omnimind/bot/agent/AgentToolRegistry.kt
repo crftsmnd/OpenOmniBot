@@ -171,7 +171,7 @@ class AgentToolRegistry(
     }
 
     private fun toDynamicMcpToolDefinition(tool: RemoteMcpToolDescriptor): JsonObject {
-        return buildJsonObject {
+        return AgentToolDefinitions.decorateToolDefinition(buildJsonObject {
             put("type", JsonPrimitive("function"))
             put("function", buildJsonObject {
                 put("name", JsonPrimitive(tool.encodedToolName))
@@ -184,7 +184,7 @@ class AgentToolRegistry(
                 )
                 put("parameters", mapToJsonElement(tool.inputSchema))
             })
-        }
+        })
     }
 
     private fun mapToJsonElement(value: Any?): JsonElement {

@@ -1737,17 +1737,18 @@ class AgentToolRouter(
         callback: AgentCallback
     ): ToolExecutionResult {
         return try {
+            val toolTitle = args["tool_title"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
             reportToolProgress(
                 callback,
                 remoteTool.encodedToolName,
-                "正在调用 ${remoteTool.serverName} 的 ${remoteTool.toolName}"
+                toolTitle.ifBlank { "正在调用 ${remoteTool.serverName} 的 ${remoteTool.toolName}" }
             )
             val config = RemoteMcpConfigStore.getServer(remoteTool.serverId)
                 ?: throw IllegalStateException("Remote MCP server not found")
             val result = RemoteMcpClient.callTool(
                 config = config,
                 toolName = remoteTool.toolName,
-                arguments = jsonObjectToMap(args)
+                arguments = jsonObjectToMap(args).filterKeys { it != "tool_title" }
             )
             ToolExecutionResult.McpResult(
                 toolName = remoteTool.encodedToolName,

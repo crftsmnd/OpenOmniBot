@@ -378,6 +378,7 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                               key: _inputAreaKey,
                               child: ChatInputWrapper(
                                 inputAreaKey: _chatInputAreaKey,
+                                messages: _messages,
                                 controller: _messageController,
                                 focusNode: _inputFocusNode,
                                 isProcessing: _isAiResponding,
@@ -499,10 +500,11 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     if (!mounted || nextThreshold == null) return;
     if (nextThreshold == conversation.promptTokenThreshold) return;
 
-    final success = await ConversationService.updateConversationPromptTokenThreshold(
-      conversationId: conversation.id,
-      promptTokenThreshold: nextThreshold,
-    );
+    final success =
+        await ConversationService.updateConversationPromptTokenThreshold(
+          conversationId: conversation.id,
+          promptTokenThreshold: nextThreshold,
+        );
     if (!mounted) return;
     if (!success) {
       _showSnackBar('更新压缩阈值失败');
@@ -561,7 +563,8 @@ class _ContextThresholdDialog extends StatefulWidget {
   final int initialThreshold;
 
   @override
-  State<_ContextThresholdDialog> createState() => _ContextThresholdDialogState();
+  State<_ContextThresholdDialog> createState() =>
+      _ContextThresholdDialogState();
 }
 
 class _ContextThresholdDialogState extends State<_ContextThresholdDialog> {
@@ -572,7 +575,9 @@ class _ContextThresholdDialogState extends State<_ContextThresholdDialog> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialThreshold.toString());
+    _controller = TextEditingController(
+      text: widget.initialThreshold.toString(),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _focusNode.requestFocus();
@@ -681,10 +686,7 @@ class _ContextThresholdDialogState extends State<_ContextThresholdDialog> {
             onPressed: () => _close(_kDefaultContextTokenThreshold),
             child: const Text('恢复默认'),
           ),
-          TextButton(
-            onPressed: () => _close(),
-            child: const Text('取消'),
-          ),
+          TextButton(onPressed: () => _close(), child: const Text('取消')),
           TextButton(
             onPressed: () {
               final parsed = _parseInput();
