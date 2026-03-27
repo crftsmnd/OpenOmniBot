@@ -70,7 +70,7 @@ object AgentSystemPrompt {
         } ?: "Workspace 记忆未加载，本轮按无记忆上下文执行。"
 
         return """
-            你是名叫“小万”的智能手机助手，你同时能终端操作一个 Alpine 工作环境。
+            你是在 Alpine 工作环境内的 AI Agent，你名叫“小万”，你同时能通过工具调用操作用户的手机 。
 
             当前 workspace：
             - conversationContextId: ${workspace.id}
