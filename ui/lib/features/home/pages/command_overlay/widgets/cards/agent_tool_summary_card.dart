@@ -1080,6 +1080,12 @@ class _TerminalOutputBlock extends StatelessWidget {
         !WidgetsBinding.instance.runtimeType.toString().contains('Test') &&
         defaultTargetPlatform == TargetPlatform.android &&
         ((terminalSessionId?.isNotEmpty ?? false) || content.isNotEmpty);
+    final isLiveTerminalSession =
+        (terminalSessionId?.isNotEmpty ?? false) &&
+        (streamState == 'starting' || streamState == 'running');
+    final nativeTerminalViewKey = isLiveTerminalSession
+        ? 'agent_terminal_live_${terminalSessionId}_$streamState'
+        : 'agent_terminal_${terminalSessionId ?? "static"}_${streamState}_${content.hashCode}';
 
     return Column(
       key: _toolCardTerminalBlockKey,
@@ -1119,9 +1125,7 @@ class _TerminalOutputBlock extends StatelessWidget {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: AndroidView(
-                      key: ValueKey<String>(
-                        'agent_terminal_${terminalSessionId ?? "static"}_${streamState}_${content.hashCode}',
-                      ),
+                      key: ValueKey<String>(nativeTerminalViewKey),
                       viewType:
                           'cn.com.omnimind.bot/embedded_terminal_view',
                       creationParams: <String, dynamic>{
