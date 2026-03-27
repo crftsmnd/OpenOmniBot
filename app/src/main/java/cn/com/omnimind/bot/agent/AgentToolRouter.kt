@@ -529,9 +529,9 @@ class AgentToolRouter(
             reportToolProgress(
                 callback,
                 toolName,
-                "正在调用内嵌 Ubuntu 终端执行命令",
+                "正在调用内嵌 Alpine 终端执行命令",
                 mapOf(
-                    "summary" to "正在调用内嵌 Ubuntu 终端执行命令",
+                    "summary" to "正在调用内嵌 Alpine 终端执行命令",
                     "terminalStreamState" to "starting"
                 )
             )
@@ -551,13 +551,13 @@ class AgentToolRouter(
                         callback,
                         toolName,
                         if (outputDelta.isBlank()) {
-                            "正在调用内嵌 Ubuntu 终端执行命令"
+                            "正在调用内嵌 Alpine 终端执行命令"
                         } else {
                             "终端输出更新中"
                         },
                         mapOf(
                             "summary" to if (outputDelta.isBlank()) {
-                                "正在调用内嵌 Ubuntu 终端执行命令"
+                                "正在调用内嵌 Alpine 终端执行命令"
                             } else {
                                 "终端输出更新中"
                             },
@@ -2439,18 +2439,8 @@ class AgentToolRouter(
     }
 
     private fun buildDirectTerminalTranscript(session: TerminalSessionData): String {
-        val lines = session.ansiParser.getFullContent().map { row ->
-            buildString(row.size) {
-                row.forEach { terminalChar ->
-                    append(terminalChar.char)
-                }
-            }.trimEnd()
-        }.toMutableList()
-        while (lines.isNotEmpty() && lines.last().isBlank()) {
-            lines.removeAt(lines.lastIndex)
-        }
         return EmbeddedTerminalRuntime.trimTerminalOutput(
-            EmbeddedTerminalRuntime.sanitizeTerminalNoise(lines.joinToString("\n").trim('\n'))
+            EmbeddedTerminalRuntime.sanitizeTerminalNoise(session.transcript.trim('\n'))
         )
     }
 
@@ -2582,7 +2572,7 @@ class AgentToolRouter(
             ) { "executionMode 仅支持 termux 或 proot" }
         }
 
-        // 终端能力固定在 Ubuntu proot 运行，避免模型误传 termux 导致偏离预期环境。
+        // 终端能力固定在 Alpine proot 运行，避免模型误传 termux 导致偏离预期环境。
         val executionMode = TermuxCommandSpec.EXECUTION_MODE_PROOT
         val prootDistro = TermuxCommandSpec.DEFAULT_PROOT_DISTRO
 

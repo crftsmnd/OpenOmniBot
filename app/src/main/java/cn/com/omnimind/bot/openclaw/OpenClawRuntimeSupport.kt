@@ -8,6 +8,7 @@ import androidx.security.crypto.MasterKey
 import cn.com.omnimind.bot.termux.TermuxCommandRunner
 import cn.com.omnimind.bot.termux.TermuxCommandSpec
 import com.ai.assistance.operit.terminal.provider.filesystem.PRootMountMapping
+import com.rk.libcommons.localBinDir
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
@@ -91,15 +92,20 @@ object OpenClawRuntimeSupport {
         return securePrefs(context).getString(KEY_PROVIDER_API_KEY, null)?.trim()?.takeIf { it.isNotEmpty() }
     }
 
+    fun embeddedRootfsDir(context: Context): File {
+        return File(context.filesDir.parentFile, "local/alpine")
+    }
+
+    @Deprecated("Use embeddedRootfsDir() instead.")
     fun ubuntuRootfsDir(context: Context): File {
-        return File(context.filesDir, "usr/var/lib/proot-distro/installed-rootfs/ubuntu")
+        return embeddedRootfsDir(context)
     }
 
     fun mapLinuxPathToHostFile(context: Context, linuxPath: String): File {
-        val ubuntuRoot = ubuntuRootfsDir(context)
+        val rootfsRoot = embeddedRootfsDir(context)
         val hostPath = PRootMountMapping.mapLinuxPathToHostPath(
             linuxPath = linuxPath,
-            ubuntuRoot = ubuntuRoot,
+            rootfsRoot = rootfsRoot,
             homeDir = context.filesDir.absolutePath,
             workspaceDir = File(context.applicationInfo.dataDir, "workspace").absolutePath,
             appDataDir = context.applicationInfo.dataDir,
@@ -118,15 +124,15 @@ object OpenClawRuntimeSupport {
     fun openClawCompatHostDir(context: Context): File = mapLinuxPathToHostFile(context, OPENCLAW_DIR_PATH)
 
     fun openClawPackageJsonHostFile(context: Context): File {
-        return File(ubuntuRootfsDir(context), "usr/local/lib/node_modules/openclaw/package.json")
+        return File(embeddedRootfsDir(context), "usr/local/lib/node_modules/openclaw/package.json")
     }
 
     fun npmCliHostFile(context: Context): File {
-        return File(ubuntuRootfsDir(context), "usr/local/lib/node_modules/npm/bin/npm-cli.js")
+        return File(embeddedRootfsDir(context), "usr/local/lib/node_modules/npm/bin/npm-cli.js")
     }
 
     fun nodeModulesHostPath(context: Context): File {
-        return File(ubuntuRootfsDir(context), "usr/local/lib/node_modules")
+        return File(embeddedRootfsDir(context), "usr/local/lib/node_modules")
     }
 
     fun nodeLayoutNeedsRepair(context: Context): Boolean {
@@ -139,7 +145,7 @@ object OpenClawRuntimeSupport {
     }
 
     fun openClawWrapperHostFile(context: Context): File {
-        return File(ubuntuRootfsDir(context), "usr/local/bin/openclaw")
+        return File(embeddedRootfsDir(context), "usr/local/bin/openclaw")
     }
 
     fun nodeTarballGuestPath(): String {
@@ -163,7 +169,7 @@ object OpenClawRuntimeSupport {
     }
 
     fun ensureRuntimeFiles(context: Context) {
-        val rootfsDir = ubuntuRootfsDir(context)
+        val rootfsDir = embeddedRootfsDir(context)
         if (!rootfsDir.exists()) {
             return
         }
@@ -178,10 +184,11 @@ object OpenClawRuntimeSupport {
         ensureGitConfig(context)
         ensureBashrcExport(context)
         ensureGatewayLogFile(context)
+        ensureEmbeddedShellScripts(context)
     }
 
     fun ensureResolvConf(context: Context) {
-        val rootfsResolv = File(ubuntuRootfsDir(context), "etc/resolv.conf")
+        val rootfsResolv = File(embeddedRootfsDir(context), "etc/resolv.conf")
         if (rootfsResolv.exists() && rootfsResolv.length() > 0L) {
             return
         }
@@ -372,7 +379,7 @@ object OpenClawRuntimeSupport {
     }
 
     fun buildGatewayProcessBuilder(context: Context, providerApiKey: String): ProcessBuilder {
-        val bashPath = resolveHostBashPath(context)
+        val initHost = ensureEmbeddedShellScripts(context)
         val gatewayCommand = listOf(
             "export NODE_OPTIONS=\"--require /root/.openclaw/bionic-bypass.js\"",
             "export $PROVIDER_API_KEY_ENV=${quoteShell(providerApiKey)}",
@@ -380,9 +387,13 @@ object OpenClawRuntimeSupport {
             "touch /root/openclaw.log",
             "exec openclaw gateway run --port $GATEWAY_PORT"
         ).joinToString("\n")
-        val startScript =
-            "source \$HOME/common.sh && install_ubuntu && configure_sources && fix_permissions && login_ubuntu ${quoteShell(gatewayCommand)}"
-        val builder = ProcessBuilder(bashPath, "-c", startScript)
+        val builder = ProcessBuilder(
+            "/system/bin/sh",
+            initHost.absolutePath,
+            "/bin/sh",
+            "-lc",
+            gatewayCommand
+        )
         builder.directory(context.filesDir)
         builder.redirectErrorStream(false)
         val environment = builder.environment()
@@ -523,13 +534,10 @@ object OpenClawRuntimeSupport {
     }
 
     private fun ensureInstallScaffolding(context: Context) {
-        val rootfsDir = ubuntuRootfsDir(context)
+        val rootfsDir = embeddedRootfsDir(context)
         val paths = listOf(
             "/etc/ssl/certs",
-            "/usr/share/keyrings",
-            "/etc/apt/sources.list.d",
-            "/var/lib/dpkg/updates",
-            "/var/lib/dpkg/triggers",
+            "/var/cache/apk",
             "/tmp",
             "/tmp/npm-cache/_cacache/tmp",
             "/tmp/npm-cache/_cacache/content-v2",
@@ -567,13 +575,6 @@ object OpenClawRuntimeSupport {
             machineId.writeText("10000000000000000000000000000000\n", StandardCharsets.UTF_8)
         }
 
-        val policyRc = mapLinuxPathToHostFile(context, "/usr/sbin/policy-rc.d")
-        if (!policyRc.exists()) {
-            policyRc.parentFile?.mkdirs()
-            policyRc.writeText("#!/bin/sh\nexit 101\n", StandardCharsets.UTF_8)
-            policyRc.setExecutable(true, false)
-        }
-
         val fakeProcDir = File(rootfsDir, "proc")
         fakeProcDir.mkdirs()
         val fakeSysEmptyDir = File(rootfsDir, "sys/.empty")
@@ -582,6 +583,27 @@ object OpenClawRuntimeSupport {
         if (!fipsEnabledFile.exists()) {
             fipsEnabledFile.writeText("0\n", StandardCharsets.UTF_8)
         }
+    }
+
+    private fun ensureEmbeddedShellScripts(context: Context): File {
+        val initHost = localBinDir().resolve("init-host")
+        if (!initHost.exists()) {
+            initHost.parentFile?.mkdirs()
+            context.assets.open("init-host.sh").use { input ->
+                initHost.outputStream().use { output -> input.copyTo(output) }
+            }
+            initHost.setExecutable(true, false)
+        }
+
+        val init = localBinDir().resolve("init")
+        if (!init.exists()) {
+            context.assets.open("init.sh").use { input ->
+                init.outputStream().use { output -> input.copyTo(output) }
+            }
+            init.setExecutable(true, false)
+        }
+
+        return initHost
     }
 
     private fun writeCompatScripts(context: Context) {

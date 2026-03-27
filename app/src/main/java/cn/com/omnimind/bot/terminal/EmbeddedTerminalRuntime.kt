@@ -118,12 +118,12 @@ object EmbeddedTerminalRuntime {
     private val sessionHandles = ConcurrentHashMap<String, SessionHandle>()
     private val packageInstallMutex = Mutex()
     private val requiredCliCommands = listOf(
+        "bash",
         "curl",
         "fuser",
         "git",
         "node",
         "npm",
-        "pipx",
         "pkill",
         "python",
         "python3",
@@ -141,27 +141,29 @@ object EmbeddedTerminalRuntime {
     )
 
     private val basePackageBootstrapCommand = """
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update &&
-        apt-get install -y \
+        export PATH="${'$'}HOME/.local/bin:${'$'}PATH"
+        apk update &&
+        apk add --no-cache \
+          bash \
           ca-certificates \
           curl \
+          gcompat \
           git \
+          glib \
           nodejs \
           npm \
-          pipx \
           procps \
           psmisc \
-          python-is-python3 \
           python3 \
-          python3-pip \
-          python3-venv \
+          py3-pip \
+          py3-virtualenv \
           ripgrep \
           tmux \
-          xz-utils && \
-        export PATH="${'$'}HOME/.local/bin:${'$'}PATH" && \
+          xz && \
+        ln -sf /usr/bin/python3 /usr/local/bin/python || true && \
+        python3 -m pip install --upgrade pip >/dev/null 2>&1 || true && \
+        python3 -m pip install --upgrade uv >/dev/null 2>&1 || true && \
         npm install -g pnpm --no-audit --no-fund >/dev/null 2>&1 || true && \
-        pipx install uv --force && \
         if [ -x "${'$'}HOME/.local/bin/uv" ]; then ln -sf "${'$'}HOME/.local/bin/uv" /usr/local/bin/uv; fi && \
         if [ -x "${'$'}HOME/.local/bin/uvx" ]; then ln -sf "${'$'}HOME/.local/bin/uvx" /usr/local/bin/uvx; fi
     """.trimIndent()
@@ -191,7 +193,7 @@ object EmbeddedTerminalRuntime {
                 runtimeReady = false,
                 basePackagesReady = false,
                 missingCommands = emptyList(),
-                message = "当前设备 ABI 不受支持，内嵌 Ubuntu 终端仅支持 arm64-v8a。",
+                message = "当前设备 ABI 不受支持，内嵌 Alpine 终端仅支持 arm64-v8a。",
                 nodeReady = false,
                 nodeVersion = null,
                 nodeMinMajor = NODE_MIN_MAJOR,
@@ -211,7 +213,7 @@ object EmbeddedTerminalRuntime {
                 runtimeReady = false,
                 basePackagesReady = false,
                 missingCommands = emptyList(),
-                message = environmentStatus.message.ifBlank { "内嵌 Ubuntu 终端初始化失败。" },
+                message = environmentStatus.message.ifBlank { "内嵌 Alpine 终端初始化失败。" },
                 nodeReady = false,
                 nodeVersion = null,
                 nodeMinMajor = NODE_MIN_MAJOR,
@@ -243,9 +245,9 @@ object EmbeddedTerminalRuntime {
             ensureOpenClawCompatRuntime(context)
             val readyMessage =
                 if (probeResult.nodeReady && probeResult.pnpmReady) {
-                    "内嵌 Ubuntu 终端和基础 Agent CLI 包均已就绪。"
+                    "内嵌 Alpine 终端和基础 Agent CLI 包均已就绪。"
                 } else {
-                    "内嵌 Ubuntu 终端和基础 Agent CLI 包已就绪；Node.js/PNPM 状态可在环境页查看。"
+                    "内嵌 Alpine 终端和基础 Agent CLI 包已就绪；Node.js/PNPM 状态可在环境页查看。"
                 }
             return RuntimeReadinessStatus(
                 supported = true,
@@ -285,14 +287,14 @@ object EmbeddedTerminalRuntime {
                 onProgress,
                 EnvironmentProgress(
                     kind = EnvironmentProgress.Kind.ERROR,
-                    message = "当前设备 ABI 不受支持，内嵌 Ubuntu 终端仅支持 arm64-v8a。"
+                    message = "当前设备 ABI 不受支持，内嵌 Alpine 终端仅支持 arm64-v8a。"
                 )
             )
             return EnvironmentStatus(
                 success = false,
                 initialized = false,
                 basePackagesReady = false,
-                message = "当前设备 ABI 不受支持，内嵌 Ubuntu 终端仅支持 arm64-v8a。"
+                message = "当前设备 ABI 不受支持，内嵌 Alpine 终端仅支持 arm64-v8a。"
             )
         }
 
@@ -330,14 +332,14 @@ object EmbeddedTerminalRuntime {
                 onProgress,
                 EnvironmentProgress(
                     kind = EnvironmentProgress.Kind.ERROR,
-                    message = "内嵌 Ubuntu 终端初始化失败。"
+                    message = "内嵌 Alpine 终端初始化失败。"
                 )
             )
             return EnvironmentStatus(
                 success = false,
                 initialized = false,
                 basePackagesReady = isBasePackagesReady(context),
-                message = "内嵌 Ubuntu 终端初始化失败。"
+                message = "内嵌 Alpine 终端初始化失败。"
             )
         }
 
@@ -349,9 +351,9 @@ object EmbeddedTerminalRuntime {
                 EnvironmentProgress(
                     kind = EnvironmentProgress.Kind.STATUS,
                     message = if (basePackagesReady) {
-                        "内嵌 Ubuntu 终端已就绪。"
+                        "内嵌 Alpine 终端已就绪。"
                     } else {
-                        "内嵌 Ubuntu 终端已就绪，基础 Agent CLI 包尚未完成预装。"
+                        "内嵌 Alpine 终端已就绪，基础 Agent CLI 包尚未完成预装。"
                     }
                 )
             )
@@ -360,9 +362,9 @@ object EmbeddedTerminalRuntime {
                 initialized = true,
                 basePackagesReady = basePackagesReady,
                 message = if (basePackagesReady) {
-                    "内嵌 Ubuntu 终端已就绪。"
+                    "内嵌 Alpine 终端已就绪。"
                 } else {
-                    "内嵌 Ubuntu 终端已就绪，基础 Agent CLI 包尚未完成预装。"
+                    "内嵌 Alpine 终端已就绪，基础 Agent CLI 包尚未完成预装。"
                 }
             )
         }
@@ -390,7 +392,7 @@ object EmbeddedTerminalRuntime {
                     success = true,
                     initialized = true,
                     basePackagesReady = true,
-                    message = "内嵌 Ubuntu 终端和基础 Agent CLI 包均已就绪。"
+                    message = "内嵌 Alpine 终端和基础 Agent CLI 包均已就绪。"
                 )
             }
 
@@ -452,7 +454,7 @@ object EmbeddedTerminalRuntime {
                         success = true,
                         initialized = true,
                         basePackagesReady = true,
-                        message = "内嵌 Ubuntu 终端和基础 Agent CLI 包均已就绪。"
+                        message = "内嵌 Alpine 终端和基础 Agent CLI 包均已就绪。"
                     )
                 }
                 val failureMessage = postInstallProbe.errorMessage
@@ -526,7 +528,7 @@ object EmbeddedTerminalRuntime {
         onLiveUpdate(
             TermuxLiveUpdate(
                 sessionId = liveSessionId,
-                summary = "正在执行内嵌 Ubuntu 终端命令",
+                summary = "正在执行内嵌 Alpine 终端命令",
                 streamState = "running"
             )
         )
@@ -1153,20 +1155,8 @@ object EmbeddedTerminalRuntime {
     }
 
     private fun buildTranscript(session: TerminalSessionData): String {
-        val lines = session.ansiParser.getFullContent().map { row ->
-            buildString(row.size) {
-                row.forEach { terminalChar ->
-                    append(terminalChar.char)
-                }
-            }.trimEnd()
-        }.toMutableList()
-
-        while (lines.isNotEmpty() && lines.last().isBlank()) {
-            lines.removeAt(lines.lastIndex)
-        }
-
         return trimTerminalOutput(
-            sanitizeTerminalNoise(lines.joinToString("\n").trim('\n'))
+            sanitizeTerminalNoise(session.transcript.trim('\n'))
         )
     }
 
@@ -1348,14 +1338,14 @@ object EmbeddedTerminalRuntime {
             result.error.isNotBlank() -> result.error
             else -> "未知错误"
         }
-        return "内嵌 Ubuntu 终端已初始化，但基础 Agent CLI 包安装失败：$details"
+        return "内嵌 Alpine 终端已初始化，但基础 Agent CLI 包安装失败：$details"
     }
 
     private fun buildMissingBasePackageFailureMessage(missingCommands: List<String>): String {
         if (missingCommands.isEmpty()) {
-            return "内嵌 Ubuntu 终端已初始化，但基础 Agent CLI 包安装后仍未通过校验。"
+            return "内嵌 Alpine 终端已初始化，但基础 Agent CLI 包安装后仍未通过校验。"
         }
-        return "内嵌 Ubuntu 终端已初始化，但基础 Agent CLI 包仍缺失：${missingCommands.joinToString(", ")}"
+        return "内嵌 Alpine 终端已初始化，但基础 Agent CLI 包仍缺失：${missingCommands.joinToString(", ")}"
     }
 
     private fun shouldSuppressTerminalLine(line: String): Boolean {

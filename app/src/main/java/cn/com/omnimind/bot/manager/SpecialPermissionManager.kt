@@ -33,17 +33,20 @@ class SpecialPermissionManager(private val context: Context) {
         private const val TAG = "[PlatformManager]"
         private const val MAX_INIT_LOG_LINES = 160
         private val BASE_PACKAGE_NAMES = listOf(
+            "bash",
             "ca-certificates",
             "curl",
             "git",
+            "gcompat",
+            "glib",
             "nodejs",
             "npm",
-            "python-is-python3",
             "python3",
-            "python3-pip",
-            "python3-venv",
+            "py3-pip",
+            "py3-virtualenv",
             "ripgrep",
-            "tmux"
+            "tmux",
+            "xz"
         )
     }
 
@@ -626,7 +629,7 @@ class SpecialPermissionManager(private val context: Context) {
         resetEmbeddedTerminalInitState()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                emitEmbeddedTerminalInitProgress("status", "开始准备内嵌 Ubuntu 终端环境")
+                emitEmbeddedTerminalInitProgress("status", "开始准备内嵌 Alpine 终端环境")
                 val status =
                     TermuxCommandRunner.prepareLiveEnvironment(context) { progress ->
                         emitEmbeddedTerminalInitProgress(
@@ -712,7 +715,7 @@ class SpecialPermissionManager(private val context: Context) {
                 success = null,
                 progress = 0.02,
                 stage = "准备开始",
-                logLines = listOf("[系统] 正在启动内嵌 Ubuntu 环境初始化..."),
+                logLines = listOf("[系统] 正在启动内嵌 Alpine 环境初始化..."),
                 startedAt = now,
                 updatedAt = now
             )
@@ -782,7 +785,7 @@ class SpecialPermissionManager(private val context: Context) {
     ) {
         val normalizedMessage = finalMessage.trim().ifBlank {
             if (success) {
-                "内嵌 Ubuntu 终端和基础 Agent CLI 包均已就绪。"
+                "内嵌 Alpine 终端和基础 Agent CLI 包均已就绪。"
             } else {
                 "检查内嵌终端环境失败"
             }
@@ -864,7 +867,10 @@ class SpecialPermissionManager(private val context: Context) {
             lowerCaseLines.any { line ->
                 line.contains(lowerPackageName) &&
                     (
-                        line.contains("get:") ||
+                        line.contains("fetch ") ||
+                            line.contains("installing ") ||
+                            line.contains("upgrading ") ||
+                            line.contains("get:") ||
                             line.contains("selecting previously") ||
                             line.contains("unpacking") ||
                             line.contains("setting up") ||
@@ -883,14 +889,11 @@ class SpecialPermissionManager(private val context: Context) {
         val normalizedMessage = message.trim()
         val stageProgress =
             when {
-                normalizedMessage.contains("开始准备内嵌 Ubuntu 终端环境") -> 0.04
+                normalizedMessage.contains("开始准备内嵌 Alpine 终端环境") -> 0.04
                 normalizedMessage.contains("正在准备 workspace 和运行目录") -> 0.10
                 normalizedMessage.contains("正在初始化宿主终端运行时") -> 0.14
-                normalizedMessage.contains("正在创建终端运行目录") -> 0.20
-                normalizedMessage.contains("正在准备 busybox/proot/bash") -> 0.30
-                normalizedMessage.contains("正在解压 Ubuntu 运行资源") -> 0.42
-                normalizedMessage.contains("正在生成启动脚本") -> 0.54
-                normalizedMessage.contains("终端运行时初始化完成") -> 0.60
+                normalizedMessage.contains("正在校验 Alpine 终端运行资源") -> 0.24
+                normalizedMessage.contains("正在安装 Alpine 终端运行资源") -> 0.42
                 normalizedMessage.contains("宿主终端环境校验完成") -> 0.60
                 normalizedMessage.contains("正在检查基础 Agent CLI 包") -> 0.68
                 normalizedMessage.contains("基础 Agent CLI 包已就绪") -> 0.96
@@ -907,16 +910,20 @@ class SpecialPermissionManager(private val context: Context) {
             return currentProgress
         }
 
-        if (normalizedMessage.contains("Reading package lists")) {
+        if (normalizedMessage.contains("fetch ", ignoreCase = true)) {
             return 0.74
         }
-        if (normalizedMessage.contains("Building dependency tree")) {
+        if (normalizedMessage.contains("installing ", ignoreCase = true)) {
             return 0.76
         }
-        if (normalizedMessage.contains("Reading state information")) {
+        if (normalizedMessage.contains("upgrading ", ignoreCase = true) ||
+            normalizedMessage.contains("executing busybox", ignoreCase = true)
+        ) {
             return 0.78
         }
-        if (normalizedMessage.contains("Need to get")) {
+        if (normalizedMessage.contains("npm install -g pnpm", ignoreCase = true) ||
+            normalizedMessage.contains("python3 -m pip install", ignoreCase = true)
+        ) {
             return 0.80
         }
         if (normalizedMessage.contains("Fetched ")) {

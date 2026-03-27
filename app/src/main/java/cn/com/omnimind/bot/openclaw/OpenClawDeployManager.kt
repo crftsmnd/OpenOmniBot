@@ -152,7 +152,7 @@ class OpenClawDeployManager(
             val readiness = EmbeddedTerminalRuntime.inspectRuntimeReadiness(context)
             if (!readiness.supported || !readiness.runtimeReady) {
                 fail(
-                    "内嵌 Ubuntu 运行时尚未完成初始化，请先打开终端环境配置完成初始化后再试。",
+                    "内嵌 Alpine 运行时尚未完成初始化，请先打开终端环境配置完成初始化后再试。",
                     stage = "运行时未就绪",
                     progress = 0.05
                 )
@@ -329,7 +329,7 @@ class OpenClawDeployManager(
             timeoutSeconds = 120
         )
         if (result.success) {
-            updateState(appendLines = listOf("[完成] OpenClaw 配置已通过 Ubuntu 内写入"))
+            updateState(appendLines = listOf("[完成] OpenClaw 配置已通过 Alpine 内写入"))
             return
         }
         val fallbackFile = OpenClawRuntimeSupport.openClawConfigHostFile(context)
@@ -337,7 +337,7 @@ class OpenClawDeployManager(
         fallbackFile.writeText(normalizedConfigJson)
         updateState(
             appendLines = listOf(
-                "[系统] Ubuntu 内写入失败，已自动切换为 rootfs 直写兜底。",
+                "[系统] Alpine 内写入失败，已自动切换为 rootfs 直写兜底。",
                 "[完成] openclaw.json 已写入 ${fallbackFile.absolutePath}"
             )
         )
@@ -369,9 +369,8 @@ class OpenClawDeployManager(
         val quotedTarballPath = quoteShell(nodeTarballPath)
         return """
             set -euo pipefail
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y ca-certificates curl procps psmisc xz-utils
+            apk update
+            apk add --no-cache ca-certificates curl procps psmisc xz
 
             NODE_MAJOR=0
             if command -v node >/dev/null 2>&1; then

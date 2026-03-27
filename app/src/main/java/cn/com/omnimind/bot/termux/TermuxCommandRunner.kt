@@ -16,7 +16,7 @@ data class TermuxCommandSpec(
     companion object {
         const val EXECUTION_MODE_TERMUX = "termux"
         const val EXECUTION_MODE_PROOT = "proot"
-        const val DEFAULT_PROOT_DISTRO = "ubuntu"
+        const val DEFAULT_PROOT_DISTRO = "alpine"
         const val DEFAULT_TIMEOUT_SECONDS = 60
     }
 }

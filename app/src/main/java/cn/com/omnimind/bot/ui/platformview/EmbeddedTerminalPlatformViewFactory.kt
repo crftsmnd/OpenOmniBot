@@ -1,11 +1,20 @@
 package cn.com.omnimind.bot.ui.platformview
 
 import android.content.Context
+import android.graphics.Typeface
+import android.util.Log
+import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
+import android.widget.FrameLayout
+import android.widget.TextView
 import com.ai.assistance.operit.terminal.TerminalManager
-import com.ai.assistance.operit.terminal.view.canvas.CanvasTerminalView
-import com.ai.assistance.operit.terminal.view.domain.ansi.AnsiTerminalEmulator
+import com.rk.settings.Settings
+import com.termux.terminal.TerminalEmulator
+import com.termux.terminal.TerminalSession
+import com.termux.view.TerminalView
+import com.termux.view.TerminalViewClient
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
@@ -36,11 +45,7 @@ class EmbeddedTerminalPlatformViewFactory : PlatformViewFactory(StandardMessageC
         }
     }
 
-    override fun create(
-        context: Context,
-        viewId: Int,
-        args: Any?
-    ): PlatformView {
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         val params = args as? Map<*, *>
         val sessionId = params?.get("sessionId")?.toString()?.trim().orEmpty()
         val transcript = params?.get("transcript")?.toString().orEmpty()
@@ -59,55 +64,137 @@ private class EmbeddedTerminalPlatformView(
 ) : PlatformView {
     private val terminalManager = TerminalManager.getInstance(hostContext.applicationContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val terminalView = CanvasTerminalView(hostContext).apply {
-        setFullscreenMode(false)
-        setSessionScrollCallbacks(
-            sessionId = sessionId,
-            onScrollOffsetChanged = { id, offset ->
-                terminalManager.saveScrollOffset(id, offset)
-            },
-            getScrollOffset = { id ->
-                terminalManager.getScrollOffset(id)
-            }
-        )
-        setOnTouchListener { v, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> v.parent?.requestDisallowInterceptTouchEvent(true)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.parent?.requestDisallowInterceptTouchEvent(false)
-                }
-            }
-            false
-        }
+    private val container = FrameLayout(hostContext)
+    private val terminalView = TerminalView(hostContext, null).apply {
+        setTerminalViewClient(NoOpTerminalViewClient())
+        setTextSize(Settings.terminal_font_size)
+        setTypeface(Typeface.MONOSPACE)
     }
-
-    private fun renderTranscriptFallback() {
-        val emulator = AnsiTerminalEmulator()
-        if (transcript.isNotBlank()) {
-            emulator.parse(transcript)
-        }
-        terminalView.setEmulator(emulator)
-        terminalView.setPty(null)
+    private val transcriptView = TextView(hostContext).apply {
+        typeface = Typeface.MONOSPACE
+        textSize = Settings.terminal_font_size.toFloat()
+        setTextIsSelectable(true)
+        text = transcript
     }
 
     init {
+        container.addView(
+            transcriptView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
         scope.launch {
             terminalManager.terminalState.collectLatest { state ->
                 val session = state.sessions.find { it.id == sessionId }
-                if (session != null) {
-                    terminalView.setEmulator(session.ansiParser)
-                    terminalView.setPty(session.pty)
+                val liveSession = terminalManager.getTerminalSession(sessionId)
+                if (session != null && liveSession != null) {
+                    attachLiveSession(liveSession)
                 } else {
-                    renderTranscriptFallback()
+                    showTranscript(session?.transcript ?: transcript)
                 }
             }
         }
     }
 
-    override fun getView(): View = terminalView
+    private fun attachLiveSession(session: TerminalSession) {
+        if (terminalView.parent == null) {
+            container.removeAllViews()
+            container.addView(
+                terminalView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+        terminalView.attachSession(session)
+        terminalView.onScreenUpdated()
+    }
+
+    private fun showTranscript(text: String) {
+        transcriptView.text = text
+        if (transcriptView.parent == null) {
+            container.removeAllViews()
+            container.addView(
+                transcriptView,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            )
+        }
+    }
+
+    override fun getView(): View = container
 
     override fun dispose() {
         scope.cancel()
-        terminalView.release()
+    }
+}
+
+private class NoOpTerminalViewClient : TerminalViewClient {
+    override fun onScale(scale: Float): Float = 1.0f
+
+    override fun onSingleTapUp(e: MotionEvent) = Unit
+
+    override fun shouldBackButtonBeMappedToEscape(): Boolean = false
+
+    override fun shouldEnforceCharBasedInput(): Boolean = false
+
+    override fun getInputMode(): Int = 0
+
+    override fun shouldUseCtrlSpaceWorkaround(): Boolean = false
+
+    override fun isTerminalViewSelected(): Boolean = true
+
+    override fun copyModeChanged(copyMode: Boolean) = Unit
+
+    override fun onKeyDown(keyCode: Int, e: KeyEvent, session: TerminalSession): Boolean = false
+
+    override fun onKeyUp(keyCode: Int, e: KeyEvent): Boolean = false
+
+    override fun onLongPress(event: MotionEvent): Boolean = false
+
+    override fun readControlKey(): Boolean = false
+
+    override fun readAltKey(): Boolean = false
+
+    override fun readShiftKey(): Boolean = false
+
+    override fun readFnKey(): Boolean = false
+
+    override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession): Boolean = false
+
+    override fun onEmulatorSet() = Unit
+
+    override fun logError(tag: String, message: String) {
+        Log.e(tag, message)
+    }
+
+    override fun logWarn(tag: String, message: String) {
+        Log.w(tag, message)
+    }
+
+    override fun logInfo(tag: String, message: String) {
+        Log.i(tag, message)
+    }
+
+    override fun logDebug(tag: String, message: String) {
+        Log.d(tag, message)
+    }
+
+    override fun logVerbose(tag: String, message: String) {
+        Log.v(tag, message)
+    }
+
+    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {
+        Log.e(tag, message, e)
+    }
+
+    override fun logStackTrace(tag: String, e: Exception) {
+        Log.e(tag, e.message, e)
     }
 }
