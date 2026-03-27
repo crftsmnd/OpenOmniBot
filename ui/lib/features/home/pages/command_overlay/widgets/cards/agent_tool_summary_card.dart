@@ -43,7 +43,6 @@ class AgentToolSummaryCard extends StatelessWidget {
             decoration: BoxDecoration(
               color: statusColor.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: statusColor.withValues(alpha: 0.16)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,

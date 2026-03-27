@@ -50,8 +50,10 @@ import 'mixins/conversation_manager.dart';
 
 // 导入 Widgets
 import 'chat_page_models.dart';
+import 'tool_activity_utils.dart';
 import 'widgets/chat_widgets.dart';
 import 'widgets/chat_browser_overlay.dart';
+import 'widgets/chat_tool_activity_strip.dart';
 import 'package:ui/widgets/app_update_banner.dart';
 import 'package:ui/widgets/app_update_dialog.dart';
 

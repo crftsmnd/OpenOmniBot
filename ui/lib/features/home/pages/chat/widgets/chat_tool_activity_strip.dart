@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:ui/features/home/pages/chat/tool_activity_utils.dart';
 import 'package:ui/features/home/pages/command_overlay/widgets/cards/terminal_output_utils.dart';
@@ -26,8 +28,16 @@ class ChatToolActivityStrip extends StatefulWidget {
   State<ChatToolActivityStrip> createState() => _ChatToolActivityStripState();
 }
 
-class _ChatToolActivityStripState extends State<ChatToolActivityStrip>
-    with TickerProviderStateMixin {
+class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
+  static const double _barHeight = 40;
+  static const double _barMinWidth = 236;
+  static const double _barMaxWidth = 420;
+  static const double _thumbnailWidth = 132;
+  static const double _thumbnailHeight = 78;
+  static const double _thumbnailBottom = 5;
+  static const double _drawerGap = 4;
+  static const double _drawerMaxHeight = 196;
+
   bool _expanded = false;
 
   @override
@@ -40,71 +50,46 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip>
 
     final transcript = buildAgentToolTranscript(cards);
     final title = resolveAgentToolTitle(activeCard);
+    final rawStatus = (activeCard['status'] ?? 'running').toString();
     final statusLabel = resolveAgentToolStatusLabel(activeCard);
+    final statusColor = _statusColor(rawStatus);
+    final activeIndex = math.max(1, cards.indexOf(activeCard) + 1);
+    final historyHeight = _expanded ? _resolveHistoryHeight(cards.length) : 0.0;
+    final totalHeight =
+        math.max(_thumbnailHeight + _thumbnailBottom, _barHeight) +
+        historyHeight +
+        (_expanded ? _drawerGap : 0);
 
-    return FractionallySizedBox(
-      widthFactor: 0.88,
-      alignment: Alignment.centerLeft,
-      child: AnimatedSize(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        alignment: Alignment.bottomLeft,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_expanded)
-              Container(
-                key: kChatToolActivityPanelKey,
-                constraints: const BoxConstraints(maxHeight: 240),
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.95),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(20),
-                    topRight: Radius.circular(20),
-                    bottomLeft: Radius.circular(14),
-                    bottomRight: Radius.circular(14),
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+      alignment: Alignment.bottomCenter,
+      child: SizedBox(
+        width: double.infinity,
+        height: totalHeight,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final barWidth = _resolveBarWidth(constraints.maxWidth);
+            final barLeft = (constraints.maxWidth - barWidth) / 2;
+            final previewLeft = _resolvePreviewLeft(
+              maxWidth: constraints.maxWidth,
+              barLeft: barLeft,
+            );
+
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                if (_expanded)
+                  Positioned(
+                    left: barLeft,
+                    width: barWidth,
+                    bottom: _barHeight - 1,
+                    child: _HistoryDrawer(cards: cards, height: historyHeight),
                   ),
-                  border: Border.all(color: const Color(0xFFE0E8F7)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0x1F23446E).withValues(alpha: 0.12),
-                      blurRadius: 18,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: _ToolHistoryList(cards: cards),
-              ),
-            Container(
-              key: kChatToolActivityBarKey,
-              height: 42,
-              padding: const EdgeInsets.fromLTRB(6, 4, 6, 4),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFFF8FBFF), Color(0xFFEFF5FF)],
-                ),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(_expanded ? 12 : 18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: const Radius.circular(10),
-                  bottomRight: const Radius.circular(18),
-                ),
-                border: Border.all(color: const Color(0xFFD6E4FC)),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0x1A1D4ED8).withValues(alpha: 0.09),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  _TerminalThumbnail(
+                Positioned(
+                  left: previewLeft,
+                  bottom: _thumbnailBottom,
+                  child: _TerminalThumbnail(
                     key: kChatToolActivityPreviewKey,
                     transcript: transcript,
                     onTap: () => _openTranscriptDialog(
@@ -113,72 +98,48 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip>
                       title: title,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.text,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            height: 1.1,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${cards.length} 次工具调用 · $statusLabel',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.text50,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w500,
-                            height: 1.1,
-                          ),
-                        ),
-                      ],
-                    ),
+                ),
+                Positioned(
+                  left: barLeft,
+                  width: barWidth,
+                  bottom: 0,
+                  child: _ActivityBar(
+                    title: title,
+                    status: rawStatus,
+                    statusLabel: statusLabel,
+                    statusColor: statusColor,
+                    activeIndex: activeIndex,
+                    totalCount: cards.length,
+                    expanded: _expanded,
+                    onToggle: () => setState(() => _expanded = !_expanded),
                   ),
-                  const SizedBox(width: 6),
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      key: kChatToolActivityToggleKey,
-                      onTap: () => setState(() => _expanded = !_expanded),
-                      borderRadius: BorderRadius.circular(999),
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFEDF3FF),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: AnimatedRotation(
-                          turns: _expanded ? 0.5 : 0,
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeOutCubic,
-                          child: const Icon(
-                            Icons.keyboard_arrow_up_rounded,
-                            size: 18,
-                            color: Color(0xFF4F6485),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+                ),
+              ],
+            );
+          },
         ),
       ),
     );
+  }
+
+  double _resolveBarWidth(double maxWidth) {
+    final cappedAvailable = math.max(0.0, maxWidth - 48);
+    final desired = math.max(_barMinWidth, maxWidth * 0.62);
+    return math.min(_barMaxWidth, math.min(desired, cappedAvailable));
+  }
+
+  double _resolvePreviewLeft({
+    required double maxWidth,
+    required double barLeft,
+  }) {
+    final desired = barLeft - (_thumbnailWidth * 0.74);
+    final maxLeft = math.max(12.0, maxWidth - _thumbnailWidth - 12.0);
+    return desired.clamp(12.0, maxLeft).toDouble();
+  }
+
+  double _resolveHistoryHeight(int count) {
+    final estimated = 18 + (count * 30) + (math.max(0, count - 1) * 8) + 16;
+    return math.min(_drawerMaxHeight, estimated.toDouble());
   }
 
   Future<void> _openTranscriptDialog(
@@ -215,7 +176,6 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip>
               ],
             ),
             child: Column(
-              mainAxisSize: MainAxisSize.max,
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(18, 16, 10, 12),
@@ -277,6 +237,193 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip>
   }
 }
 
+class _ActivityBar extends StatelessWidget {
+  const _ActivityBar({
+    required this.title,
+    required this.status,
+    required this.statusLabel,
+    required this.statusColor,
+    required this.activeIndex,
+    required this.totalCount,
+    required this.expanded,
+    required this.onToggle,
+  });
+
+  final String title;
+  final String status;
+  final String statusLabel;
+  final Color statusColor;
+  final int activeIndex;
+  final int totalCount;
+  final bool expanded;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final counterLabel = totalCount > 1
+        ? '$activeIndex/$totalCount'
+        : statusLabel;
+    return Container(
+      key: kChatToolActivityBarKey,
+      height: _ChatToolActivityStripState._barHeight,
+      padding: const EdgeInsets.fromLTRB(16, 9, 12, 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.97),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x26182432).withValues(alpha: 0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(_statusIcon(status), size: 13, color: Colors.white),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.text,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                height: 1,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            counterLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.text50,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              height: 1,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              key: kChatToolActivityToggleKey,
+              onTap: onToggle,
+              borderRadius: BorderRadius.circular(999),
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: AnimatedRotation(
+                  turns: expanded ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: const Icon(
+                    Icons.arrow_outward_rounded,
+                    size: 18,
+                    color: Color(0xFF4B5C77),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryDrawer extends StatelessWidget {
+  const _HistoryDrawer({required this.cards, required this.height});
+
+  final List<Map<String, dynamic>> cards;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: kChatToolActivityPanelKey,
+      height: height,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.98),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0x22182432).withValues(alpha: 0.10),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ListView.separated(
+        reverse: true,
+        padding: EdgeInsets.zero,
+        shrinkWrap: true,
+        itemBuilder: (context, index) {
+          final card = cards[index];
+          return Row(
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: _statusColor((card['status'] ?? 'running').toString()),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  resolveAgentToolTitle(card),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.text70,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '${resolveAgentToolTypeLabel(card)} · ${resolveAgentToolStatusLabel(card)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.text50,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w500,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          );
+        },
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemCount: cards.length,
+      ),
+    );
+  }
+}
+
 class _TerminalThumbnail extends StatelessWidget {
   const _TerminalThumbnail({
     super.key,
@@ -294,26 +441,33 @@ class _TerminalThumbnail extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
         child: Ink(
-          width: 54,
-          height: 30,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          width: _ChatToolActivityStripState._thumbnailWidth,
+          height: _ChatToolActivityStripState._thumbnailHeight,
+          padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF0D1524),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF213451)),
+            color: const Color(0xFF1C1D23),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: const Color(0xFF2C313D)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33101521),
+                blurRadius: 18,
+                offset: Offset(0, 10),
+              ),
+            ],
           ),
           child: Align(
             alignment: Alignment.topLeft,
             child: Text(
               preview,
-              maxLines: 3,
+              maxLines: 5,
               overflow: TextOverflow.clip,
               style: const TextStyle(
-                color: Color(0xFF9FFFC5),
-                fontSize: 5.8,
-                height: 1.05,
+                color: Color(0xFF9AF9B7),
+                fontSize: 7.1,
+                height: 1.08,
                 fontFamily: 'monospace',
               ),
             ),
@@ -336,106 +490,35 @@ class _TerminalThumbnail extends StatelessWidget {
     if (lines.isEmpty) {
       return '\$ idle';
     }
-    final previewLines = lines.length > 3
-        ? lines.sublist(lines.length - 3)
+    final previewLines = lines.length > 5
+        ? lines.sublist(lines.length - 5)
         : lines;
     return previewLines.join('\n');
   }
 }
 
-class _ToolHistoryList extends StatelessWidget {
-  const _ToolHistoryList({required this.cards});
+IconData _statusIcon(String status) {
+  switch (status) {
+    case 'success':
+      return Icons.check_rounded;
+    case 'error':
+      return Icons.close_rounded;
+    case 'interrupted':
+      return Icons.stop_rounded;
+    default:
+      return Icons.more_horiz_rounded;
+  }
+}
 
-  final List<Map<String, dynamic>> cards;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      reverse: true,
-      shrinkWrap: true,
-      padding: EdgeInsets.zero,
-      itemCount: cards.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final card = cards[index];
-        final status = (card['status'] ?? 'running').toString();
-        final statusColor = switch (status) {
-          'success' => const Color(0xFF2F8F4E),
-          'error' => AppColors.alertRed,
-          'interrupted' => const Color(0xFFFFAA2C),
-          _ => const Color(0xFF2C7FEB),
-        };
-
-        return Container(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          decoration: BoxDecoration(
-            color: statusColor.withValues(alpha: 0.07),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: statusColor.withValues(alpha: 0.18)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.only(top: 5),
-                decoration: BoxDecoration(
-                  color: statusColor,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      resolveAgentToolTitle(card),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.text,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      resolveAgentToolPreview(card),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.text50,
-                        fontSize: 11,
-                        height: 1.3,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  resolveAgentToolTypeLabel(card),
-                  style: const TextStyle(
-                    color: AppColors.text70,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    height: 1,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+Color _statusColor(String status) {
+  switch (status) {
+    case 'success':
+      return const Color(0xFF2F8F4E);
+    case 'error':
+      return AppColors.alertRed;
+    case 'interrupted':
+      return const Color(0xFFFFAA2C);
+    default:
+      return const Color(0xFF2C7FEB);
   }
 }

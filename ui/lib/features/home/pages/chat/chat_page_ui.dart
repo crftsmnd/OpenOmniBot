@@ -38,6 +38,33 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     return (inputTop - 30).clamp(8.0, constraints.maxHeight - 24).toDouble();
   }
 
+  double _resolveToolActivityStripBottom({
+    required BuildContext layoutContext,
+    required BoxConstraints constraints,
+    required double inputBottomPadding,
+    required double keyboardSpacer,
+  }) {
+    final fallback = (inputBottomPadding + keyboardSpacer + 84)
+        .clamp(0.0, constraints.maxHeight)
+        .toDouble();
+    if (!_isInputAreaVisible) {
+      return fallback;
+    }
+    final inputContext = _chatInputAreaKey.currentContext;
+    final inputBox = inputContext?.findRenderObject();
+    final stackBox = layoutContext.findRenderObject();
+    if (inputBox is! RenderBox ||
+        stackBox is! RenderBox ||
+        !inputBox.hasSize ||
+        !stackBox.hasSize) {
+      return fallback;
+    }
+    final inputTop = inputBox.localToGlobal(Offset.zero, ancestor: stackBox).dy;
+    return (constraints.maxHeight - inputTop)
+        .clamp(0.0, constraints.maxHeight)
+        .toDouble();
+  }
+
   Widget _buildNewConversationPullIndicator(double topOffset) {
     final progress =
         (_newConversationPullDistance /
@@ -279,6 +306,9 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
               onPointerCancel: _handlePagePointerCancel,
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  final toolActivityCards = !_isWorkspaceSurface
+                      ? extractAgentToolCards(_messages)
+                      : const <Map<String, dynamic>>[];
                   final newConversationPullIndicatorTopOffset =
                       _resolveNewConversationPullIndicatorTop(
                         layoutContext: context,
@@ -286,6 +316,14 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                         inputBottomPadding: inputBottomPadding,
                         keyboardSpacer: keyboardSpacer,
                       );
+                  final toolActivityStripBottom = toolActivityCards.isEmpty
+                      ? 0.0
+                      : _resolveToolActivityStripBottom(
+                          layoutContext: context,
+                          constraints: constraints,
+                          inputBottomPadding: inputBottomPadding,
+                          keyboardSpacer: keyboardSpacer,
+                        );
                   return Stack(
                     clipBehavior: Clip.hardEdge,
                     children: [
@@ -378,7 +416,6 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                               key: _inputAreaKey,
                               child: ChatInputWrapper(
                                 inputAreaKey: _chatInputAreaKey,
-                                messages: _messages,
                                 controller: _messageController,
                                 focusNode: _inputFocusNode,
                                 isProcessing: _isAiResponding,
@@ -425,6 +462,15 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                           SizedBox(height: inputBottomPadding + keyboardSpacer),
                         ],
                       ),
+                      if (!_isWorkspaceSurface &&
+                          _isInputAreaVisible &&
+                          toolActivityCards.isNotEmpty)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: toolActivityStripBottom,
+                          child: ChatToolActivityStrip(messages: _messages),
+                        ),
                       if (!_isWorkspaceSurface)
                         Positioned(
                           left: 24,

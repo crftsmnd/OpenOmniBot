@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../../../models/chat_message_model.dart';
-import '../tool_activity_utils.dart';
 import '../chat_page_models.dart';
-import 'chat_tool_activity_strip.dart';
 import '../../command_overlay/widgets/message_bubble.dart';
 import '../../command_overlay/widgets/chat_input_area.dart';
 
@@ -940,7 +938,6 @@ class VlmInfoPrompt extends StatelessWidget {
 /// 聊天输入区域包装器
 class ChatInputWrapper extends StatelessWidget {
   final GlobalKey<ChatInputAreaState> inputAreaKey;
-  final List<ChatMessageModel> messages;
   final TextEditingController controller;
   final FocusNode focusNode;
   final bool isProcessing;
@@ -965,7 +962,6 @@ class ChatInputWrapper extends StatelessWidget {
   const ChatInputWrapper({
     super.key,
     required this.inputAreaKey,
-    this.messages = const [],
     required this.controller,
     required this.focusNode,
     required this.isProcessing,
@@ -990,11 +986,6 @@ class ChatInputWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasToolActivity = messages.any(
-      (message) =>
-          (message.cardData?['type'] ?? '').toString() ==
-          kAgentToolSummaryCardType,
-    );
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
       child: Column(
@@ -1002,7 +993,6 @@ class ChatInputWrapper extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (topBanner != null) ...[topBanner!, const SizedBox(height: 8)],
-          if (hasToolActivity) ChatToolActivityStrip(messages: messages),
           ChatInputArea(
             key: inputAreaKey,
             controller: controller,
