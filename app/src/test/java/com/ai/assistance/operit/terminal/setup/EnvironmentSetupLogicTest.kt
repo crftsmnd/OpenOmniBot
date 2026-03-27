@@ -9,23 +9,24 @@ class EnvironmentSetupLogicTest {
     @Test
     fun buildInstallCommands_usesAlpinePackagesAndUvBootstrap() {
         val commands = EnvironmentSetupLogic.buildInstallCommands(
-            selectedPackageIds = listOf("python3", "uv", "nodejs", "tmux"),
+            selectedPackageIds = listOf("python", "pip", "uv", "nodejs", "ssh_client"),
             repositorySetupCommand = ""
         )
-
-        assertEquals("apk update", commands[0])
 
         val apkAdd = commands.first { it.startsWith("apk add ") }
         assertTrue(apkAdd.contains("python3"))
         assertTrue(apkAdd.contains("py3-pip"))
-        assertTrue(apkAdd.contains("py3-virtualenv"))
         assertTrue(apkAdd.contains("nodejs"))
         assertTrue(apkAdd.contains("npm"))
-        assertTrue(apkAdd.contains("tmux"))
+        assertTrue(apkAdd.contains("openssh-client-default"))
 
         assertTrue(commands.contains("ln -sf /usr/bin/python3 /usr/local/bin/python || true"))
-        assertTrue(commands.contains("python3 -m pip install --upgrade pip"))
-        assertTrue(commands.contains("python3 -m pip install uv"))
+        assertTrue(commands.contains("ln -sf /usr/bin/pip3 /usr/local/bin/pip || true"))
+        assertTrue(
+            commands.contains(
+                "(apk add --no-cache uv || python3 -m pip install --break-system-packages --upgrade uv)"
+            )
+        )
     }
 
     @Test
@@ -36,6 +37,6 @@ class EnvironmentSetupLogicTest {
         )
 
         assertEquals("echo mirror-ready", commands.first())
-        assertTrue(commands.any { it == "apk update" })
+        assertTrue(commands.any { it == "apk add --no-cache curl" })
     }
 }

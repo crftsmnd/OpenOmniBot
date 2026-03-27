@@ -459,7 +459,8 @@ fun TerminalScreen(
                                                 )
                                                     ?: mainActivityActivity.sessionBinder!!.createSession(
                                                         pendingCommand!!.id,
-                                                        mainActivityActivity, workingMode = Settings.working_Mode
+                                                        mainActivityActivity,
+                                                        workingMode = pendingCommand!!.workingMode
                                                     )
                                             } else {
                                                 mainActivityActivity.sessionBinder!!.getSession(

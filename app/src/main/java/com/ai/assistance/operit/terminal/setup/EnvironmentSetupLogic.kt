@@ -10,17 +10,37 @@ object EnvironmentSetupLogic {
     )
 
     val packageDefinitions: List<PackageDefinition> = listOf(
-        PackageDefinition("bash", "bash --version", "base"),
-        PackageDefinition("curl", "curl --version", "base"),
-        PackageDefinition("git", "git --version", "base"),
-        PackageDefinition("nodejs", "node --version", "base"),
-        PackageDefinition("npm", "npm --version", "base"),
-        PackageDefinition("python3", "python3 --version", "base"),
-        PackageDefinition("pip3", "pip3 --version", "base"),
-        PackageDefinition("ripgrep", "rg --version", "base"),
-        PackageDefinition("tmux", "tmux -V", "base"),
-        PackageDefinition("uv", "uv --version", "base"),
-        PackageDefinition("xz", "xz --version", "base")
+        PackageDefinition("nodejs", "node --version", "dev"),
+        PackageDefinition("npm", "npm --version", "dev"),
+        PackageDefinition("git", "git --version", "dev"),
+        PackageDefinition("python", "python3 --version", "dev"),
+        PackageDefinition("uv", "uv --version", "dev"),
+        PackageDefinition("pip", "pip3 --version", "dev"),
+        PackageDefinition("ssh_client", "ssh -V 2>&1", "ssh"),
+        PackageDefinition("sshpass", "sshpass -V 2>&1", "ssh"),
+        PackageDefinition("openssh_server", "sshd -V 2>&1", "ssh")
+    )
+
+    data class PackageProbeResult(
+        val ready: Boolean,
+        val version: String?
+    )
+
+    private val installPackageMap = linkedMapOf(
+        "bash" to listOf("bash"),
+        "curl" to listOf("curl"),
+        "ripgrep" to listOf("ripgrep"),
+        "tmux" to listOf("tmux"),
+        "xz" to listOf("xz"),
+        "nodejs" to listOf("nodejs", "npm"),
+        "npm" to listOf("npm"),
+        "git" to listOf("git"),
+        "python" to listOf("python3"),
+        "pip" to listOf("py3-pip"),
+        "uv" to listOf("python3", "py3-pip"),
+        "ssh_client" to listOf("openssh-client-default"),
+        "sshpass" to listOf("sshpass"),
+        "openssh_server" to listOf("openssh-server")
     )
 
     fun buildInstallCommands(
@@ -37,29 +57,15 @@ object EnvironmentSetupLogic {
         selectedPackageIds: List<String>,
         repositorySetupCommand: String
     ): List<String> {
-        val requested = selectedPackageIds.toSet()
+        val requested = selectedPackageIds
+            .map(::canonicalPackageId)
+            .toSet()
         if (requested.isEmpty()) {
             return emptyList()
         }
         val repoSetup = repositorySetupCommand.trim()
-        val packageMap = linkedMapOf(
-            "bash" to "bash",
-            "curl" to "curl",
-            "git" to "git",
-            "nodejs" to "nodejs npm",
-            "npm" to "npm",
-            "python3" to "python3 py3-pip py3-virtualenv",
-            "pip3" to "py3-pip",
-            "ripgrep" to "ripgrep",
-            "tmux" to "tmux",
-            "xz" to "xz",
-            "uv" to ""
-        )
-
         val apkPackages = requested
-            .flatMap { (packageMap[it] ?: "").split(' ') }
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+            .flatMap { installPackageMap[it].orEmpty() }
             .distinct()
 
         val commands = mutableListOf<String>()
@@ -67,34 +73,123 @@ object EnvironmentSetupLogic {
             commands += repoSetup
         }
         if (apkPackages.isNotEmpty()) {
-            commands += "apk update"
-            commands += "apk add ${apkPackages.joinToString(" ")}"
+            commands += "apk add --no-cache ${apkPackages.joinToString(" ")}"
         }
 
-        if ("python3" in requested || "pip3" in requested || "uv" in requested) {
+        if ("python" in requested || "pip" in requested || "uv" in requested) {
             commands += "ln -sf /usr/bin/python3 /usr/local/bin/python || true"
         }
+        if ("pip" in requested || "uv" in requested) {
+            commands += "ln -sf /usr/bin/pip3 /usr/local/bin/pip || true"
+        }
         if ("uv" in requested) {
-            commands += "python3 -m pip install --upgrade pip"
-            commands += "python3 -m pip install uv"
+            commands += "(apk add --no-cache uv || python3 -m pip install --break-system-packages --upgrade uv)"
+        }
+        if ("openssh_server" in requested) {
+            commands += "mkdir -p /var/run/sshd /etc/ssh"
+            commands += "ssh-keygen -A || true"
         }
 
         return commands
     }
 
+    fun buildInventoryProbeCommand(selectedPackageIds: List<String>): String {
+        val requested = selectedPackageIds
+            .map(::canonicalPackageId)
+            .filter { id -> packageDefinitions.any { it.id == id } }
+            .distinct()
+        if (requested.isEmpty()) {
+            return "true"
+        }
+        return requested.joinToString(separator = "\n") { packageId ->
+            when (packageId) {
+                "nodejs" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v node >/dev/null 2>&1",
+                    versionCommand = "node --version"
+                )
+                "npm" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v npm >/dev/null 2>&1",
+                    versionCommand = "npm --version"
+                )
+                "git" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v git >/dev/null 2>&1",
+                    versionCommand = "git --version"
+                )
+                "python" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v python3 >/dev/null 2>&1",
+                    versionCommand = "python3 --version"
+                )
+                "uv" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v uv >/dev/null 2>&1",
+                    versionCommand = "uv --version"
+                )
+                "pip" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v pip3 >/dev/null 2>&1",
+                    versionCommand = "pip3 --version"
+                )
+                "ssh_client" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v ssh >/dev/null 2>&1",
+                    versionCommand = "ssh -V 2>&1"
+                )
+                "sshpass" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v sshpass >/dev/null 2>&1",
+                    versionCommand = "sshpass -V 2>&1"
+                )
+                "openssh_server" -> buildProbeSnippet(
+                    packageId = packageId,
+                    commandCheck = "command -v sshd >/dev/null 2>&1",
+                    versionCommand = "sshd -V 2>&1"
+                )
+                else -> buildMissingProbeSnippet(packageId)
+            }
+        }
+    }
+
+    fun parseInventoryProbeOutput(output: String): Map<String, PackageProbeResult> {
+        return output
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.startsWith("__OMNI_ENV__\t") }
+            .mapNotNull { line ->
+                val parts = line.split('\t', limit = 4)
+                if (parts.size < 4) {
+                    return@mapNotNull null
+                }
+                val packageId = canonicalPackageId(parts[1])
+                val ready = parts[2] == "READY"
+                val version = parts[3].trim().ifBlank { null }
+                packageId to PackageProbeResult(
+                    ready = ready,
+                    version = version
+                )
+            }
+            .toMap()
+    }
+
     fun buildCheckCommand(pkgId: String, command: String): String {
-        val actual = when (pkgId) {
+        val actual = when (canonicalPackageId(pkgId)) {
             "bash" -> "command -v bash"
             "curl" -> "command -v curl"
             "git" -> "command -v git"
             "nodejs" -> "command -v node"
             "npm" -> "command -v npm"
-            "python3" -> "command -v python3"
-            "pip3" -> "command -v pip3"
+            "python" -> "command -v python3"
+            "pip" -> "command -v pip3"
+            "uv" -> "command -v uv"
             "ripgrep" -> "command -v rg"
             "tmux" -> "command -v tmux"
-            "uv" -> "command -v uv"
             "xz" -> "command -v xz"
+            "ssh_client" -> "command -v ssh"
+            "sshpass" -> "command -v sshpass"
+            "openssh_server" -> "command -v sshd"
             else -> command
         }
         return "$actual >/dev/null 2>&1 && echo INSTALLED || echo MISSING"
@@ -102,6 +197,37 @@ object EnvironmentSetupLogic {
 
     fun isPackageInstalled(pkgId: String, output: String): Boolean {
         val normalized = output.trim()
-        return normalized.contains("INSTALLED") || normalized.contains(pkgId, ignoreCase = true)
+        val canonicalId = canonicalPackageId(pkgId)
+        return normalized.contains("INSTALLED") || normalized.contains(canonicalId, ignoreCase = true)
+    }
+
+    private fun canonicalPackageId(packageId: String): String {
+        return when (packageId.trim()) {
+            "python3" -> "python"
+            "pip3" -> "pip"
+            "ssh" -> "ssh_client"
+            "openssh_client" -> "ssh_client"
+            "ssh_server" -> "openssh_server"
+            else -> packageId.trim()
+        }
+    }
+
+    private fun buildProbeSnippet(
+        packageId: String,
+        commandCheck: String,
+        versionCommand: String
+    ): String {
+        return """
+            if $commandCheck; then
+              version="${'$'}($versionCommand | head -n 1 | tr '\r' ' ')"
+              printf '__OMNI_ENV__\t%s\tREADY\t%s\n' '$packageId' "${'$'}version"
+            else
+              printf '__OMNI_ENV__\t%s\tMISSING\t\n' '$packageId'
+            fi
+        """.trimIndent()
+    }
+
+    private fun buildMissingProbeSnippet(packageId: String): String {
+        return "printf '__OMNI_ENV__\\t%s\\tMISSING\\t\\n' '$packageId'"
     }
 }

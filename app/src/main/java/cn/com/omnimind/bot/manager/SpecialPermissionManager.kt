@@ -419,6 +419,30 @@ class SpecialPermissionManager(private val context: Context) {
         }
     }
 
+    fun getEmbeddedTerminalSetupInventory(result: MethodChannel.Result) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val packageInventory = embeddedTerminalSetupManager.getPackageInventory()
+                withContext(Dispatchers.Main) {
+                    result.success(
+                        mapOf(
+                            "packages" to packageInventory.mapValues { it.value.toMap() }
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                OmniLog.e(TAG, "Error reading embedded terminal setup inventory", e)
+                withContext(Dispatchers.Main) {
+                    result.error(
+                        "READ_SETUP_INVENTORY_FAILED",
+                        "Failed to read embedded terminal setup inventory.",
+                        e.message
+                    )
+                }
+            }
+        }
+    }
+
     fun installEmbeddedTerminalPackages(call: MethodCall, result: MethodChannel.Result) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -497,9 +521,18 @@ class SpecialPermissionManager(private val context: Context) {
     fun openNativeTerminal(call: MethodCall, result: MethodChannel.Result) {
         try {
             val openSetup = call.argument<Boolean>("openSetup") == true
+            val setupPackageIds = call.argument<List<String>>("setupPackageIds")
+                .orEmpty()
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
             val intent = Intent(context, TerminalActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 putExtra(TerminalActivity.EXTRA_OPEN_SETUP, openSetup)
+                putStringArrayListExtra(
+                    TerminalActivity.EXTRA_SETUP_PACKAGE_IDS,
+                    ArrayList(setupPackageIds)
+                )
             }
             ContextCompat.startActivity(context, intent, null)
             result.success(true)

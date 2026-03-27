@@ -135,6 +135,47 @@ class EmbeddedTerminalSetupStatus {
   }
 }
 
+class EmbeddedTerminalSetupInventoryItem {
+  const EmbeddedTerminalSetupInventoryItem({
+    required this.ready,
+    required this.version,
+  });
+
+  final bool ready;
+  final String? version;
+
+  factory EmbeddedTerminalSetupInventoryItem.fromMap(
+    Map<dynamic, dynamic>? map,
+  ) {
+    return EmbeddedTerminalSetupInventoryItem(
+      ready: map?['ready'] == true,
+      version: (map?['version'] as String?)?.trim(),
+    );
+  }
+}
+
+class EmbeddedTerminalSetupInventory {
+  const EmbeddedTerminalSetupInventory({required this.packages});
+
+  final Map<String, EmbeddedTerminalSetupInventoryItem> packages;
+
+  factory EmbeddedTerminalSetupInventory.fromMap(Map<dynamic, dynamic>? map) {
+    final rawPackages = map?['packages'];
+    final packages = <String, EmbeddedTerminalSetupInventoryItem>{};
+    if (rawPackages is Map) {
+      for (final entry in rawPackages.entries) {
+        packages[entry.key
+            .toString()] = EmbeddedTerminalSetupInventoryItem.fromMap(
+          entry.value is Map
+              ? Map<dynamic, dynamic>.from(entry.value as Map)
+              : const <dynamic, dynamic>{},
+        );
+      }
+    }
+    return EmbeddedTerminalSetupInventory(packages: packages);
+  }
+}
+
 class EmbeddedTerminalSetupResult {
   const EmbeddedTerminalSetupResult({
     required this.success,
@@ -224,6 +265,14 @@ Future<EmbeddedTerminalSetupStatus> getEmbeddedTerminalSetupStatus() async {
   return EmbeddedTerminalSetupStatus.fromMap(result ?? const {});
 }
 
+Future<EmbeddedTerminalSetupInventory>
+getEmbeddedTerminalSetupInventory() async {
+  final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
+    'getEmbeddedTerminalSetupInventory',
+  );
+  return EmbeddedTerminalSetupInventory.fromMap(result ?? const {});
+}
+
 Future<EmbeddedTerminalSetupSessionSnapshot>
 getEmbeddedTerminalSetupSessionSnapshot() async {
   final result = await spePermission.invokeMethod<Map<dynamic, dynamic>>(
@@ -256,9 +305,13 @@ Future<void> dismissEmbeddedTerminalSetupSession() async {
   await spePermission.invokeMethod<void>('dismissEmbeddedTerminalSetupSession');
 }
 
-Future<void> openNativeTerminal({bool openSetup = false}) async {
+Future<void> openNativeTerminal({
+  bool openSetup = false,
+  List<String> setupPackageIds = const <String>[],
+}) async {
   await spePermission.invokeMethod<void>('openNativeTerminal', {
     'openSetup': openSetup,
+    'setupPackageIds': setupPackageIds,
   });
 }
 

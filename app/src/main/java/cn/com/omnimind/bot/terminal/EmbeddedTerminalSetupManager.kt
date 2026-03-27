@@ -34,6 +34,16 @@ class EmbeddedTerminalSetupManager(
         )
     }
 
+    data class PackageInventoryItem(
+        val ready: Boolean,
+        val version: String? = null
+    ) {
+        fun toMap(): Map<String, Any?> = mapOf(
+            "ready" to ready,
+            "version" to version
+        )
+    }
+
     data class InstallSessionSnapshot(
         val sessionId: String? = null,
         val running: Boolean = false,
@@ -64,9 +74,30 @@ class EmbeddedTerminalSetupManager(
         }
 
     suspend fun getPackageInstallStatus(): Map<String, Boolean> = withContext(Dispatchers.IO) {
+        getPackageInventory().mapValues { it.value.ready }
+    }
+
+    suspend fun getPackageInventory(): Map<String, PackageInventoryItem> = withContext(Dispatchers.IO) {
         withLocalTerminalManager { manager ->
+            val packageIds = packageDefinitions.map { it.id }
+            val result = manager.executeHiddenCommand(
+                command = EnvironmentSetupLogic.buildInventoryProbeCommand(packageIds),
+                executorKey = "embedded-terminal-setup-inventory",
+                timeoutMs = 30_000L
+            )
+            val parsed = EnvironmentSetupLogic.parseInventoryProbeOutput(
+                EmbeddedTerminalRuntime.trimTerminalOutput(
+                    EmbeddedTerminalRuntime.sanitizeTerminalNoise(
+                        result.output.ifBlank { result.rawOutputPreview }
+                    )
+                )
+            )
             packageDefinitions.associate { pkg ->
-                pkg.id to checkPackageInstalled(manager, pkg)
+                val probe = parsed[pkg.id]
+                pkg.id to PackageInventoryItem(
+                    ready = probe?.ready == true,
+                    version = probe?.version
+                )
             }
         }
     }
@@ -330,7 +361,6 @@ class EmbeddedTerminalSetupManager(
         pkg: PackageDefinition
     ): Boolean {
         val command = EnvironmentSetupLogic.buildCheckCommand(pkg.id, pkg.command)
-
         val result = manager.executeHiddenCommand(
             command = command,
             executorKey = "embedded-terminal-setup-check-${pkg.id}",
@@ -340,7 +370,6 @@ class EmbeddedTerminalSetupManager(
         if (!result.isOk && output.isBlank()) {
             return false
         }
-
         return EnvironmentSetupLogic.isPackageInstalled(pkg.id, output)
     }
 }
