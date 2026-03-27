@@ -1,6 +1,8 @@
 package com.rk.terminal.ui.screens.terminal
 
 import android.os.Environment
+import android.util.Log
+import com.rk.libcommons.ShellArgv
 import com.rk.libcommons.alpineDir
 import com.rk.libcommons.alpineHomeDir
 import com.rk.libcommons.application
@@ -22,6 +24,8 @@ import com.termux.terminal.TerminalSessionClient
 import java.io.File
 
 object MkSession {
+    private const val TAG = "MkSession"
+
     fun createSession(
         activity: MainActivity, sessionClient: TerminalSessionClient, session_id: String,workingMode:Int
     ): TerminalSession {
@@ -122,15 +126,17 @@ object MkSession {
 
             val shell = if (pendingCommand == null) {
                 args = if (workingMode == WorkingMode.ALPINE){
-                    arrayOf("-c",initFile.absolutePath)
+                    ShellArgv.buildShellScriptArgv(initFile.absolutePath)
                 }else{
-                    arrayOf()
+                    ShellArgv.buildInteractiveShellArgv()
                 }
-                "/system/bin/sh"
+                ShellArgv.SYSTEM_SH
             } else{
                 args = pendingCommand!!.args
                 pendingCommand!!.shell
             }
+
+            Log.d(TAG, "Launching session ${ShellArgv.formatExecSpec(shell, args, workingDir)}")
 
             pendingCommand = null
             return TerminalSession(

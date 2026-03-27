@@ -11,6 +11,7 @@ import com.ai.assistance.operit.terminal.data.TerminalSessionData
 import com.ai.assistance.operit.terminal.data.TerminalState
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
 import com.ai.assistance.operit.terminal.provider.type.TerminalType
+import com.rk.libcommons.ShellArgv
 import com.rk.libcommons.localBinDir
 import com.rk.libcommons.localLibDir
 import com.rk.settings.Settings
@@ -136,10 +137,13 @@ class TerminalManager private constructor(
         }
 
         val terminalSession = withContext(Dispatchers.Main) {
+            val shell = ShellArgv.SYSTEM_SH
+            val args = ShellArgv.buildShellScriptArgv(ensureShellScripts().absolutePath)
+            Log.d(TAG, "Creating local session ${ShellArgv.formatExecSpec(shell, args, "/")}")
             TerminalSession(
-                "/system/bin/sh",
+                shell,
                 "/",
-                arrayOf("-c", ensureShellScripts().absolutePath),
+                args,
                 buildSessionEnvironment(sessionId),
                 TerminalEmulator.DEFAULT_TERMINAL_TRANSCRIPT_ROWS,
                 client

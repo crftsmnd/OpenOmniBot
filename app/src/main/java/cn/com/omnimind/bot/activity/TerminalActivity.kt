@@ -2,11 +2,13 @@ package cn.com.omnimind.bot.activity
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
 import com.ai.assistance.operit.terminal.TerminalManager
 import com.ai.assistance.operit.terminal.setup.EnvironmentSetupLogic
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
+import com.rk.libcommons.ShellArgv
 import com.rk.libcommons.TerminalCommand
 import com.rk.libcommons.pendingCommand
 import com.rk.terminal.ui.activities.terminal.MainActivity
@@ -16,6 +18,7 @@ import java.io.File
 
 class TerminalActivity : ComponentActivity() {
     companion object {
+        private const val TAG = "TerminalActivity"
         const val EXTRA_OPEN_SETUP = "open_setup"
         const val EXTRA_SETUP_PACKAGE_IDS = "setup_package_ids"
     }
@@ -63,28 +66,29 @@ class TerminalActivity : ComponentActivity() {
         }
 
         val initHostPath = File(filesDir.parentFile, "local/bin/init-host").absolutePath
-        val installScript = buildString {
-            appendLine("""printf '\033[34;1m[*]\033[0m 开始配置 Alpine 开发环境\n'""")
-            appendLine(commands.joinToString(separator = " && "))
-            appendLine("status=\$?")
-            appendLine("""if [ "${'$'}status" -eq 0 ]; then""")
-            appendLine("""  printf '\033[32;1m[+]\033[0m 选中的环境已准备完成\n'""")
-            appendLine("else")
-            appendLine(
-                """  printf '\033[31;1m[!]\033[0m 环境配置失败，退出码: %s\n' "${'$'}status" """,
-            )
-            appendLine("fi")
-            appendLine("echo")
-            appendLine("exec /bin/ash -l")
-        }.trim()
+        val installScriptPath = prepareSetupScript(commands)
 
         pendingCommand = TerminalCommand(
-            shell = initHostPath,
-            args = arrayOf("/bin/sh", "-lc", installScript),
+            shell = ShellArgv.SYSTEM_SH,
+            args = ShellArgv.buildShellScriptArgv(initHostPath, "/bin/sh", installScriptPath),
             id = "setup-${System.currentTimeMillis()}",
             workingMode = WorkingMode.ALPINE,
             terminatePreviousSession = false,
             workingDir = "/"
         )
+        Log.d(
+            TAG,
+            "Prepared setup session ${ShellArgv.formatExecSpec(ShellArgv.SYSTEM_SH, pendingCommand!!.args, "/")}"
+        )
+    }
+
+    private fun prepareSetupScript(commands: List<String>): String {
+        val scriptFile = File(filesDir.parentFile, "local/bin/omni-setup.sh").apply {
+            parentFile?.mkdirs()
+        }
+        val content = EnvironmentSetupLogic.buildSetupScript(commands)
+        scriptFile.writeText(content)
+        scriptFile.setExecutable(true, false)
+        return scriptFile.absolutePath
     }
 }

@@ -83,7 +83,7 @@ object EnvironmentSetupLogic {
             commands += "ln -sf /usr/bin/pip3 /usr/local/bin/pip || true"
         }
         if ("uv" in requested) {
-            commands += "(apk add --no-cache uv || python3 -m pip install --break-system-packages --upgrade uv)"
+            commands += "if ! apk add --no-cache uv; then python3 -m pip install --break-system-packages --upgrade uv; fi"
         }
         if ("openssh_server" in requested) {
             commands += "mkdir -p /var/run/sshd /etc/ssh"
@@ -91,6 +91,29 @@ object EnvironmentSetupLogic {
         }
 
         return commands
+    }
+
+    internal fun buildSetupScript(commands: List<String>): String {
+        return buildString {
+            appendLine("#!/bin/sh")
+            appendLine("""printf '\033[34;1m[*]\033[0m 开始配置 Alpine 开发环境\n'""")
+            appendLine("run_setup() {")
+            appendLine("  set -e")
+            commands.forEach { command ->
+                appendLine("  $command")
+            }
+            appendLine("}")
+            appendLine("if run_setup; then")
+            appendLine("""  printf '\033[32;1m[+]\033[0m 选中的环境已准备完成\n'""")
+            appendLine("else")
+            appendLine("  status=\$?")
+            appendLine(
+                """  printf '\033[31;1m[!]\033[0m 环境配置失败，退出码: %s\n' "${'$'}status" """,
+            )
+            appendLine("fi")
+            appendLine("echo")
+            appendLine("exec /bin/ash -l")
+        }.trimEnd()
     }
 
     fun buildInventoryProbeCommand(selectedPackageIds: List<String>): String {
