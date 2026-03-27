@@ -7,6 +7,11 @@ import '../../command_overlay/widgets/chat_input_area.dart';
 
 enum ChatSurfaceMode { workspace, normal, openclaw }
 
+const List<ChatSurfaceMode> kVisibleChatSurfaceModes = <ChatSurfaceMode>[
+  ChatSurfaceMode.workspace,
+  ChatSurfaceMode.normal,
+];
+
 /// 聊天页面 AppBar
 class ChatAppBar extends StatelessWidget {
   final VoidCallback onMenuTap;
@@ -207,6 +212,14 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
   double _verticalDragDelta = 0;
   double _horizontalDragDelta = 0;
 
+  int get _activeVisibleModeIndex {
+    final index = kVisibleChatSurfaceModes.indexOf(widget.activeMode);
+    if (index >= 0) {
+      return index;
+    }
+    return kVisibleChatSurfaceModes.indexOf(ChatSurfaceMode.normal);
+  }
+
   String get _modelLabel {
     final text = (widget.activeModelId ?? '').trim();
     if (text.isEmpty) {
@@ -252,14 +265,14 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
     }
     final intent = _horizontalDragDelta + velocity * 0.015;
     _horizontalDragDelta = 0;
-    final currentIndex = ChatSurfaceMode.values.indexOf(widget.activeMode);
+    final currentIndex = _activeVisibleModeIndex;
     final delta = intent > 0 ? 1 : -1;
     final targetIndex = (currentIndex + delta).clamp(
       0,
-      ChatSurfaceMode.values.length - 1,
+      kVisibleChatSurfaceModes.length - 1,
     );
     widget.onInteracted?.call();
-    widget.onModeChanged(ChatSurfaceMode.values[targetIndex]);
+    widget.onModeChanged(kVisibleChatSurfaceModes[targetIndex]);
   }
 
   void _handleVerticalDragUpdate(DragUpdateDetails details) {
@@ -642,28 +655,34 @@ class _ChatModeSliderState extends State<ChatModeSlider> {
 
   double _dragDelta = 0;
 
+  int get _activeVisibleModeIndex {
+    final index = kVisibleChatSurfaceModes.indexOf(widget.activeMode);
+    if (index >= 0) {
+      return index;
+    }
+    return kVisibleChatSurfaceModes.indexOf(ChatSurfaceMode.normal);
+  }
+
   void _handleDragEnd({double velocity = 0}) {
     final intent = _dragDelta + velocity * 0.015;
     final shouldSwitch = _dragDelta.abs() > 14 || velocity.abs() > 250;
     if (shouldSwitch) {
-      final currentIndex = ChatSurfaceMode.values.indexOf(widget.activeMode);
+      final currentIndex = _activeVisibleModeIndex;
       final delta = intent > 0 ? 1 : -1;
       final targetIndex = (currentIndex + delta).clamp(
         0,
-        ChatSurfaceMode.values.length - 1,
+        kVisibleChatSurfaceModes.length - 1,
       );
-      widget.onChanged(ChatSurfaceMode.values[targetIndex]);
+      widget.onChanged(kVisibleChatSurfaceModes[targetIndex]);
     }
     _dragDelta = 0;
   }
 
   @override
   Widget build(BuildContext context) {
-    final alignment = switch (widget.activeMode) {
-      ChatSurfaceMode.workspace => Alignment.centerLeft,
-      ChatSurfaceMode.normal => Alignment.center,
-      ChatSurfaceMode.openclaw => Alignment.centerRight,
-    };
+    final alignment = _activeVisibleModeIndex == 0
+        ? Alignment.centerLeft
+        : Alignment.centerRight;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onHorizontalDragUpdate: (details) {
@@ -679,12 +698,12 @@ class _ChatModeSliderState extends State<ChatModeSlider> {
         final box = context.findRenderObject() as RenderBox?;
         if (box == null || !box.hasSize) return;
         final local = box.globalToLocal(details.globalPosition);
-        final segmentWidth = box.size.width / ChatSurfaceMode.values.length;
+        final segmentWidth = box.size.width / kVisibleChatSurfaceModes.length;
         final targetIndex = (local.dx / segmentWidth).floor().clamp(
           0,
-          ChatSurfaceMode.values.length - 1,
+          kVisibleChatSurfaceModes.length - 1,
         );
-        widget.onChanged(ChatSurfaceMode.values[targetIndex]);
+        widget.onChanged(kVisibleChatSurfaceModes[targetIndex]);
       },
       child: Container(
         height: 32,
@@ -700,7 +719,7 @@ class _ChatModeSliderState extends State<ChatModeSlider> {
               curve: Curves.easeOutCubic,
               alignment: alignment,
               child: FractionallySizedBox(
-                widthFactor: 1 / 3,
+                widthFactor: 1 / kVisibleChatSurfaceModes.length,
                 child: Container(
                   margin: const EdgeInsets.symmetric(horizontal: 1),
                   decoration: BoxDecoration(
@@ -738,16 +757,6 @@ class _ChatModeSliderState extends State<ChatModeSlider> {
                     isSelected: widget.activeMode == ChatSurfaceMode.normal,
                     child: SvgPicture.string(
                       _normalChatIconSvg,
-                      width: 16,
-                      height: 16,
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: _buildModeIcon(
-                    isSelected: widget.activeMode == ChatSurfaceMode.openclaw,
-                    child: SvgPicture.asset(
-                      'assets/home/openclaw.svg',
                       width: 16,
                       height: 16,
                     ),

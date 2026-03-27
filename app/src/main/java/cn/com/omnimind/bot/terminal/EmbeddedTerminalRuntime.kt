@@ -3,7 +3,6 @@ package cn.com.omnimind.bot.terminal
 import android.content.Context
 import android.os.Build
 import cn.com.omnimind.bot.agent.AgentWorkspaceManager
-import cn.com.omnimind.bot.openclaw.OpenClawRuntimeSupport
 import cn.com.omnimind.bot.termux.TermuxCommandBuilder
 import cn.com.omnimind.bot.termux.TermuxLiveUpdate
 import com.ai.assistance.operit.terminal.TerminalManager
@@ -242,7 +241,6 @@ object EmbeddedTerminalRuntime {
         val missingCommands = probeResult.missingCommands
         if (missingCommands.isEmpty()) {
             markBasePackagesReady(context)
-            ensureOpenClawCompatRuntime(context)
             val readyMessage =
                 if (probeResult.nodeReady && probeResult.pnpmReady) {
                     "内嵌 Alpine 终端和基础 Agent CLI 包均已就绪。"
@@ -345,7 +343,6 @@ object EmbeddedTerminalRuntime {
 
         if (!installBasePackages) {
             val basePackagesReady = isBasePackagesReady(context)
-            ensureOpenClawCompatRuntime(context)
             emitEnvironmentProgress(
                 onProgress,
                 EnvironmentProgress(
@@ -380,7 +377,6 @@ object EmbeddedTerminalRuntime {
             val preflightProbe = probeBasePackageCommands(context)
             if (preflightProbe.errorMessage == null && preflightProbe.missingCommands.isEmpty()) {
                 markBasePackagesReady(context)
-                ensureOpenClawCompatRuntime(context)
                 emitEnvironmentProgress(
                     onProgress,
                     EnvironmentProgress(
@@ -442,7 +438,6 @@ object EmbeddedTerminalRuntime {
                 val postInstallProbe = probeBasePackageCommands(context)
                 if (postInstallProbe.errorMessage == null && postInstallProbe.missingCommands.isEmpty()) {
                     markBasePackagesReady(context)
-                    ensureOpenClawCompatRuntime(context)
                     emitEnvironmentProgress(
                         onProgress,
                         EnvironmentProgress(
@@ -1181,12 +1176,6 @@ object EmbeddedTerminalRuntime {
             .edit()
             .putInt(KEY_BASE_PACKAGE_VERSION, BASE_PACKAGE_VERSION)
             .apply()
-    }
-
-    private fun ensureOpenClawCompatRuntime(context: Context) {
-        runCatching {
-            OpenClawRuntimeSupport.ensureRuntimeFiles(context)
-        }
     }
 
     private suspend fun ensureCommandEnvironmentReady(

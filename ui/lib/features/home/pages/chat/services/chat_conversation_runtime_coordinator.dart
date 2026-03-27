@@ -489,12 +489,6 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
       isError = true;
       isSummarizing = false;
       runtime.currentAiMessages.remove(taskId);
-    } else if (isErrorMessage &&
-        _isOpenClawGatewayInitializingError(runtime, content)) {
-      messageText = kOpenClawGatewayInitializingMessage;
-      isError = false;
-      isSummarizing = false;
-      runtime.currentAiMessages.remove(taskId);
     } else if (isErrorMessage) {
       messageText = kNetworkErrorMessage;
       isError = true;
@@ -1622,47 +1616,6 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
   ) {
     final waitingCardId = '$taskId-openclaw-waiting';
     runtime.messages.removeWhere((msg) => msg.id == waitingCardId);
-  }
-
-  bool _isOpenClawGatewayInitializingError(
-    ChatConversationRuntimeState runtime,
-    String rawContent,
-  ) {
-    if (runtime.mode != kChatRuntimeModeOpenClaw) {
-      return false;
-    }
-    final payload = safeDecodeMap(rawContent);
-    final text = (payload['text'] ?? payload['message'] ?? rawContent)
-        .toString()
-        .trim()
-        .toLowerCase();
-    if (text.isEmpty) {
-      return false;
-    }
-
-    final hasOpenClawContext =
-        text.contains('openclaw') ||
-        text.contains('gateway') ||
-        text.contains('127.0.0.1') ||
-        text.contains('localhost') ||
-        text.contains('18789');
-    if (!hasOpenClawContext) {
-      return false;
-    }
-
-    return text.contains('econnrefused') ||
-        text.contains('connection refused') ||
-        text.contains('fetch failed') ||
-        text.contains('connect error') ||
-        text.contains('socket hang up') ||
-        text.contains('timeout') ||
-        text.contains('timed out') ||
-        text.contains('initializing') ||
-        text.contains('not ready') ||
-        text.contains('starting') ||
-        text.contains('restarting') ||
-        text.contains('初始化') ||
-        text.contains('启动中');
   }
 
   String _buildConversationHistoryText(List<ChatMessageModel> messages) {

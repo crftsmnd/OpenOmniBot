@@ -16,7 +16,6 @@ import '../../widgets/home_drawer.dart';
 import '../authorize/authorize_page_args.dart';
 import '../command_overlay/widgets/chat_input_area.dart';
 import '../command_overlay/services/tool_card_detail_gesture_gate.dart';
-import '../command_overlay/constants/messages.dart';
 import '../common/openclaw_connection_checker.dart';
 import '../omnibot_workspace/widgets/omnibot_workspace_browser.dart';
 import 'services/chat_conversation_runtime_coordinator.dart';
@@ -117,15 +116,6 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   bool _showSlashCommandPanel = false;
   bool _showModelMentionPanel = false;
   bool _openClawPanelExpanded = false;
-  bool _openClawDeployPanelExpanded = false;
-  bool _isLoadingOpenClawDeployStatus = false;
-  EmbeddedTerminalRuntimeStatus? _openClawDeployRuntimeStatus;
-  OpenClawDeploySnapshot? _openClawDeploySnapshot;
-  OpenClawGatewayStatus? _openClawGatewayStatus;
-  Timer? _openClawDeploySnapshotPoller;
-  bool _hasHandledOpenClawDeployCompletion = false;
-  bool _openClawDeployConfigTouched = false;
-  String? _openClawDeployConfigDraftKey;
   _ActiveModelMentionToken? _activeModelMentionToken;
   List<ModelProviderProfileSummary> _modelProviderProfiles = const [];
   Map<String, List<ProviderModelOption>> _modelOptionsByProfileId = const {};
@@ -140,8 +130,6 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   final TextEditingController _openClawTokenController =
       TextEditingController();
   final TextEditingController _openClawUserIdController =
-      TextEditingController();
-  final TextEditingController _openClawDeployConfigController =
       TextEditingController();
   final GlobalKey _openClawPanelKey = GlobalKey();
   final GlobalKey _inputAreaKey = GlobalKey();
@@ -231,22 +219,10 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   bool _isRetryingLatestInstructionAfterAuth = false;
   static const String _openClawWaitingHint = '等待龙虾烹饪';
   static const String _openClawWaitingStatusKey = 'openclaw_waiting';
-  static const String _openClawProviderApiKeyEnv =
-      'OMNIBOT_OPENCLAW_PROVIDER_API_KEY';
-  static const String _openClawGatewayTokenEnvRef =
-      r'${OPENCLAW_GATEWAY_TOKEN}';
   static const String _openClawSessionKeyPrefix = 'openclaw';
-  static const Duration _openClawGatewayReadyTimeout = Duration(seconds: 70);
-  static const Duration _openClawGatewayReadyPollInterval = Duration(
-    milliseconds: 1200,
-  );
-  static const Duration _openClawGatewayInitToastCooldown = Duration(
-    seconds: 3,
-  );
   static const Duration _normalSurfaceModelRevealDelay = Duration(
     milliseconds: 1700,
   );
-  DateTime? _lastOpenClawGatewayInitToastAt;
   int _workspaceSurfaceSeed = 0;
   bool _workspaceBrowserCanGoUp = false;
   bool _hasInitializedHalfScreen = false;
@@ -1313,40 +1289,6 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     bool enable = true,
   });
 
-  String _buildDefaultOpenClawDeployConfigJson({
-    required String providerBaseUrl,
-    required String modelId,
-  });
-
-  String _buildOpenClawProviderBaseUrl(String providerBaseUrl);
-
-  String? _validateOpenClawDeployConfig(String configJson);
-
-  String _buildOpenClawDeployConfigDraftKey(
-    _OpenClawDeployResolvedConfig resolvedConfig,
-  );
-
-  void _syncOpenClawDeployConfigDraft(
-    _OpenClawDeployResolvedConfig resolvedConfig, {
-    bool force = false,
-  });
-
-  _OpenClawDeployPanelState _buildOpenClawDeployPanelState();
-
-  Future<void> _showOpenClawDeployPanel();
-
-  Future<void> _refreshOpenClawDeployPanelState();
-
-  void _startOpenClawDeploySnapshotPolling();
-
-  void _stopOpenClawDeploySnapshotPolling();
-
-  Future<void> _pollOpenClawDeploySnapshot();
-
-  Future<void> _handleOpenClawDeploySnapshot(OpenClawDeploySnapshot snapshot);
-
-  Future<void> _startOpenClawDeployFromPanel();
-
   Future<bool> _tryHandleSlashCommand(String messageText);
 
   Future<void> _checkOpenClawConnection();
@@ -1358,8 +1300,6 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     String? subtitle,
     required VoidCallback onTap,
   });
-
-  Widget _buildOpenClawDeployPanel();
 
   void _syncRuntimeSnapshotForMode(
     ChatPageMode mode, {

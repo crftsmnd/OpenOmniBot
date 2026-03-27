@@ -112,18 +112,6 @@ class SpecialPermissionChannel {
                         .startEmbeddedTerminalSetupSession(call, result)
                     "dismissEmbeddedTerminalSetupSession" -> specialPermissionManager!!
                         .dismissEmbeddedTerminalSetupSession(result)
-                    "startOpenClawDeploy" -> specialPermissionManager!!
-                        .startOpenClawDeploy(call, result)
-                    "getOpenClawDeploySnapshot" -> specialPermissionManager!!
-                        .getOpenClawDeploySnapshot(result)
-                    "getOpenClawGatewayStatus" -> specialPermissionManager!!
-                        .getOpenClawGatewayStatus(result)
-                    "setOpenClawGatewayAutoStart" -> specialPermissionManager!!
-                        .setOpenClawGatewayAutoStart(call, result)
-                    "startOpenClawGateway" -> specialPermissionManager!!
-                        .startOpenClawGateway(call, result)
-                    "stopOpenClawGateway" -> specialPermissionManager!!
-                        .stopOpenClawGateway(result)
                     "openNativeTerminal" -> specialPermissionManager!!
                         .openNativeTerminal(call, result)
                     "prepareTermuxLiveWrapper" -> specialPermissionManager!!

@@ -52,7 +52,6 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
         _showSlashCommandPanel ||
         _showModelMentionPanel ||
         _openClawPanelExpanded ||
-        _openClawDeployPanelExpanded ||
         _isAiResponding ||
         _isCheckingExecutableTask ||
         _isExecutingTask) {

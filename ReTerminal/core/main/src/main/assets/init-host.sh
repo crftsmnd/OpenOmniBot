@@ -9,6 +9,12 @@ if [ -z "$(ls -A "$ALPINE_DIR" | grep -vE '^(root|tmp)$')" ]; then
     tar -xf "$ALPINE_ARCHIVE" -C "$ALPINE_DIR"
 fi
 
+FIPS_COMPAT_FILE="$PREFIX/local/sysctl_crypto_fips_enabled"
+[ ! -f "$FIPS_COMPAT_FILE" ] && {
+    mkdir -p "$PREFIX/local"
+    printf '0\n' > "$FIPS_COMPAT_FILE"
+}
+
 if [ -n "$OMNIBOT_HOST_WORKSPACE" ]; then
     mkdir -p "$OMNIBOT_HOST_WORKSPACE"
     mkdir -p "$ALPINE_DIR/workspace"
@@ -46,6 +52,7 @@ ARGS="$ARGS -b /proc"
 ARGS="$ARGS -b $PREFIX"
 ARGS="$ARGS -b $PREFIX/local/stat:/proc/stat"
 ARGS="$ARGS -b $PREFIX/local/vmstat:/proc/vmstat"
+ARGS="$ARGS -b $FIPS_COMPAT_FILE:/proc/.sysctl_crypto_fips_enabled"
 
 if [ -n "$OMNIBOT_HOST_WORKSPACE" ]; then
   ARGS="$ARGS -b $OMNIBOT_HOST_WORKSPACE:/workspace"
