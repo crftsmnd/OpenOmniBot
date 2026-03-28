@@ -115,7 +115,7 @@ class OmniAgentExecutor(
                     initialMessages = initialMessages,
                     conversationId = conversationId,
                     contextCompactor = contextCompactor,
-                    executionEnv = AgentToolRouter.ExecutionEnvironment(
+                    executionEnv = DefaultAgentExecutionEnvironment(
                         agentRunId = agentRunId,
                         userMessage = userMessage,
                         currentPackageName = currentPackageName,

@@ -4,6 +4,13 @@ const int _kDefaultContextTokenThreshold = 128000;
 const int _kMinContextTokenThreshold = 10000;
 const int _kMaxContextTokenThreshold = 512000;
 
+class _ToolActivityAnchorGeometry {
+  const _ToolActivityAnchorGeometry({required this.rect, required this.bottom});
+
+  final Rect rect;
+  final double bottom;
+}
+
 mixin _ChatPageUiMixin on _ChatPageStateBase {
   bool get _showNewConversationPullIndicator =>
       _isNewConversationPullTracking || _newConversationPullDistance > 0;
@@ -38,17 +45,26 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     return (inputTop - 30).clamp(8.0, constraints.maxHeight - 24).toDouble();
   }
 
-  double _resolveToolActivityStripBottom({
+  _ToolActivityAnchorGeometry _resolveToolActivityAnchorGeometry({
     required BuildContext layoutContext,
     required BoxConstraints constraints,
     required double inputBottomPadding,
     required double keyboardSpacer,
   }) {
-    final fallback = (inputBottomPadding + keyboardSpacer + 84)
+    final fallbackBottom = (inputBottomPadding + keyboardSpacer + 84)
         .clamp(0.0, constraints.maxHeight)
         .toDouble();
+    final fallbackRect = Rect.fromLTWH(
+      24,
+      constraints.maxHeight - fallbackBottom,
+      math.max(0.0, constraints.maxWidth - 48),
+      0,
+    );
     if (!_isInputAreaVisible) {
-      return fallback;
+      return _ToolActivityAnchorGeometry(
+        rect: fallbackRect,
+        bottom: fallbackBottom,
+      );
     }
     final inputContext = _chatInputAreaKey.currentContext;
     final inputBox = inputContext?.findRenderObject();
@@ -57,12 +73,34 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
         stackBox is! RenderBox ||
         !inputBox.hasSize ||
         !stackBox.hasSize) {
-      return fallback;
+      return _ToolActivityAnchorGeometry(
+        rect: fallbackRect,
+        bottom: fallbackBottom,
+      );
     }
-    final inputTop = inputBox.localToGlobal(Offset.zero, ancestor: stackBox).dy;
-    return (constraints.maxHeight - inputTop)
-        .clamp(0.0, constraints.maxHeight)
-        .toDouble();
+    final inputOffset = inputBox.localToGlobal(Offset.zero, ancestor: stackBox);
+    final rect = inputOffset & inputBox.size;
+    return _ToolActivityAnchorGeometry(
+      rect: rect,
+      bottom: (constraints.maxHeight - rect.top)
+          .clamp(0.0, constraints.maxHeight)
+          .toDouble(),
+    );
+  }
+
+  void _scheduleToolActivityInsetSync(double height) {
+    final normalized = height.isFinite ? height : 0.0;
+    if ((_toolActivityOccupiedHeight - normalized).abs() < 0.5) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || (_toolActivityOccupiedHeight - normalized).abs() < 0.5) {
+        return;
+      }
+      setState(() {
+        _toolActivityOccupiedHeightByMode[_activeMode] = normalized;
+      });
+    });
   }
 
   Widget _buildNewConversationPullIndicator(double topOffset) {
@@ -219,6 +257,9 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     return ChatMessageList(
       messages: runtime?.messages ?? _messagesByMode[mode]!,
       scrollController: _scrollControllerForMode(mode),
+      bottomOverlayInset: mode == _activeMode && !_isWorkspaceSurface
+          ? _toolActivityOccupiedHeight
+          : 0,
       onBeforeTaskExecute: handleBeforeTaskExecute,
       onCancelTask: _onCancelTaskFromCard,
       onRequestAuthorize: mode == ChatPageMode.normal
@@ -316,14 +357,18 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                         inputBottomPadding: inputBottomPadding,
                         keyboardSpacer: keyboardSpacer,
                       );
-                  final toolActivityStripBottom = toolActivityCards.isEmpty
-                      ? 0.0
-                      : _resolveToolActivityStripBottom(
+                  final toolActivityAnchor = toolActivityCards.isEmpty
+                      ? null
+                      : _resolveToolActivityAnchorGeometry(
                           layoutContext: context,
                           constraints: constraints,
                           inputBottomPadding: inputBottomPadding,
                           keyboardSpacer: keyboardSpacer,
                         );
+                  if (toolActivityCards.isEmpty &&
+                      _toolActivityOccupiedHeight > 0) {
+                    _scheduleToolActivityInsetSync(0);
+                  }
                   return Stack(
                     clipBehavior: Clip.hardEdge,
                     children: [
@@ -466,10 +511,17 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                           _isInputAreaVisible &&
                           toolActivityCards.isNotEmpty)
                         Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: toolActivityStripBottom,
-                          child: ChatToolActivityStrip(messages: _messages),
+                          left: toolActivityAnchor?.rect.left ?? 24,
+                          width:
+                              toolActivityAnchor?.rect.width ??
+                              math.max(0.0, constraints.maxWidth - 48),
+                          bottom: toolActivityAnchor?.bottom ?? 0,
+                          child: ChatToolActivityStrip(
+                            messages: _messages,
+                            anchorRect: toolActivityAnchor?.rect,
+                            onOccupiedHeightChanged:
+                                _scheduleToolActivityInsetSync,
+                          ),
                         ),
                       if (!_isWorkspaceSurface)
                         Positioned(

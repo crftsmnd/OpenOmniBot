@@ -216,7 +216,7 @@ object AgentToolDefinitions {
             )
             put(
                 "postToolRule",
-                "terminal_execute 应单独占据当前 tool_calls。该工具会固定在 executionMode=proot（prootDistro=alpine）执行，传入 termux/debian 等参数会被忽略。若执行失败，可在下一轮基于 stdout/stderr/errorMessage 再次调用 terminal_execute 修正，最多 3 次；不要在同一个 tool_calls 中串联其他结果依赖型工具。"
+                "terminal_execute 应单独占据当前 tool_calls。该工具会固定在 executionMode=proot（prootDistro=alpine）执行，传入 termux/debian 等参数会被忽略。若执行失败，可在下一轮基于 stdout/stderr/errorMessage 自行决定是否再次显式调用 terminal_execute；不要在同一个 tool_calls 中串联其他结果依赖型工具。"
             )
             putJsonObject("parameters") {
                 put("type", "object")

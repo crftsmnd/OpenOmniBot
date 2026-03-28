@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -173,6 +174,10 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     ChatPageMode.normal: <ChatMessageModel>[],
     ChatPageMode.openclaw: <ChatMessageModel>[],
   };
+  final Map<ChatPageMode, double> _toolActivityOccupiedHeightByMode = {
+    ChatPageMode.normal: 0,
+    ChatPageMode.openclaw: 0,
+  };
   final Map<ChatPageMode, bool> _isAiRespondingByMode = {
     ChatPageMode.normal: false,
     ChatPageMode.openclaw: false,
@@ -325,6 +330,8 @@ abstract class _ChatPageStateBase extends State<ChatPage>
 
   List<ChatMessageModel> get _messages =>
       _activeRuntime?.messages ?? _messagesByMode[_activeMode]!;
+  double get _toolActivityOccupiedHeight =>
+      _toolActivityOccupiedHeightByMode[_activeMode] ?? 0;
   bool get _isAiResponding =>
       _activeRuntime?.isAiResponding ??
       (_isAiRespondingByMode[_activeMode] ?? false);
