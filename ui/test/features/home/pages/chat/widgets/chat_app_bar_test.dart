@@ -452,6 +452,46 @@ void main() {
     expect(find.text('gpt-5.4'), findsOneWidget);
   });
 
+  testWidgets('shows app update indicator next to companion button', (
+    tester,
+  ) async {
+    var tapCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DefaultAssetBundle(
+          bundle: _SvgTestAssetBundle(),
+          child: Scaffold(
+            body: ChatAppBar(
+              onMenuTap: () {},
+              onCompanionTap: () {},
+              activeMode: ChatSurfaceMode.normal,
+              onModeChanged: (_) {},
+              activeModelId: 'gpt-5.4',
+              displayLayer: ChatIslandDisplayLayer.model,
+              onDisplayLayerChanged: (_) {},
+              onTerminalEnvironmentTap: (_) {},
+              onTerminalTap: () {},
+              onBrowserTap: () {},
+              showAppUpdateIndicator: true,
+              appUpdateTooltip: '发现新版本 v9.9.9',
+              onAppUpdateTap: () {
+                tapCount += 1;
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final indicator = find.byKey(const ValueKey('chat-app-update-button'));
+    expect(indicator, findsOneWidget);
+
+    await tester.tap(indicator);
+    await tester.pumpAndSettle();
+
+    expect(tapCount, 1);
+  });
+
   testWidgets('supports direct island swipe between model and tools layers', (
     tester,
   ) async {
@@ -549,19 +589,19 @@ void main() {
   ) async {
     await tester.pumpWidget(const _SurfaceTransitionHarness());
 
-    await _tapModeSegment(tester, 1);
-    await _pumpSurfaceSwitch(tester);
+    await tester.tap(find.byKey(const ValueKey('request-normal')));
+    await tester.pump();
     expect(find.text('active:normal'), findsOneWidget);
     expect(find.text('layer:mode'), findsOneWidget);
 
     await tester.pump(const Duration(milliseconds: 1000));
 
-    await _tapModeSegment(tester, 2);
-    await _pumpSurfaceSwitch(tester);
+    await tester.tap(find.byKey(const ValueKey('request-openclaw')));
+    await tester.pump();
     expect(find.text('active:openclaw'), findsOneWidget);
 
-    await _tapModeSegment(tester, 1);
-    await _pumpSurfaceSwitch(tester);
+    await tester.tap(find.byKey(const ValueKey('request-normal')));
+    await tester.pump();
     expect(find.text('active:normal'), findsOneWidget);
     expect(find.text('layer:mode'), findsOneWidget);
 

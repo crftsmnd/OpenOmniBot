@@ -55,7 +55,6 @@ import 'tool_activity_utils.dart';
 import 'widgets/chat_widgets.dart';
 import 'widgets/chat_browser_overlay.dart';
 import 'widgets/chat_tool_activity_strip.dart';
-import 'package:ui/widgets/app_update_banner.dart';
 import 'package:ui/widgets/app_update_dialog.dart';
 
 part 'chat_page_browser.dart';
@@ -1176,10 +1175,6 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   double _popupMenuBottomOffset();
 
   Future<void> _handleAppUpdateBannerTap();
-
-  Future<void> _handleAppUpdateBannerDismiss();
-
-  Widget? _buildAppUpdateBanner();
 
   Future<void> _loadOpenClawConfig();
 

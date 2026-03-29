@@ -17,7 +17,7 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
       return true;
     }
     final position = controller.position;
-    final distanceToBottom = (position.pixels - position.minScrollExtent).abs();
+    final distanceToBottom = (position.maxScrollExtent - position.pixels).abs();
     return distanceToBottom <= 2;
   }
 

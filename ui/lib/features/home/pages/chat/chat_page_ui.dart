@@ -403,6 +403,12 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                       _toolActivityOccupiedHeight > 0) {
                     _scheduleToolActivityInsetSync(0);
                   }
+                  final showAppUpdateIndicator =
+                      !_isWorkspaceSurface &&
+                      AppUpdateService.shouldShowBanner(_appUpdateStatus);
+                  final appUpdateTooltip = _appUpdateStatus == null
+                      ? '发现新版本'
+                      : '发现新版本 ${_appUpdateStatus!.latestVersionLabel}';
                   return Stack(
                     clipBehavior: Clip.hardEdge,
                     children: [
@@ -452,6 +458,13 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                             activeToolType: _lastAgentToolType,
                             isCompanionModeEnabled: _isCompanionModeEnabled,
                             isCompanionToggleLoading: _isCompanionToggleLoading,
+                            showAppUpdateIndicator: showAppUpdateIndicator,
+                            appUpdateTooltip: appUpdateTooltip,
+                            onAppUpdateTap: showAppUpdateIndicator
+                                ? () {
+                                    unawaited(_handleAppUpdateBannerTap());
+                                  }
+                                : null,
                           ),
                           if (_isCompanionModeEnabled &&
                               _showCompanionCountdown)
@@ -537,7 +550,6 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                                         );
                                       }
                                     : null,
-                                topBanner: _buildAppUpdateBanner(),
                               ),
                             ),
                           SizedBox(height: inputBottomPadding + keyboardSpacer),

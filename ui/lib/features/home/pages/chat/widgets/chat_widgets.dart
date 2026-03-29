@@ -5,6 +5,20 @@ import '../chat_page_models.dart';
 import '../../command_overlay/widgets/message_bubble.dart';
 import '../../command_overlay/widgets/chat_input_area.dart';
 
+const String _chatAppBarUpdateSparklesSvg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" '
+    'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
+    'stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 '
+    '1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 '
+    '1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-'
+    '1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-'
+    '1.594z"/>'
+    '<path d="M20 2v4"/>'
+    '<path d="M22 4h-4"/>'
+    '<circle cx="4" cy="20" r="2"/>'
+    '</svg>';
+
 enum ChatSurfaceMode { workspace, normal, openclaw }
 
 const List<ChatSurfaceMode> kVisibleChatSurfaceModes = <ChatSurfaceMode>[
@@ -31,6 +45,9 @@ class ChatAppBar extends StatelessWidget {
   final String? activeToolType;
   final bool isCompanionModeEnabled;
   final bool isCompanionToggleLoading;
+  final bool showAppUpdateIndicator;
+  final VoidCallback? onAppUpdateTap;
+  final String? appUpdateTooltip;
 
   const ChatAppBar({
     super.key,
@@ -51,34 +68,41 @@ class ChatAppBar extends StatelessWidget {
     this.activeToolType,
     this.isCompanionModeEnabled = false,
     this.isCompanionToggleLoading = false,
+    this.showAppUpdateIndicator = false,
+    this.onAppUpdateTap,
+    this.appUpdateTooltip,
   });
 
   @override
   Widget build(BuildContext context) {
     final iconTint = Colors.grey[800]!;
+    const updateTint = Color(0xFFD4A017);
     return ColoredBox(
       color: const Color(0xFFF9FCFF),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Row(
-          children: [
-            // 左侧菜单按钮 - 和主页一样的样式
-            GestureDetector(
-              onTap: onMenuTap,
-              child: Container(
-                color: Colors.transparent,
-                padding: const EdgeInsets.all(15),
-                child: SvgPicture.asset(
-                  'assets/home/drawer_icon.svg',
-                  width: 20,
-                  height: 20,
-                  colorFilter: ColorFilter.mode(iconTint, BlendMode.srcIn),
+        child: SizedBox(
+          height: 50,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: GestureDetector(
+                  onTap: onMenuTap,
+                  child: Container(
+                    color: Colors.transparent,
+                    padding: const EdgeInsets.all(15),
+                    child: SvgPicture.asset(
+                      'assets/home/drawer_icon.svg',
+                      width: 20,
+                      height: 20,
+                      colorFilter: ColorFilter.mode(iconTint, BlendMode.srcIn),
+                    ),
+                  ),
                 ),
               ),
-            ),
-            // 顶部模式滑块
-            Expanded(
-              child: Center(
+              Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 176),
                   child: _ChatModeModelSwitcher(
@@ -98,40 +122,68 @@ class ChatAppBar extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
-            // 右侧小万陪伴按钮
-            GestureDetector(
-              onTap: isCompanionToggleLoading ? null : onCompanionTap,
-              child: Container(
-                color: Colors.transparent,
-                padding: const EdgeInsets.all(15),
-                child: isCompanionToggleLoading
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            isCompanionModeEnabled
-                                ? const Color(0xFF1930D9)
-                                : iconTint,
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (showAppUpdateIndicator)
+                      GestureDetector(
+                        key: const ValueKey('chat-app-update-button'),
+                        onTap: onAppUpdateTap,
+                        child: Tooltip(
+                          message: appUpdateTooltip ?? '发现新版本',
+                          child: Container(
+                            color: Colors.transparent,
+                            padding: const EdgeInsets.all(15),
+                            child: SvgPicture.string(
+                              _chatAppBarUpdateSparklesSvg,
+                              width: 18,
+                              height: 18,
+                              colorFilter: const ColorFilter.mode(
+                                updateTint,
+                                BlendMode.srcIn,
+                              ),
+                            ),
                           ),
                         ),
-                      )
-                    : SvgPicture.asset(
-                        'assets/home/avatar.svg',
-                        width: 20,
-                        height: 20,
-                        colorFilter: ColorFilter.mode(
-                          isCompanionModeEnabled
-                              ? const Color(0xFF1930D9)
-                              : iconTint,
-                          BlendMode.srcIn,
-                        ),
                       ),
+                    GestureDetector(
+                      onTap: isCompanionToggleLoading ? null : onCompanionTap,
+                      child: Container(
+                        color: Colors.transparent,
+                        padding: const EdgeInsets.all(15),
+                        child: isCompanionToggleLoading
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    isCompanionModeEnabled
+                                        ? const Color(0xFF1930D9)
+                                        : iconTint,
+                                  ),
+                                ),
+                              )
+                            : SvgPicture.asset(
+                                'assets/home/avatar.svg',
+                                width: 20,
+                                height: 20,
+                                colorFilter: ColorFilter.mode(
+                                  isCompanionModeEnabled
+                                      ? const Color(0xFF1930D9)
+                                      : iconTint,
+                                  BlendMode.srcIn,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -787,7 +839,7 @@ class _ChatModeSliderState extends State<ChatModeSlider> {
 }
 
 /// 消息列表
-class ChatMessageList extends StatelessWidget {
+class ChatMessageList extends StatefulWidget {
   final List<ChatMessageModel> messages;
   final ScrollController scrollController;
   final Future<void> Function() onBeforeTaskExecute;
@@ -806,8 +858,59 @@ class ChatMessageList extends StatelessWidget {
   });
 
   @override
+  State<ChatMessageList> createState() => _ChatMessageListState();
+}
+
+class _ChatMessageListState extends State<ChatMessageList> {
+  bool _stickToBottomScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleStickToBottom();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatMessageList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isNearBottom()) {
+      _scheduleStickToBottom();
+    }
+  }
+
+  bool _isNearBottom() {
+    if (!widget.scrollController.hasClients) {
+      return true;
+    }
+    final position = widget.scrollController.position;
+    return (position.maxScrollExtent - position.pixels).abs() <= 24;
+  }
+
+  void _scheduleStickToBottom() {
+    if (_stickToBottomScheduled) {
+      return;
+    }
+    _stickToBottomScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _stickToBottomScheduled = false;
+      if (!mounted || !widget.scrollController.hasClients) {
+        if (mounted) {
+          _scheduleStickToBottom();
+        }
+        return;
+      }
+      final position = widget.scrollController.position;
+      final target = position.maxScrollExtent;
+      if ((target - position.pixels).abs() < 0.5) {
+        return;
+      }
+      widget.scrollController.jumpTo(target);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (messages.isEmpty) {
+    if (widget.messages.isEmpty) {
       return GestureDetector(
         onVerticalDragUpdate: (_) {},
         behavior: HitTestBehavior.opaque,
@@ -824,21 +927,24 @@ class ChatMessageList extends StatelessWidget {
       child: Align(
         alignment: Alignment.topCenter,
         child: ListView.builder(
-          controller: scrollController,
-          reverse: true,
+          controller: widget.scrollController,
+          reverse: false,
           shrinkWrap: true,
           physics: const ClampingScrollPhysics(),
           clipBehavior: Clip.hardEdge,
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-          itemCount: messages.length,
+          itemCount: widget.messages.length,
           itemBuilder: (context, index) {
-            final message = messages[index];
-            final isLastMessage = index == 0;
-            final isOldestMessage = index == messages.length - 1;
-            final bottomPadding = isLastMessage ? bottomOverlayInset : 0.0;
+            final dataIndex = widget.messages.length - 1 - index;
+            final message = widget.messages[dataIndex];
+            final isNewestMessage = dataIndex == 0;
+            final isOldestMessage = dataIndex == widget.messages.length - 1;
+            final bottomPadding = isNewestMessage
+                ? widget.bottomOverlayInset
+                : 0.0;
             final needTopPadding = isOldestMessage && message.user != 1;
             return Padding(
-              key: ValueKey('chat-message-list-item-$index'),
+              key: ValueKey('chat-message-list-item-$dataIndex'),
               padding: EdgeInsets.only(
                 top: needTopPadding ? 24.0 : 0.0,
                 bottom: bottomPadding,
@@ -846,11 +952,11 @@ class ChatMessageList extends StatelessWidget {
               child: MessageBubble(
                 message: message,
                 key: ValueKey(message.dbId ?? message.contentId ?? message.id),
-                onBeforeTaskExecute: onBeforeTaskExecute,
-                onCancelTask: onCancelTask,
+                onBeforeTaskExecute: widget.onBeforeTaskExecute,
+                onCancelTask: widget.onCancelTask,
                 enableThinkingCollapse: true,
-                parentScrollController: scrollController,
-                onRequestAuthorize: onRequestAuthorize,
+                parentScrollController: widget.scrollController,
+                onRequestAuthorize: widget.onRequestAuthorize,
               ),
             );
           },

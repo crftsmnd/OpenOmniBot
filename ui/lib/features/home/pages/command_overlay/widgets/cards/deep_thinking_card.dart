@@ -112,22 +112,9 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
     }
 
     if (completionSettled && !_hasAutoCollapsedForCurrentCompletion) {
-      _hasAutoCollapsedForCurrentCompletion = true;
-      if (!_isCollapsed && mounted) {
-        setState(() {
-          _isCollapsed = true;
-        });
-      } else {
-        _isCollapsed = true;
-      }
+      _setCollapsed(true, markCompletionHandled: true);
     } else if (becameThinking && _isCollapsed) {
-      if (mounted) {
-        setState(() {
-          _isCollapsed = false;
-        });
-      } else {
-        _isCollapsed = false;
-      }
+      _setCollapsed(false);
     }
 
     final textChanged = widget.thinkingText != oldWidget.thinkingText;
@@ -212,9 +199,23 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
 
   void _toggleCollapsed() {
     if (!widget.isCollapsible || widget.stage != 4) return;
+    _setCollapsed(
+      !_isCollapsed,
+      markCompletionHandled: _shouldAutoCollapse(widget),
+    );
+  }
+
+  void _setCollapsed(bool collapsed, {bool markCompletionHandled = false}) {
+    if (_isCollapsed == collapsed) {
+      if (markCompletionHandled) {
+        _hasAutoCollapsedForCurrentCompletion = true;
+      }
+      return;
+    }
+
     setState(() {
-      _isCollapsed = !_isCollapsed;
-      if (_shouldAutoCollapse(widget)) {
+      _isCollapsed = collapsed;
+      if (markCompletionHandled) {
         _hasAutoCollapsedForCurrentCompletion = true;
       }
     });
@@ -291,11 +292,8 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
         hintText = '正在思考';
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (canCollapse && hasContent)
-          InkWell(
+    final header = canCollapse && hasContent
+        ? InkWell(
             onTap: _toggleCollapsed,
             borderRadius: BorderRadius.circular(8),
             child: Padding(
@@ -325,102 +323,85 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
               ),
             ),
           )
-        else
-          BotStatus(
+        : BotStatus(
             status: (widget.stage == 4 || widget.stage == 5)
                 ? BotStatusType.completed
                 : BotStatusType.hint,
             hintText: hintText,
             costTime: _formatTime(_elapsedSeconds),
-          ),
-
-        AnimatedSize(
-          duration: sizeAnimationDuration,
-          curve: Curves.easeInOut,
-          alignment: Alignment.topLeft,
-          child:
-              (hasContent &&
-                  widget.stage != 5 &&
-                  (!canCollapse || !_isCollapsed))
-              ? Container(
-                  width: double.infinity,
-                  constraints: BoxConstraints(maxHeight: widget.maxHeight),
-                  margin: const EdgeInsets.only(top: 8.0),
-                  decoration: const BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: AppColors.text10, // 左边框
-                        width: 1.0,
+          );
+    final content = AnimatedSize(
+      duration: sizeAnimationDuration,
+      curve: Curves.easeInOut,
+      alignment: Alignment.topLeft,
+      child:
+          (hasContent && widget.stage != 5 && (!canCollapse || !_isCollapsed))
+          ? Container(
+              width: double.infinity,
+              constraints: BoxConstraints(maxHeight: widget.maxHeight),
+              margin: const EdgeInsets.only(top: 8.0),
+              decoration: const BoxDecoration(
+                border: Border(
+                  left: BorderSide(color: AppColors.text10, width: 1.0),
+                ),
+              ),
+              child: Stack(
+                children: [
+                  NotificationListener<ScrollNotification>(
+                    onNotification: (notification) {
+                      _checkOverflow();
+                      return _forwardScrollToParent(
+                        notification,
+                        parentScrollPosition,
+                      );
+                    },
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      physics: const ClampingScrollPhysics(),
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildText(widget.thinkingText, textColor),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  child: Stack(
-                    children: [
-                      NotificationListener<ScrollNotification>(
-                        onNotification: (notification) {
-                          _checkOverflow();
-                          return _forwardScrollToParent(
-                            notification,
-                            parentScrollPosition,
-                          );
-                        },
-                        child: SingleChildScrollView(
-                          controller: _scrollController,
-                          physics: const ClampingScrollPhysics(),
-                          child: Padding(
-                            padding: const EdgeInsets.only(left: 12.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildText(widget.thinkingText, textColor),
-                                // 加载中时在内容下方显示 indicator
-                                // if (widget.isLoading)
-                                //   const Padding(padding: EdgeInsets.only(top: 12.0), child: ThinkingDotsIndicator()),
+                  if (_showGradient)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      height: 40,
+                      child: IgnorePointer(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: const BorderRadius.only(
+                              bottomLeft: Radius.circular(4),
+                              bottomRight: Radius.circular(4),
+                            ),
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                const Color(0xCCF1F8FF).withValues(alpha: 0.0),
+                                const Color(0xCCF1F8FF).withValues(alpha: 0.8),
+                                const Color(0xCCF1F8FF),
                               ],
                             ),
                           ),
                         ),
                       ),
-                      // 底部渐变遮罩
-                      if (_showGradient)
-                        Positioned(
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          height: 40,
-                          child: IgnorePointer(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.only(
-                                  bottomLeft: Radius.circular(4),
-                                  bottomRight: Radius.circular(4),
-                                ),
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    const Color(
-                                      0xCCF1F8FF,
-                                    ).withValues(alpha: 0.0),
-                                    const Color(
-                                      0xCCF1F8FF,
-                                    ).withValues(alpha: 0.8),
-                                    const Color(0xCCF1F8FF),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                )
-              : const SizedBox.shrink(),
-        ),
-
-        // Stage 4: 显示操作行（准备执行任务 + 取消任务），仅在任务可执行时显示
-        if (widget.stage == 4 && widget.isExecutable)
-          Padding(
+                    ),
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
+    );
+    final footer = widget.stage == 4 && widget.isExecutable
+        ? Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -452,11 +433,9 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                 ),
               ],
             ),
-          ),
-
-        // Stage 5: 显示已取消提示
-        if (widget.stage == 5)
-          Padding(
+          )
+        : widget.stage == 5
+        ? Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
               '任务已取消',
@@ -468,8 +447,12 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                 height: 1.83,
               ),
             ),
-          ),
-      ],
+          )
+        : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [header, content, if (footer != null) footer],
     );
   }
 
