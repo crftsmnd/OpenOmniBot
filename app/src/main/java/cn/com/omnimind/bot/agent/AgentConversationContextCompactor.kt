@@ -33,6 +33,7 @@ open class AgentConversationContextCompactor(
         private const val CHAT_COMPACTOR_SCENE = "scene.compactor.context.chat"
         private const val TAG = "AgentConversationContextCompactor"
         private const val COMPACTION_REQUEST_PROMPT = """
+/no_think
 你是一个用户与Agent对话上下文压缩器。你的职责是把一段多轮聊天历史压缩为一份可持续累积的上下文总结，供后续对话继续参考。\n\n
 # 要求：\n
 1. 只输出纯文本，不要 JSON，不要 Markdown 代码块。\n
@@ -217,7 +218,8 @@ open class AgentConversationContextCompactor(
             eventSource = HttpController.postLLMStreamRequestWithContextAsFlow(
                 model = CHAT_COMPACTOR_SCENE,
                 messages = messages,
-                event = listener
+                event = listener,
+                enableThinking = false
             )
             result.await()
         } finally {
