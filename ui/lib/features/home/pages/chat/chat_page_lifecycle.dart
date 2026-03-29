@@ -569,32 +569,6 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
   }
 
   @override
-  Future<void> _handleAppUpdateBannerDismiss() async {
-    final status = _appUpdateStatus;
-    if (status == null || !status.hasUpdate) return;
-    await AppUpdateService.dismissBanner(status);
-    if (!mounted) return;
-    setState(() {});
-  }
-
-  @override
-  Widget? _buildAppUpdateBanner() {
-    final status = _appUpdateStatus;
-    if (status == null || !AppUpdateService.shouldShowBanner(status)) {
-      return null;
-    }
-    return AppUpdateBanner(
-      text: '发现新版本 ${status.latestVersionLabel}，点击更新',
-      onTap: () {
-        _handleAppUpdateBannerTap();
-      },
-      onClose: () {
-        _handleAppUpdateBannerDismiss();
-      },
-    );
-  }
-
-  @override
   int _pageIndexForSurface(ChatSurfaceMode mode) => switch (mode) {
     ChatSurfaceMode.workspace => 0,
     ChatSurfaceMode.normal => 1,
