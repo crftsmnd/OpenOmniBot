@@ -20,6 +20,13 @@ import com.rk.terminal.ui.screens.terminal.MkSession
 import com.termux.terminal.TerminalSession
 
 class SessionService : Service() {
+    companion object {
+        private const val DEFAULT_COLUMNS = 120
+        private const val DEFAULT_ROWS = 40
+        private const val DEFAULT_CELL_WIDTH = 10
+        private const val DEFAULT_CELL_HEIGHT = 20
+    }
+
     private val sessions = hashMapOf<String, TerminalSession>()
     val sessionList = mutableStateMapOf<String,Int>()
     var currentSession = mutableStateOf(Pair("main",com.rk.settings.Settings.working_Mode))
@@ -37,18 +44,42 @@ class SessionService : Service() {
             currentSession.value = Pair("main", com.rk.settings.Settings.working_Mode)
             updateNotification()
         }
-        fun createSession(id: String, activity: MainActivity, workingMode:Int): TerminalSession {
+
+        fun createSession(id: String, context: android.content.Context, workingMode:Int): TerminalSession {
+            val existing = sessions[id]
+            if (existing != null) {
+                sessionList[id] = workingMode
+                currentSession.value = Pair(id, workingMode)
+                updateNotification()
+                return existing
+            }
             return MkSession.createSession(
-                activity,
+                context,
                 HeadlessTerminalSessionClient,
                 id,
                 workingMode = workingMode
             ).also {
                 sessions[id] = it
                 sessionList[id] = workingMode
+                currentSession.value = Pair(id, workingMode)
                 updateNotification()
             }
         }
+
+        fun createHeadlessSession(id: String, context: android.content.Context, workingMode: Int): TerminalSession {
+            val session = createSession(id = id, context = context, workingMode = workingMode)
+            session.updateTerminalSessionClient(HeadlessTerminalSessionClient)
+            if (session.emulator == null) {
+                session.updateSize(
+                    DEFAULT_COLUMNS,
+                    DEFAULT_ROWS,
+                    DEFAULT_CELL_WIDTH,
+                    DEFAULT_CELL_HEIGHT
+                )
+            }
+            return session
+        }
+
         fun getSession(id: String): TerminalSession? {
             return sessions[id]
         }

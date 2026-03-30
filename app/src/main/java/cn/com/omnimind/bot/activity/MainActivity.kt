@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import cn.com.omnimind.bot.App
 import cn.com.omnimind.bot.ui.channel.ChannelManager
 import cn.com.omnimind.bot.ui.channel.FileSaveChannel
+import cn.com.omnimind.bot.terminal.EmbeddedTerminalAutoStartManager
 import cn.com.omnimind.bot.update.AppUpdateManager
 import cn.com.omnimind.bot.util.AssistsUtil
 import cn.com.omnimind.bot.ui.halfScreen.HalfScreenListenerImpl
@@ -26,6 +27,9 @@ class MainActivity : FlutterActivity() {
     }
 
     private var channelManager: ChannelManager = ChannelManager()
+    private val embeddedTerminalAutoStartManager by lazy {
+        EmbeddedTerminalAutoStartManager(this)
+    }
 
     private lateinit var halfScreenListenerImpl: HalfScreenListenerImpl
     private var isHalfScreenInitialized = false
@@ -68,6 +72,13 @@ class MainActivity : FlutterActivity() {
         SchemeUtil.pushRoute(intent, channelManager, null)
 
         applyHideFromRecentsSetting()
+        lifecycleScope.launch {
+            runCatching {
+                embeddedTerminalAutoStartManager.runEnabledTasksOnAppOpen()
+            }.onFailure { error ->
+                OmniLog.e(TAG, "MainActivity auto-start Alpine tasks failed", error)
+            }
+        }
 
         OmniLog.d(TAG, "MainActivity onCreate total cost: ${System.currentTimeMillis() - mainActivityStart}ms")
     }

@@ -1,5 +1,6 @@
 package com.rk.terminal.ui.screens.terminal
 
+import android.content.Context
 import android.os.Environment
 import android.util.Log
 import com.rk.libcommons.ShellArgv
@@ -16,7 +17,6 @@ import com.rk.settings.Settings
 import com.rk.terminal.App
 import com.rk.terminal.App.Companion.getTempDir
 import com.rk.terminal.BuildConfig
-import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.screens.settings.WorkingMode
 import com.termux.terminal.TerminalEmulator
 import com.termux.terminal.TerminalSession
@@ -27,9 +27,12 @@ object MkSession {
     private const val TAG = "MkSession"
 
     fun createSession(
-        activity: MainActivity, sessionClient: TerminalSessionClient, session_id: String,workingMode:Int
+        context: Context,
+        sessionClient: TerminalSessionClient,
+        session_id: String,
+        workingMode: Int
     ): TerminalSession {
-        with(activity) {
+        with(context) {
             val hostWorkspaceDir = File(applicationInfo.dataDir, "workspace").also { directory ->
                 if (!directory.exists()) {
                     directory.mkdirs()

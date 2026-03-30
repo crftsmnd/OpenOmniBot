@@ -6,12 +6,10 @@ import cn.com.omnimind.bot.agent.AgentWorkspaceManager
 import cn.com.omnimind.bot.termux.TermuxCommandBuilder
 import cn.com.omnimind.bot.termux.TermuxLiveUpdate
 import com.ai.assistance.operit.terminal.TerminalManager
-import com.ai.assistance.operit.terminal.data.TerminalSessionData
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
+import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -86,10 +84,19 @@ object EmbeddedTerminalRuntime {
         val commandRunning: Boolean
     )
 
+    data class BackgroundServiceLaunchResult(
+        val sessionId: String,
+        val started: Boolean,
+        val alreadyRunning: Boolean,
+        val currentDirectory: String,
+        val transcript: String,
+        val message: String
+    )
+
     private data class SessionHandle(
         val externalSessionId: String,
-        val terminalSessionId: String,
-        val mutex: Mutex = Mutex()
+        val mutex: Mutex = Mutex(),
+        @Volatile var activeCommandToken: String? = null
     )
 
     private data class BasePackageProbeResult(
@@ -586,31 +593,20 @@ object EmbeddedTerminalRuntime {
         val status = ensureCommandEnvironmentReady(context)
         require(status.success) { status.message }
 
-        val manager = terminalManager(context)
-        val existingHandle = sessionHandles[requestedSessionId]
-        val activeHandle = existingHandle?.takeIf { getTerminalSession(context, it) != null }
-        val createdNewSession: Boolean
-
-        if (activeHandle != null) {
-            createdNewSession = false
-        } else {
-            if (existingHandle != null) {
-                sessionHandles.remove(requestedSessionId, existingHandle)
-                runCatching {
-                    manager.closeSession(existingHandle.terminalSessionId)
-                }
-            }
-            val created = manager.createNewSession(requestedSessionId)
-            sessionHandles[requestedSessionId] = SessionHandle(
-                externalSessionId = requestedSessionId,
-                terminalSessionId = created.id
-            )
-            createdNewSession = true
+        val handle = sessionHandles.computeIfAbsent(requestedSessionId) {
+            SessionHandle(externalSessionId = requestedSessionId)
+        }
+        val sessionAccess = ReTerminalSessionBridge.ensureHeadlessSession(
+            context = context,
+            sessionId = requestedSessionId
+        )
+        if (sessionAccess.created) {
+            handle.activeCommandToken = null
         }
 
         val targetWorkingDirectory = workingDirectory?.trim().takeUnless { it.isNullOrBlank() }
             ?: AgentWorkspaceManager.SHELL_ROOT_PATH
-        if (createdNewSession) {
+        if (sessionAccess.created) {
             val cwdResult = executeSessionCommand(
                 context = context,
                 sessionId = requestedSessionId,
@@ -716,7 +712,7 @@ object EmbeddedTerminalRuntime {
                 commandRunning = false
             )
 
-        val session = getTerminalSession(context, handle) ?: run {
+        val session = ReTerminalSessionBridge.getSession(context, sessionId) ?: run {
             sessionHandles.remove(sessionId)
             return SessionReadResult(
                 sessionId = sessionId,
@@ -725,19 +721,94 @@ object EmbeddedTerminalRuntime {
                 commandRunning = false
             )
         }
+        val rawTranscript = session.getTranscriptText().trim('\n')
+        val activeToken = handle.activeCommandToken
+        val commandRunning = if (activeToken.isNullOrBlank()) {
+            false
+        } else {
+            val parsed = parsePersistentCommandOutput(rawTranscript, activeToken)
+            if (parsed.exitCode != null) {
+                handle.activeCommandToken = null
+                false
+            } else {
+                session.isRunning
+            }
+        }
 
         return SessionReadResult(
             sessionId = sessionId,
-            transcript = buildTranscript(session),
-            currentDirectory = normalizeCurrentDirectory(session.currentDirectory),
-            commandRunning = session.currentExecutingCommand?.isExecuting == true
+            transcript = buildTranscript(rawTranscript),
+            currentDirectory = normalizeCurrentDirectory(session.getCwd().orEmpty()),
+            commandRunning = commandRunning
         )
     }
 
-    fun stopSession(context: Context, sessionId: String): Boolean {
-        val handle = sessionHandles.remove(sessionId) ?: return false
-        terminalManager(context).closeSession(handle.terminalSessionId)
-        return true
+    suspend fun stopSession(context: Context, sessionId: String): Boolean {
+        sessionHandles.remove(sessionId)
+        return runCatching {
+            ReTerminalSessionBridge.stopSession(context, sessionId)
+        }.getOrDefault(false)
+    }
+
+    suspend fun launchBackgroundServiceSession(
+        context: Context,
+        sessionId: String,
+        command: String,
+        workingDirectory: String?,
+        environment: Map<String, String> = emptyMap()
+    ): BackgroundServiceLaunchResult {
+        val status = ensureCommandEnvironmentReady(context)
+        if (!status.success) {
+            return BackgroundServiceLaunchResult(
+                sessionId = sessionId,
+                started = false,
+                alreadyRunning = false,
+                currentDirectory = DEFAULT_CURRENT_DIRECTORY,
+                transcript = "",
+                message = status.message
+            )
+        }
+
+        val existingSession = ReTerminalSessionBridge.getSession(context, sessionId)
+        if (existingSession?.isRunning == true) {
+            return BackgroundServiceLaunchResult(
+                sessionId = sessionId,
+                started = false,
+                alreadyRunning = true,
+                currentDirectory = normalizeCurrentDirectory(existingSession.getCwd().orEmpty()),
+                transcript = buildTranscript(existingSession.getTranscriptText().trim('\n')),
+                message = "后台服务已在运行。"
+            )
+        }
+
+        if (existingSession != null) {
+            runCatching { ReTerminalSessionBridge.stopSession(context, sessionId) }
+        }
+
+        sessionHandles.remove(sessionId)
+        ReTerminalSessionBridge.ensureHeadlessSession(
+            context = context,
+            sessionId = sessionId
+        )
+        ReTerminalSessionBridge.sendCommand(
+            context = context,
+            sessionId = sessionId,
+            command = wrapServiceSessionCommand(
+                command = command,
+                workingDirectory = workingDirectory,
+                environment = environment
+            )
+        )
+        delay(150)
+        val session = ReTerminalSessionBridge.getSession(context, sessionId)
+        return BackgroundServiceLaunchResult(
+            sessionId = sessionId,
+            started = true,
+            alreadyRunning = false,
+            currentDirectory = normalizeCurrentDirectory(session?.getCwd().orEmpty()),
+            transcript = buildTranscript(session?.getTranscriptText()?.trim('\n').orEmpty()),
+            message = "后台服务启动命令已发送。"
+        )
     }
 
     private suspend fun sendSessionCommandAndAwait(
@@ -746,30 +817,44 @@ object EmbeddedTerminalRuntime {
         command: String,
         timeoutSeconds: Int,
         environment: Map<String, String> = emptyMap()
-    ): SessionCommandResult = coroutineScope {
-        val manager = terminalManager(context)
-        val commandId = UUID.randomUUID().toString()
+    ): SessionCommandResult {
         val token = UUID.randomUUID().toString()
-        val awaited = async {
-            withTimeoutOrNull(timeoutSeconds * 1000L) {
-                manager.commandExecutionEvents.first { event ->
-                    event.sessionId == handle.terminalSessionId &&
-                        event.commandId == commandId &&
-                        event.isCompleted
-                }
-            }
+        val sessionAccess = ReTerminalSessionBridge.ensureHeadlessSession(
+            context = context,
+            sessionId = handle.externalSessionId
+        )
+        if (sessionAccess.created) {
+            handle.activeCommandToken = null
         }
-
-        manager.sendCommandToSession(
-            sessionId = handle.terminalSessionId,
-            command = wrapPersistentSessionCommand(command, token, environment),
-            commandId = commandId
+        val transcriptStart = sessionAccess.session.getTranscriptText().length
+        handle.activeCommandToken = token
+        ReTerminalSessionBridge.sendCommand(
+            context = context,
+            sessionId = handle.externalSessionId,
+            command = wrapPersistentSessionCommand(command, token, environment)
         )
 
-        val completion = awaited.await()
+        var completionTranscript: String? = null
+        withTimeoutOrNull(timeoutSeconds * 1000L) {
+            while (completionTranscript == null) {
+                val currentTranscript = ReTerminalSessionBridge.getSession(
+                    context = context,
+                    sessionId = handle.externalSessionId
+                )?.getTranscriptText().orEmpty()
+                val parsed = parsePersistentCommandOutput(
+                    rawOutput = currentTranscript.safeSubstring(transcriptStart),
+                    token = token
+                )
+                if (parsed.exitCode != null) {
+                    completionTranscript = currentTranscript
+                    continue
+                }
+                delay(150)
+            }
+        }
         val snapshot = readSession(context, handle.externalSessionId)
-        if (completion == null) {
-            return@coroutineScope SessionCommandResult(
+        if (completionTranscript == null) {
+            return SessionCommandResult(
                 sessionId = handle.externalSessionId,
                 completed = false,
                 success = false,
@@ -781,9 +866,18 @@ object EmbeddedTerminalRuntime {
             )
         }
 
-        val parsed = parsePersistentCommandOutput(completion.outputChunk, token)
+        val completionOutput = if (completionTranscript.length <= transcriptStart) {
+            ""
+        } else {
+            completionTranscript.substring(transcriptStart)
+        }
+        val parsed = parsePersistentCommandOutput(
+            rawOutput = completionOutput,
+            token = token
+        )
+        handle.activeCommandToken = null
         val cleanedOutput = trimTerminalOutput(sanitizeTerminalNoise(parsed.output))
-        SessionCommandResult(
+        return SessionCommandResult(
             sessionId = handle.externalSessionId,
             completed = true,
             success = parsed.exitCode == 0,
@@ -855,6 +949,48 @@ object EmbeddedTerminalRuntime {
             append(":")
             append(token)
             append(":%s\\n' \"\$__omnibot_session_rc\"\n")
+        }
+    }
+
+    private fun wrapServiceSessionCommand(
+        command: String,
+        workingDirectory: String?,
+        environment: Map<String, String>
+    ): String {
+        val normalizedCommand = command.replace("\r\n", "\n").replace("\r", "\n").trim()
+        require(normalizedCommand.isNotEmpty()) { "command 不能为空" }
+        val scriptId = UUID.randomUUID().toString().replace("-", "")
+        val heredocMarker = "__OMNIBOT_SERVICE_${scriptId}__"
+        val normalizedWorkingDirectory = workingDirectory?.trim().orEmpty()
+        val environmentExports = buildCommandEnvironmentExports(environment)
+        return buildString {
+            append("__omnibot_service_script=\"\${TMPDIR:-/tmp}/omni_service_")
+            append(scriptId)
+            append(".sh\"\n")
+            append("cat >\"\$__omnibot_service_script\" <<'")
+            append(heredocMarker)
+            append("'\n")
+            append("trap 'rm -f \"\$0\"' EXIT\n")
+            append(buildPythonEnvironmentPrelude())
+            append("\n")
+            if (normalizedWorkingDirectory.isNotBlank()) {
+                append("cd ")
+                append(TermuxCommandBuilder.quoteForShell(normalizedWorkingDirectory))
+                append(" || exit $?\n")
+            }
+            append("__omni_prepare_python_env 0 || exit $?\n")
+            if (environmentExports.isNotBlank()) {
+                append(environmentExports)
+                append('\n')
+            }
+            append(normalizedCommand)
+            if (!normalizedCommand.endsWith("\n")) {
+                append('\n')
+            }
+            append(heredocMarker)
+            append("\n")
+            append("chmod 700 \"\$__omnibot_service_script\"\n")
+            append("exec /bin/sh \"\$__omnibot_service_script\"\n")
         }
     }
 
@@ -1142,18 +1278,9 @@ object EmbeddedTerminalRuntime {
         return TerminalManager.getInstance(context.applicationContext)
     }
 
-    private fun getTerminalSession(
-        context: Context,
-        handle: SessionHandle
-    ): TerminalSessionData? {
-        return terminalManager(context).terminalState.value.sessions.find { session ->
-            session.id == handle.terminalSessionId
-        }
-    }
-
-    private fun buildTranscript(session: TerminalSessionData): String {
+    private fun buildTranscript(sessionTranscript: String): String {
         return trimTerminalOutput(
-            sanitizeTerminalNoise(session.transcript.trim('\n'))
+            sanitizeTerminalNoise(sessionTranscript)
         )
     }
 
@@ -1398,4 +1525,10 @@ object EmbeddedTerminalRuntime {
         val output: String,
         val exitCode: Int?
     )
+
+    private fun String.safeSubstring(startIndex: Int): String {
+        if (startIndex <= 0) return this
+        if (startIndex >= length) return ""
+        return substring(startIndex)
+    }
 }
