@@ -105,13 +105,21 @@ class AgentOrchestrator(
                     )
                 )
                 latestPromptTokens = turn.usage?.promptTokens
+                latestPromptTokenThreshold =
+                    input.contextCompactor?.resolvePromptTokenThreshold(input.conversationId)
+                latestPromptTokens?.let { promptTokens ->
+                    callback.onPromptTokenUsageChanged(
+                        latestPromptTokens = promptTokens,
+                        promptTokenThreshold = latestPromptTokenThreshold
+                    )
+                }
                 input.contextCompactor?.let { compactor ->
-                    latestPromptTokenThreshold = compactor.resolvePromptTokenThreshold(input.conversationId)
                     messages = compactor.compactIfNeeded(
                         conversationId = input.conversationId,
                         conversationMode = input.executionEnv.conversationMode,
                         promptTokens = latestPromptTokens,
                         messages = messages,
+                        promptTokenThresholdOverride = latestPromptTokenThreshold,
                         callback = callback
                     ).toMutableList()
                 }

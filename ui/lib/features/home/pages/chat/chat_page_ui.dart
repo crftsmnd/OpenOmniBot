@@ -666,9 +666,8 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     final usedTokens = conversation.latestPromptTokens;
     final thresholdTokens = conversation.promptTokenThreshold;
     final usageRatio = usedTokens / thresholdTokens;
-    return '当前上下文 ${_formatTokenCount(usedTokens)} / '
+    return '${_formatTokenCount(usedTokens)} / '
         '${_formatTokenCount(thresholdTokens)} tokens'
-        '\n占阈值 ${_formatUsagePercent(usageRatio)}'
         '\n长按可调整阈值';
   }
 

@@ -42,6 +42,12 @@ typedef AgentToolCallProgressCallback = void Function(AgentToolEventData event);
 typedef AgentToolCallCompleteCallback = void Function(AgentToolEventData event);
 typedef AgentChatMessageCallback =
     void Function(String taskId, String message, {bool isFinal});
+typedef AgentPromptTokenUsageCallback =
+    void Function(
+      String taskId,
+      int latestPromptTokens,
+      int? promptTokenThreshold,
+    );
 typedef AgentContextCompactionStateCallback =
     void Function(
       String taskId,
@@ -202,6 +208,7 @@ class AssistsMessageService {
   static AgentToolCallProgressCallback? _onAgentToolCallProgressCallback;
   static AgentToolCallCompleteCallback? _onAgentToolCallCompleteCallback;
   static AgentChatMessageCallback? _onAgentChatMessageCallback;
+  static AgentPromptTokenUsageCallback? _onAgentPromptTokenUsageCallback;
   static AgentContextCompactionStateCallback?
   _onAgentContextCompactionStateCallback;
   static AgentClarifyCallback? _onAgentClarifyCallback;
@@ -351,6 +358,20 @@ class AssistsMessageService {
             (data['taskId'] ?? '').toString(),
             (data['message'] ?? '').toString(),
             isFinal: isFinal,
+          );
+          break;
+        case 'onAgentPromptTokenUsageChanged':
+          final Map<String, dynamic> data = Map<String, dynamic>.from(
+            call.arguments,
+          );
+          final latestPromptTokens = _asNullableInt(data['latestPromptTokens']);
+          if (latestPromptTokens == null) {
+            break;
+          }
+          _onAgentPromptTokenUsageCallback?.call(
+            (data['taskId'] ?? '').toString(),
+            latestPromptTokens,
+            _asNullableInt(data['promptTokenThreshold']),
           );
           break;
         case 'onAgentContextCompactionStateChanged':
@@ -566,6 +587,12 @@ class AssistsMessageService {
     AgentChatMessageCallback? callback,
   ) {
     _onAgentChatMessageCallback = callback;
+  }
+
+  static void setOnAgentPromptTokenUsageCallback(
+    AgentPromptTokenUsageCallback? callback,
+  ) {
+    _onAgentPromptTokenUsageCallback = callback;
   }
 
   static void setOnAgentContextCompactionStateCallback(
