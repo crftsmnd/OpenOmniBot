@@ -1,5 +1,6 @@
 package cn.com.omnimind.bot.agent
 
+import cn.com.omnimind.baselib.llm.ChatCompletionUsage
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -249,6 +250,46 @@ class AgentOrchestratorTest {
         assertTrue(callback.finalChatMessages().last().contains("校验失败"))
     }
 
+    @Test
+    fun promptTokenUsageIsReportedAfterEveryModelTurn() = runBlocking {
+        val llmClient = FakeLlmClient(
+            turns = listOf(
+                assistantTurn(
+                    toolCalls = listOf(toolCall("file_search")),
+                    promptTokens = 321
+                ),
+                assistantTurn(
+                    content = "已根据工具结果完成回复。",
+                    promptTokens = 654
+                )
+            )
+        )
+        val toolExecutor = FakeToolExecutor(
+            results = mapOf(
+                "file_search" to listOf(
+                    ToolExecutionResult.ContextResult(
+                        toolName = "file_search",
+                        summaryText = "已找到结果",
+                        previewJson = "{}",
+                        rawResultJson = "{}",
+                        success = true
+                    )
+                )
+            )
+        )
+        val callback = RecordingCallback()
+
+        createOrchestrator(llmClient, toolExecutor).run(
+            AgentOrchestrator.Input(
+                callback = callback,
+                initialMessages = initialMessages("搜索配置"),
+                executionEnv = FakeExecutionEnvironment("搜索配置")
+            )
+        )
+
+        assertEquals(listOf(321, 654), callback.promptTokenUpdates)
+    }
+
     private fun createOrchestrator(
         llmClient: FakeLlmClient,
         toolExecutor: FakeToolExecutor
@@ -273,14 +314,16 @@ class AgentOrchestratorTest {
 
     private fun assistantTurn(
         content: String = "",
-        toolCalls: List<AssistantToolCall> = emptyList()
+        toolCalls: List<AssistantToolCall> = emptyList(),
+        promptTokens: Int? = null
     ): ChatCompletionTurn {
         return ChatCompletionTurn(
             message = ChatCompletionMessage(
                 role = "assistant",
                 content = if (content.isBlank()) null else JsonPrimitive(content),
                 toolCalls = toolCalls.ifEmpty { null }
-            )
+            ),
+            usage = promptTokens?.let { ChatCompletionUsage(promptTokens = it) }
         )
     }
 
@@ -363,6 +406,7 @@ class AgentOrchestratorTest {
 
     private class RecordingCallback : AgentCallback {
         val chatMessages = mutableListOf<Pair<String, Boolean>>()
+        val promptTokenUpdates = mutableListOf<Int>()
         val errors = mutableListOf<String>()
         var completedResult: AgentResult? = null
 
@@ -389,6 +433,13 @@ class AgentOrchestratorTest {
 
         override suspend fun onChatMessage(message: String, isFinal: Boolean) {
             chatMessages += message to isFinal
+        }
+
+        override suspend fun onPromptTokenUsageChanged(
+            latestPromptTokens: Int,
+            promptTokenThreshold: Int?
+        ) {
+            promptTokenUpdates += latestPromptTokens
         }
 
         override suspend fun onClarifyRequired(

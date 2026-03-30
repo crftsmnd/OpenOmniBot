@@ -66,13 +66,15 @@ open class AgentConversationContextCompactor(
         conversationMode: String,
         promptTokens: Int?,
         messages: List<ChatCompletionMessage>,
+        promptTokenThresholdOverride: Int? = null,
         callback: AgentCallback? = null
     ): List<ChatCompletionMessage> {
         if (conversationId == null || conversationId <= 0L) {
             return messages
         }
         val normalizedPromptTokens = promptTokens ?: return messages
-        val promptTokenThreshold = resolvePromptTokenThreshold(conversationId)
+        val promptTokenThreshold = promptTokenThresholdOverride?.coerceAtLeast(1)
+            ?: resolvePromptTokenThreshold(conversationId)
         historyRepository.updatePromptTokenUsage(
             conversationId = conversationId,
             promptTokens = normalizedPromptTokens,

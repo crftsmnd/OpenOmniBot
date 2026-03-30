@@ -3017,6 +3017,19 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                         dispatchAgentChatMessage(message, isFinal)
                     }
 
+                    override suspend fun onPromptTokenUsageChanged(
+                        latestPromptTokens: Int,
+                        promptTokenThreshold: Int?
+                    ) {
+                        sendEvent(
+                            "onAgentPromptTokenUsageChanged",
+                            mapOf(
+                                "latestPromptTokens" to latestPromptTokens,
+                                "promptTokenThreshold" to promptTokenThreshold
+                            )
+                        )
+                    }
+
                     override suspend fun onContextCompactionStateChanged(
                         isCompacting: Boolean,
                         latestPromptTokens: Int?,

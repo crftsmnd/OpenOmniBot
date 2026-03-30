@@ -207,6 +207,14 @@ interface AgentCallback {
     }
 
     /**
+     * 主模型一轮调用结束后的 prompt token 统计更新
+     */
+    suspend fun onPromptTokenUsageChanged(
+        latestPromptTokens: Int,
+        promptTokenThreshold: Int?
+    ) = Unit
+
+    /**
      * 对话上下文压缩状态变化
      */
     suspend fun onContextCompactionStateChanged(

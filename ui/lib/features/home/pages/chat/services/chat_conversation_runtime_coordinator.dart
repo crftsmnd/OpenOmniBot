@@ -135,6 +135,9 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     AssistsMessageService.setOnAgentChatMessageCallback(
       _handleAgentChatMessage,
     );
+    AssistsMessageService.setOnAgentPromptTokenUsageCallback(
+      _handleAgentPromptTokenUsageChanged,
+    );
     AssistsMessageService.setOnAgentContextCompactionStateCallback(
       _handleAgentContextCompactionStateChanged,
     );
@@ -850,22 +853,33 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     final runtime = _runtimeForTask(taskId);
     if (binding == null || runtime == null) return;
 
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final conversation = runtime.conversation;
-    if (conversation != null &&
-        (latestPromptTokens != null || promptTokenThreshold != null)) {
-      runtime.conversation = conversation.copyWith(
-        latestPromptTokens:
-            latestPromptTokens ?? conversation.latestPromptTokens,
-        promptTokenThreshold:
-            promptTokenThreshold ?? conversation.promptTokenThreshold,
-        latestPromptTokensUpdatedAt: latestPromptTokens != null
-            ? now
-            : conversation.latestPromptTokensUpdatedAt,
-      );
-    }
-
+    _applyPromptTokenUsageUpdate(
+      runtime,
+      latestPromptTokens: latestPromptTokens,
+      promptTokenThreshold: promptTokenThreshold,
+    );
     runtime.isContextCompressing = isCompacting;
+    notifyListeners();
+    schedulePersistRuntimeConversation(
+      conversationId: binding.conversationId,
+      mode: binding.mode,
+    );
+  }
+
+  void _handleAgentPromptTokenUsageChanged(
+    String taskId,
+    int latestPromptTokens,
+    int? promptTokenThreshold,
+  ) {
+    final binding = _taskBindings[taskId];
+    final runtime = _runtimeForTask(taskId);
+    if (binding == null || runtime == null) return;
+
+    _applyPromptTokenUsageUpdate(
+      runtime,
+      latestPromptTokens: latestPromptTokens,
+      promptTokenThreshold: promptTokenThreshold,
+    );
     notifyListeners();
     schedulePersistRuntimeConversation(
       conversationId: binding.conversationId,
@@ -945,21 +959,11 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
     final binding = _taskBindings[taskId];
     final runtime = _runtimeForTask(taskId);
     if (binding == null || runtime == null) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (latestPromptTokens != null || promptTokenThreshold != null) {
-      final conversation = runtime.conversation;
-      if (conversation != null) {
-        runtime.conversation = conversation.copyWith(
-          latestPromptTokens:
-              latestPromptTokens ?? conversation.latestPromptTokens,
-          promptTokenThreshold:
-              promptTokenThreshold ?? conversation.promptTokenThreshold,
-          latestPromptTokensUpdatedAt: latestPromptTokens != null
-              ? now
-              : conversation.latestPromptTokensUpdatedAt,
-        );
-      }
-    }
+    _applyPromptTokenUsageUpdate(
+      runtime,
+      latestPromptTokens: latestPromptTokens,
+      promptTokenThreshold: promptTokenThreshold,
+    );
 
     runtime.currentThinkingStage = ThinkingStage.complete.value;
     runtime.isDeepThinking = false;
@@ -1036,6 +1040,28 @@ class ChatConversationRuntimeCoordinator extends ChangeNotifier {
         mode: binding.mode,
         markComplete: true,
       ),
+    );
+  }
+
+  void _applyPromptTokenUsageUpdate(
+    ChatConversationRuntimeState runtime, {
+    int? latestPromptTokens,
+    int? promptTokenThreshold,
+  }) {
+    final conversation = runtime.conversation;
+    if (conversation == null ||
+        (latestPromptTokens == null && promptTokenThreshold == null)) {
+      return;
+    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    runtime.conversation = conversation.copyWith(
+      latestPromptTokens:
+          latestPromptTokens ?? conversation.latestPromptTokens,
+      promptTokenThreshold:
+          promptTokenThreshold ?? conversation.promptTokenThreshold,
+      latestPromptTokensUpdatedAt: latestPromptTokens != null
+          ? now
+          : conversation.latestPromptTokensUpdatedAt,
     );
   }
 
