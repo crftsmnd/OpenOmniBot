@@ -7,6 +7,7 @@ import cn.com.omnimind.bot.termux.TermuxCommandBuilder
 import cn.com.omnimind.bot.termux.TermuxLiveUpdate
 import com.ai.assistance.operit.terminal.TerminalManager
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
+import com.rk.terminal.App
 import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -120,6 +121,7 @@ object EmbeddedTerminalRuntime {
     private const val BASE_PACKAGE_PNPM_VERSION_MARKER = "__OMNIBOT_PNPM_VERSION__"
     private const val NODE_MIN_MAJOR = 22
     private val terminalEnvKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+    private const val SESSION_HELPER_SCRIPT_NAME = "omnibot-session-lib.sh"
 
     private val sessionHandles = ConcurrentHashMap<String, SessionHandle>()
     private val packageInstallMutex = Mutex()
@@ -815,7 +817,8 @@ object EmbeddedTerminalRuntime {
         ReTerminalSessionBridge.sendCommand(
             context = context,
             sessionId = sessionId,
-            command = wrapServiceSessionCommand(
+            command = buildServiceSessionCommand(
+                context = context,
                 command = command,
                 workingDirectory = workingDirectory,
                 environment = environment
@@ -853,7 +856,12 @@ object EmbeddedTerminalRuntime {
         ReTerminalSessionBridge.sendCommand(
             context = context,
             sessionId = handle.externalSessionId,
-            command = wrapPersistentSessionCommand(command, token, environment)
+            command = buildPersistentSessionCommand(
+                context = context,
+                command = command,
+                token = token,
+                environment = environment
+            )
         )
 
         var completionTranscript: String? = null
@@ -934,86 +942,67 @@ object EmbeddedTerminalRuntime {
         }
     }
 
-    private fun wrapPersistentSessionCommand(
+    private suspend fun buildPersistentSessionCommand(
+        context: Context,
         command: String,
         token: String,
         environment: Map<String, String>
-    ): String {
-        val normalizedCommand = command.replace("\r\n", "\n").replace("\r", "\n")
+    ): String = withContext(Dispatchers.IO) {
+        val normalizedCommand = command.replace("\r\n", "\n").replace("\r", "\n").trimEnd()
         val tokenSuffix = token.replace("-", "")
-        val heredocMarker = "__OMNIBOT_SESSION_${tokenSuffix}__"
-        val environmentExports = buildCommandEnvironmentExports(environment)
-        return buildString {
-            append("__omnibot_session_script=\"\${TMPDIR:-/tmp}/omni_session_")
-            append(tokenSuffix)
-            append(".sh\"\n")
-            append("cat >\"\$__omnibot_session_script\" <<'")
-            append(heredocMarker)
-            append("'\n")
-            append(buildPythonEnvironmentPrelude())
-            append("\n")
-            append("__omni_prepare_python_env 0 || return $?\n")
-            if (environmentExports.isNotBlank()) {
-                append(environmentExports)
-                append('\n')
+        val sessionScript = writeSessionTempScript(
+            context = context,
+            fileName = "omni_session_$tokenSuffix.sh",
+            content = buildString {
+                appendLine(". ${TermuxCommandBuilder.quoteForShell(ensureSessionHelperScript(context).absolutePath)} || return $?")
+                appendLine("__omni_prepare_python_env 0 || return $?")
+                val environmentExports = buildCommandEnvironmentExports(environment)
+                if (environmentExports.isNotBlank()) {
+                    appendLine(environmentExports)
+                }
+                append(normalizedCommand)
+                if (!normalizedCommand.endsWith("\n")) {
+                    append('\n')
+                }
             }
-            append(normalizedCommand)
-            if (!normalizedCommand.endsWith("\n")) {
-                append('\n')
-            }
-            append(heredocMarker)
-            append("\n")
-            append(". \"\$__omnibot_session_script\"\n")
-            append("__omnibot_session_rc=\$?\n")
-            append("rm -f \"\$__omnibot_session_script\"\n")
-            append("printf '\\n")
-            append(SESSION_DONE_PREFIX)
-            append(":")
-            append(token)
-            append(":%s\\n' \"\$__omnibot_session_rc\"\n")
-        }
+        )
+        val quotedScriptPath = TermuxCommandBuilder.quoteForShell(sessionScript.absolutePath)
+        ". $quotedScriptPath; __omnibot_session_rc=$?; rm -f $quotedScriptPath; printf '\\n$SESSION_DONE_PREFIX:$token:%s\\n' \"\$__omnibot_session_rc\""
     }
 
-    private fun wrapServiceSessionCommand(
+    private suspend fun buildServiceSessionCommand(
+        context: Context,
         command: String,
         workingDirectory: String?,
         environment: Map<String, String>
-    ): String {
+    ): String = withContext(Dispatchers.IO) {
         val normalizedCommand = command.replace("\r\n", "\n").replace("\r", "\n").trim()
         require(normalizedCommand.isNotEmpty()) { "command 不能为空" }
         val scriptId = UUID.randomUUID().toString().replace("-", "")
-        val heredocMarker = "__OMNIBOT_SERVICE_${scriptId}__"
         val normalizedWorkingDirectory = workingDirectory?.trim().orEmpty()
-        val environmentExports = buildCommandEnvironmentExports(environment)
-        return buildString {
-            append("__omnibot_service_script=\"\${TMPDIR:-/tmp}/omni_service_")
-            append(scriptId)
-            append(".sh\"\n")
-            append("cat >\"\$__omnibot_service_script\" <<'")
-            append(heredocMarker)
-            append("'\n")
-            append("trap 'rm -f \"\$0\"' EXIT\n")
-            append(buildPythonEnvironmentPrelude())
-            append("\n")
-            if (normalizedWorkingDirectory.isNotBlank()) {
-                append("cd ")
-                append(TermuxCommandBuilder.quoteForShell(normalizedWorkingDirectory))
-                append(" || exit $?\n")
+        val serviceScript = writeSessionTempScript(
+            context = context,
+            fileName = "omni_service_$scriptId.sh",
+            content = buildString {
+                appendLine("trap 'rm -f \"\$0\"' EXIT")
+                appendLine(". ${TermuxCommandBuilder.quoteForShell(ensureSessionHelperScript(context).absolutePath)} || exit $?")
+                if (normalizedWorkingDirectory.isNotBlank()) {
+                    append("cd ")
+                    append(TermuxCommandBuilder.quoteForShell(normalizedWorkingDirectory))
+                    appendLine(" || exit $?")
+                }
+                appendLine("__omni_prepare_python_env 0 || exit $?")
+                val environmentExports = buildCommandEnvironmentExports(environment)
+                if (environmentExports.isNotBlank()) {
+                    appendLine(environmentExports)
+                }
+                append(normalizedCommand)
+                if (!normalizedCommand.endsWith("\n")) {
+                    append('\n')
+                }
             }
-            append("__omni_prepare_python_env 0 || exit $?\n")
-            if (environmentExports.isNotBlank()) {
-                append(environmentExports)
-                append('\n')
-            }
-            append(normalizedCommand)
-            if (!normalizedCommand.endsWith("\n")) {
-                append('\n')
-            }
-            append(heredocMarker)
-            append("\n")
-            append("chmod 700 \"\$__omnibot_service_script\"\n")
-            append("exec /bin/sh \"\$__omnibot_service_script\"\n")
-        }
+        )
+        "exec /bin/sh ${TermuxCommandBuilder.quoteForShell(serviceScript.absolutePath)}"
     }
 
     internal fun buildCommandEnvironmentExports(environment: Map<String, String>): String {
@@ -1033,6 +1022,32 @@ object EmbeddedTerminalRuntime {
                 append('\n')
             }
         }.trimEnd()
+    }
+
+    private fun ensureSessionHelperScript(context: Context): File {
+        val scriptFile = File(context.filesDir.parentFile, "local/bin/$SESSION_HELPER_SCRIPT_NAME")
+        scriptFile.parentFile?.mkdirs()
+        val content = buildPythonEnvironmentPrelude().trimEnd() + "\n"
+        if (!scriptFile.exists() || scriptFile.readText() != content) {
+            scriptFile.writeText(content)
+        }
+        scriptFile.setReadable(true, false)
+        scriptFile.setExecutable(false, false)
+        return scriptFile
+    }
+
+    private fun writeSessionTempScript(
+        context: Context,
+        fileName: String,
+        content: String
+    ): File {
+        val directory = App.getTempDir().resolve("agent-session-scripts").apply { mkdirs() }
+        return directory.resolve(fileName).apply {
+            parentFile?.mkdirs()
+            writeText(content)
+            setReadable(true, false)
+            setExecutable(true, false)
+        }
     }
 
     internal fun buildPythonEnvironmentPrelude(): String = """

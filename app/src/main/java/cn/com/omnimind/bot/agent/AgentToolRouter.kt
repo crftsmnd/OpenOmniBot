@@ -629,7 +629,6 @@ class AgentToolRouter(
                 "workingDirectory" to workingDirectory,
                 "currentDirectory" to result.currentDirectory,
                 "success" to true,
-                "terminalOutput" to truncateTerminalTail(result.transcript, 2000),
                 "logPath" to logArtifact.androidPath,
                 "logUri" to logArtifact.uri
             )
@@ -639,7 +638,7 @@ class AgentToolRouter(
                 previewJson = json.encodeToString(mapToJsonElement(payload)),
                 rawResultJson = json.encodeToString(mapToJsonElement(payload)),
                 success = true,
-                terminalOutput = result.transcript,
+                terminalOutput = "",
                 terminalSessionId = sessionId,
                 terminalStreamState = "ready",
                 artifacts = listOf(logArtifact),

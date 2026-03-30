@@ -10,6 +10,7 @@ fi
 
 if [ "$HEADLESS_MODE" = "1" ]; then
     export PS1=""
+    export PS2=""
     unset PROMPT_COMMAND
     export PAGER=cat
     export GIT_PAGER=cat
