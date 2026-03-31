@@ -11,8 +11,10 @@ import com.rk.terminal.ui.screens.settings.WorkingMode
 import com.termux.terminal.TerminalSession
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -24,6 +26,8 @@ object ReTerminalSessionBridge {
     )
 
     private const val BIND_TIMEOUT_MS = 15_000L
+    private const val SESSION_STARTUP_GRACE_MS = 2_000L
+    private const val SESSION_STARTUP_POLL_MS = 50L
 
     private val bindMutex = Mutex()
     @Volatile
@@ -42,19 +46,17 @@ object ReTerminalSessionBridge {
     ): SessionAccessResult = withContext(Dispatchers.Main.immediate) {
         val sessionBinder = awaitBinder(context)
         val requestedSessionId = sessionId?.trim()?.takeIf { it.isNotEmpty() }
-        val existing = requestedSessionId
-            ?.let { existingId -> sessionBinder.getSession(existingId)?.takeIf { it.isRunning } }
-        if (existing != null) {
-            return@withContext SessionAccessResult(
-                sessionId = requestedSessionId,
-                session = existing,
-                created = false
-            )
-        }
         requestedSessionId?.let { existingId ->
-            sessionBinder.getSession(existingId)
-        }?.let {
-            sessionBinder.terminateSession(requestedSessionId)
+            sessionBinder.getSession(existingId)?.let { existing ->
+                if (existing.isRunning || awaitSessionRunning(existing)) {
+                    return@withContext SessionAccessResult(
+                        sessionId = requestedSessionId,
+                        session = existing,
+                        created = false
+                    )
+                }
+                sessionBinder.terminateSession(existingId)
+            }
         }
         val access = sessionBinder.createHeadlessSession(
             requestedId = requestedSessionId,
@@ -63,6 +65,7 @@ object ReTerminalSessionBridge {
             sessionTitle = sessionTitle,
             extraEnv = extraEnv
         )
+        awaitSessionRunning(access.session)
         SessionAccessResult(
             sessionId = access.sessionId,
             session = access.session,
@@ -94,11 +97,15 @@ object ReTerminalSessionBridge {
         sessionId: String
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         val sessionBinder = awaitBinder(context)
+        val service = sessionBinder.getService()
         val existed = sessionBinder.getSession(sessionId) != null
         if (!existed) {
             return@withContext false
         }
         sessionBinder.terminateSession(sessionId)
+        if (service.sessionList.isEmpty()) {
+            clearCachedBinding(context.applicationContext)
+        }
         true
     }
 
@@ -182,5 +189,28 @@ object ReTerminalSessionBridge {
             }
             throw error
         }
+    }
+
+    private suspend fun awaitSessionRunning(session: TerminalSession): Boolean {
+        if (session.isRunning) {
+            return true
+        }
+        return withTimeoutOrNull(SESSION_STARTUP_GRACE_MS) {
+            while (!session.isRunning) {
+                delay(SESSION_STARTUP_POLL_MS)
+            }
+            true
+        } == true
+    }
+
+    private fun clearCachedBinding(appContext: Context) {
+        binder = null
+        bindDeferred = null
+        serviceConnection?.let { connection ->
+            runCatching {
+                appContext.unbindService(connection)
+            }
+        }
+        serviceConnection = null
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.NotificationCompat
+import com.rk.libcommons.TerminalCommand
 import com.rk.resources.drawables
 import com.rk.resources.strings
 import com.rk.terminal.ui.activities.terminal.MainActivity
@@ -52,7 +53,12 @@ class SessionService : Service() {
             updateNotification()
         }
 
-        fun createSession(id: String, context: android.content.Context, workingMode:Int): TerminalSession {
+        fun createSession(
+            id: String,
+            context: android.content.Context,
+            workingMode:Int,
+            launchCommand: TerminalCommand? = null
+        ): TerminalSession {
             val existing = sessions[id]
             if (existing != null) {
                 sessionList[id] = workingMode
@@ -64,7 +70,8 @@ class SessionService : Service() {
                 context,
                 HeadlessTerminalSessionClient,
                 id,
-                workingMode = workingMode
+                workingMode = workingMode,
+                launchCommand = launchCommand
             ).also {
                 sessions[id] = it
                 sessionList[id] = workingMode
@@ -109,7 +116,8 @@ class SessionService : Service() {
                 sessionClient = HeadlessTerminalSessionClient,
                 session_id = sessionId,
                 workingMode = workingMode,
-                extraEnv = mergedEnv
+                extraEnv = mergedEnv,
+                launchCommand = null
             ).also { created ->
                 created.mSessionName = sessionTitle?.trim().takeUnless { it.isNullOrEmpty() }
                     ?: "Agent Session"

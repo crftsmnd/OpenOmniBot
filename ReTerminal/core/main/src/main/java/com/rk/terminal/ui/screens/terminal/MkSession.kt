@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Environment
 import android.util.Log
 import com.rk.libcommons.ShellArgv
+import com.rk.libcommons.TerminalCommand
 import com.rk.libcommons.alpineDir
 import com.rk.libcommons.alpineHomeDir
 import com.rk.libcommons.application
@@ -12,7 +13,6 @@ import com.rk.libcommons.createFileIfNot
 import com.rk.libcommons.localBinDir
 import com.rk.libcommons.localDir
 import com.rk.libcommons.localLibDir
-import com.rk.libcommons.pendingCommand
 import com.rk.settings.Settings
 import com.rk.terminal.App
 import com.rk.terminal.App.Companion.getTempDir
@@ -31,7 +31,8 @@ object MkSession {
         sessionClient: TerminalSessionClient,
         session_id: String,
         workingMode: Int,
-        extraEnv: Map<String, String> = emptyMap()
+        extraEnv: Map<String, String> = emptyMap(),
+        launchCommand: TerminalCommand? = null
     ): TerminalSession {
         with(context) {
             val hostWorkspaceDir = File(applicationInfo.dataDir, "workspace").also { directory ->
@@ -51,7 +52,7 @@ object MkSession {
                 "EXTERNAL_STORAGE" to System.getenv("EXTERNAL_STORAGE")
             )
 
-            val workingDir = pendingCommand?.workingDir ?: alpineHomeDir().path
+            val workingDir = launchCommand?.workingDir ?: alpineHomeDir().path
 
             val initFile: File = localBinDir().child("init-host")
             initFile.parentFile?.mkdirs()
@@ -122,7 +123,7 @@ object MkSession {
                 }
             }
 
-            pendingCommand?.env?.let {
+            launchCommand?.env?.let {
                 env.addAll(it)
             }
 
@@ -150,7 +151,7 @@ object MkSession {
 
             val args: Array<String>
 
-            val shell = if (pendingCommand == null) {
+            val shell = if (launchCommand == null) {
                 args = if (workingMode == WorkingMode.ALPINE){
                     ShellArgv.buildShellScriptArgv(initFile.absolutePath)
                 }else{
@@ -158,13 +159,12 @@ object MkSession {
                 }
                 ShellArgv.SYSTEM_SH
             } else{
-                args = pendingCommand!!.args
-                pendingCommand!!.shell
+                args = launchCommand.args
+                launchCommand.shell
             }
 
             Log.d(TAG, "Launching session ${ShellArgv.formatExecSpec(shell, args, workingDir)}")
 
-            pendingCommand = null
             return TerminalSession(
                 shell,
                 workingDir,

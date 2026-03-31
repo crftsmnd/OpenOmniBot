@@ -11,8 +11,8 @@ import androidx.core.content.ContextCompat
 import cn.com.omnimind.baselib.permission.PermissionRequest
 import cn.com.omnimind.baselib.util.OmniLog
 import cn.com.omnimind.bot.agent.AgentWorkspaceManager
-import cn.com.omnimind.bot.activity.TerminalActivity
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalAutoStartManager
+import cn.com.omnimind.bot.terminal.EmbeddedTerminalLaunchHelper
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalRuntime
 import cn.com.omnimind.bot.terminal.EmbeddedTerminalSetupManager
 import cn.com.omnimind.bot.termux.TermuxCommandRunner
@@ -211,10 +211,7 @@ class SpecialPermissionManager(private val context: Context) {
                 result.success(false)
                 return
             }
-            val intent = Intent(context, TerminalActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            ContextCompat.startActivity(context, intent, null)
+            EmbeddedTerminalLaunchHelper.launch(context = context)
             result.success(true)
         } catch (e: Exception) {
             OmniLog.e(TAG, "请求打开内嵌终端时发生异常。", e)
@@ -622,15 +619,11 @@ class SpecialPermissionManager(private val context: Context) {
                 .map { it.trim() }
                 .filter { it.isNotEmpty() }
                 .distinct()
-            val intent = Intent(context, TerminalActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                putExtra(TerminalActivity.EXTRA_OPEN_SETUP, openSetup)
-                putStringArrayListExtra(
-                    TerminalActivity.EXTRA_SETUP_PACKAGE_IDS,
-                    ArrayList(setupPackageIds)
-                )
-            }
-            ContextCompat.startActivity(context, intent, null)
+            EmbeddedTerminalLaunchHelper.launch(
+                context = context,
+                openSetup = openSetup,
+                setupPackageIds = setupPackageIds
+            )
             result.success(true)
         } catch (e: Exception) {
             OmniLog.e(TAG, "Error opening native terminal", e)
