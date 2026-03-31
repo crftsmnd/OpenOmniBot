@@ -474,8 +474,6 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                 ),
                 const SizedBox(height: 14),
               ],
-              _buildAutoStartSection(),
-              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -511,6 +509,8 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                   height: 1.6,
                 ),
               ),
+              const SizedBox(height: 14),
+              _buildAutoStartSection(),
             ],
           ),
         ),
