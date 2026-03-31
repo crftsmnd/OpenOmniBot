@@ -36,6 +36,7 @@ import 'package:ui/services/omnibot_resource_service.dart';
 import 'package:ui/services/permission_registry.dart';
 import 'package:ui/services/permission_service.dart';
 import 'package:ui/services/scene_model_config_service.dart';
+import 'package:ui/services/shared_open_draft_service.dart';
 import 'package:ui/services/special_permission.dart';
 import 'package:ui/utils/popup_menu_anchor_position.dart';
 import 'package:ui/services/storage_service.dart';
@@ -107,6 +108,8 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   final ChatConversationRuntimeCoordinator _runtimeCoordinator =
       ChatConversationRuntimeCoordinator.instance;
   ConversationThreadTarget? _resolvedThreadTarget;
+  SharedOpenDraftPayload? _stagedSharedOpenDraft;
+  int? _stagedSharedOpenDraftExpiresAt;
 
   // OpenClaw 配置与开关
   bool _openClawEnabled = false;
@@ -239,6 +242,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   );
   int _workspaceSurfaceSeed = 0;
   bool _workspaceBrowserCanGoUp = false;
+  Future<OmnibotWorkspacePaths>? _workspacePathsLoadFuture;
   bool _hasInitializedHalfScreen = false;
   bool _isCompanionModeEnabled = false;
   bool _isCompanionToggleLoading = false;

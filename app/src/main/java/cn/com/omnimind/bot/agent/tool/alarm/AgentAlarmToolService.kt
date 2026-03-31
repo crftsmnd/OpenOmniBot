@@ -167,6 +167,21 @@ class AgentAlarmToolService(
         return toMap(record)
     }
 
+    fun reschedulePersistedExactRemindersIfPermitted(): Int {
+        if (!hasExactAlarmPermission()) {
+            return 0
+        }
+        val now = System.currentTimeMillis()
+        val activeRecords = loadRecords().filter { record ->
+            record.triggerAtMillis > now && record.state != STATE_RINGING
+        }
+        activeRecords.forEach { record ->
+            cancelExactAlarms(record)
+            scheduleExactAlarms(record)
+        }
+        return activeRecords.size
+    }
+
     fun markCountdownState(alarmId: String): Map<String, Any?>? {
         val updated = updateRecord(alarmId) { record ->
             record.copy(state = STATE_COUNTDOWN)

@@ -52,6 +52,7 @@ class AgentWorkspaceManager(
         }
 
         fun workspacePathSnapshot(context: Context): Map<String, String> {
+            AgentWorkspaceManager(context).ensureRuntimeDirectories()
             return linkedMapOf(
                 "rootPath" to androidRootPath(context),
                 "shellRootPath" to SHELL_ROOT_PATH,

@@ -151,14 +151,17 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     ConversationThreadTarget target, {
     bool syncPage = true,
   }) async {
-    final targetMode = _pageModeForConversationMode(target.mode);
+    final effectiveTarget = await _overrideTargetWithSharedDraftIfNeeded(
+      target,
+    );
+    final targetMode = _pageModeForConversationMode(effectiveTarget.mode);
     _storeDraftForActiveConversationMode();
     _cancelNormalSurfaceModelReveal();
     if (!mounted) return;
     setState(() {
-      _resolvedThreadTarget = target;
+      _resolvedThreadTarget = effectiveTarget;
       _activeConversationMode = targetMode;
-      _activeSurfaceMode = _surfaceForConversationMode(target.mode);
+      _activeSurfaceMode = _surfaceForConversationMode(effectiveTarget.mode);
       _showSlashCommandPanel = false;
       _showModelMentionPanel = false;
       _activeModelMentionToken = null;
@@ -170,6 +173,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     _vlmAnswerController.clear();
     _applyDraftForConversationMode(targetMode);
     await initializeConversation();
+    await _applyStagedSharedDraftIfNeeded(effectiveTarget);
     await _persistVisibleThreadTargetIfNeeded();
     if (syncPage) {
       _jumpToCurrentModePage(animate: false);
@@ -337,6 +341,7 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
     try {
       await _initializeHalfScreenEngineIfNeeded();
       final deviceInfo = await DeviceService.getDeviceInfo();
+      if (!mounted) return;
       final brand = (deviceInfo?['brand'] as String?)?.toLowerCase() ?? 'other';
       final checkedSpecs = PermissionRegistry.getPermissionsByLevel(
         brand: brand,
@@ -639,9 +644,12 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
 
     if (resolvedTargetMode == ChatSurfaceMode.workspace) {
       _inputFocusNode.unfocus();
+      final workspacePathsFuture =
+          OmnibotResourceService.ensureWorkspacePathsLoaded(forceRefresh: true);
       setState(() {
         _activeSurfaceMode = ChatSurfaceMode.workspace;
         _workspaceSurfaceSeed += 1;
+        _workspacePathsLoadFuture = workspacePathsFuture;
         _messageController.clear();
         _setChatIslandDisplayLayerForMode(
           ChatPageMode.normal,
@@ -695,6 +703,86 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
       text: draft,
       selection: TextSelection.collapsed(offset: draft.length),
     );
+  }
+
+  Future<ConversationThreadTarget> _overrideTargetWithSharedDraftIfNeeded(
+    ConversationThreadTarget target,
+  ) async {
+    final staged = _activeStagedSharedOpenDraft();
+    if (staged != null && staged.hasContent) {
+      return ConversationThreadTarget.newConversation(
+        mode: ConversationMode.normal,
+        fromNativeRoute: true,
+        requestKey: staged.requestKey,
+      );
+    }
+
+    final payload = await SharedOpenDraftService.getPendingDraft();
+    if (payload == null || !payload.hasContent) {
+      return target;
+    }
+    _stagedSharedOpenDraft = payload;
+    _stagedSharedOpenDraftExpiresAt =
+        DateTime.now().millisecondsSinceEpoch + 5000;
+    return ConversationThreadTarget.newConversation(
+      mode: ConversationMode.normal,
+      fromNativeRoute: true,
+      requestKey: payload.requestKey,
+    );
+  }
+
+  Future<void> _applyStagedSharedDraftIfNeeded(
+    ConversationThreadTarget target,
+  ) async {
+    final payload = _activeStagedSharedOpenDraft();
+    if (payload == null ||
+        !payload.hasContent ||
+        !target.isNewConversation ||
+        target.mode != ConversationMode.normal) {
+      return;
+    }
+
+    final attachments = payload.attachments
+        .map(
+          (item) => ChatInputAttachment(
+            id: item.id.isNotEmpty ? item.id : item.path,
+            name: item.name.isNotEmpty ? item.name : item.path.split('/').last,
+            path: item.path,
+            size: item.size,
+            mimeType: item.mimeType,
+            isImage: item.isImage,
+          ),
+        )
+        .toList();
+
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _draftMessageByMode[ChatPageMode.normal] = payload.text ?? '';
+      _pendingAttachmentsByMode[ChatPageMode.normal]!
+        ..clear()
+        ..addAll(attachments);
+    });
+    if (_activeConversationMode == ChatPageMode.normal) {
+      _applyDraftForConversationMode(ChatPageMode.normal);
+    }
+    await SharedOpenDraftService.clearPendingDraft();
+  }
+
+  SharedOpenDraftPayload? _activeStagedSharedOpenDraft() {
+    final payload = _stagedSharedOpenDraft;
+    final expiresAt = _stagedSharedOpenDraftExpiresAt;
+    if (payload == null) {
+      return null;
+    }
+    if (expiresAt != null &&
+        DateTime.now().millisecondsSinceEpoch > expiresAt) {
+      _stagedSharedOpenDraft = null;
+      _stagedSharedOpenDraftExpiresAt = null;
+      return null;
+    }
+    return payload;
   }
 
   @override
