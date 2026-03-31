@@ -34,14 +34,26 @@ class AppStateService {
     }
   }
 
-  static Future<Map<dynamic, dynamic>?> consumePendingShareDraft() async {
+  static Future<Map<dynamic, dynamic>?> getPendingShareDraft() async {
     try {
       return await _channel.invokeMethod<Map<dynamic, dynamic>>(
-        'consumePendingShareDraft',
+        'getPendingShareDraft',
       );
     } catch (e) {
       debugPrint('⚠️ Failed to consume pending share draft: $e');
       return null;
+    }
+  }
+
+  static Future<bool> clearPendingShareDraft() async {
+    try {
+      final result = await _channel.invokeMethod<dynamic>(
+        'clearPendingShareDraft',
+      );
+      return result == true;
+    } catch (e) {
+      debugPrint('⚠️ Failed to clear pending share draft: $e');
+      return false;
     }
   }
 }

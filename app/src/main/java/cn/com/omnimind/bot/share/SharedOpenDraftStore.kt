@@ -100,14 +100,17 @@ object SharedOpenDraftStore {
         return draft
     }
 
-    fun consume(context: Context): Map<String, Any?>? {
+    fun getPending(context: Context): Map<String, Any?>? {
         val raw = prefs(context).getString(KEY_PENDING_DRAFT, null) ?: return null
-        prefs(context).edit().remove(KEY_PENDING_DRAFT).apply()
         return runCatching {
             fromJson(JSONObject(raw)).toMap()
         }.onFailure { error ->
             OmniLog.e(TAG, "Failed to consume shared draft", error)
         }.getOrNull()
+    }
+
+    fun clearPending(context: Context) {
+        prefs(context).edit().remove(KEY_PENDING_DRAFT).apply()
     }
 
     private fun prefs(context: Context) =

@@ -61,13 +61,22 @@ class AppStateChannel {
                     result.error("INVALID_CONTEXT", "Context is not MainActivity", null)
                 }
             }
-            "consumePendingShareDraft" -> {
+            "getPendingShareDraft" -> {
                 val appContext = context?.applicationContext
                 if (appContext == null) {
                     result.error("INVALID_CONTEXT", "Context is null", null)
                     return
                 }
-                result.success(SharedOpenDraftStore.consume(appContext))
+                result.success(SharedOpenDraftStore.getPending(appContext))
+            }
+            "clearPendingShareDraft" -> {
+                val appContext = context?.applicationContext
+                if (appContext == null) {
+                    result.error("INVALID_CONTEXT", "Context is null", null)
+                    return
+                }
+                SharedOpenDraftStore.clearPending(appContext)
+                result.success(true)
             }
             else -> {
                 result.notImplemented()

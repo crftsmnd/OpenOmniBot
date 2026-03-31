@@ -108,6 +108,8 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   final ChatConversationRuntimeCoordinator _runtimeCoordinator =
       ChatConversationRuntimeCoordinator.instance;
   ConversationThreadTarget? _resolvedThreadTarget;
+  SharedOpenDraftPayload? _stagedSharedOpenDraft;
+  int? _stagedSharedOpenDraftExpiresAt;
 
   // OpenClaw 配置与开关
   bool _openClawEnabled = false;

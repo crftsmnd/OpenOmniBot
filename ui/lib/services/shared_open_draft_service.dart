@@ -67,12 +67,16 @@ class SharedOpenDraftPayload {
 }
 
 class SharedOpenDraftService {
-  static Future<SharedOpenDraftPayload?> consumePendingDraft() async {
-    final map = await AppStateService.consumePendingShareDraft();
+  static Future<SharedOpenDraftPayload?> getPendingDraft() async {
+    final map = await AppStateService.getPendingShareDraft();
     if (map == null || map.isEmpty) {
       return null;
     }
     final payload = SharedOpenDraftPayload.fromMap(map);
     return payload.hasContent ? payload : null;
+  }
+
+  static Future<void> clearPendingDraft() async {
+    await AppStateService.clearPendingShareDraft();
   }
 }

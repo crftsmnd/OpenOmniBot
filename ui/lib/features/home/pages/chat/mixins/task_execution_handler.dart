@@ -117,6 +117,7 @@ mixin TaskExecutionHandler<T extends StatefulWidget> on State<T> {
     if (attachments.isEmpty) return text;
 
     final names = attachments
+        .where((attachment) => !_isImageAttachment(attachment))
         .map(_resolveAttachmentName)
         .where((name) => name.trim().isNotEmpty)
         .map((name) => name.trim())
