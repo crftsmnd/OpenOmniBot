@@ -1,7 +1,11 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/services/omnibot_resource_service.dart';
+import 'package:ui/services/special_permission.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   const workspacePaths = OmnibotWorkspacePaths(
     rootPath: '/data/user/0/cn.com.omnimind.bot/workspace',
     shellRootPath: '/workspace',
@@ -10,6 +14,11 @@ void main() {
 
   setUpAll(() {
     OmnibotResourceService.debugSetWorkspacePaths(workspacePaths);
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(spePermission, null);
   });
 
   test(
@@ -66,4 +75,49 @@ void main() {
     expect(document.embedKind, 'link');
     expect(document.inlineRenderable, isFalse);
   });
+
+  test(
+    'ensureWorkspacePathsLoaded retries after an initial channel failure',
+    () async {
+      OmnibotResourceService.debugResetWorkspacePaths();
+      var callCount = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(spePermission, (call) async {
+            if (call.method != 'getWorkspacePathSnapshot') {
+              return null;
+            }
+            callCount += 1;
+            if (callCount == 1) {
+              throw PlatformException(
+                code: 'channel-unavailable',
+                message: 'not ready',
+              );
+            }
+            return <String, String>{
+              'rootPath': '/data/user/0/cn.com.omnimind.bot.debug/workspace',
+              'shellRootPath': '/workspace',
+              'internalRootPath':
+                  '/data/user/0/cn.com.omnimind.bot.debug/workspace/.omnibot',
+            };
+          });
+
+      final initial = await OmnibotResourceService.ensureWorkspacePathsLoaded(
+        forceRefresh: true,
+      );
+      expect(initial.rootPath, workspacePaths.rootPath);
+
+      final retried = await OmnibotResourceService.ensureWorkspacePathsLoaded();
+      expect(callCount, 2);
+      expect(
+        retried.rootPath,
+        '/data/user/0/cn.com.omnimind.bot.debug/workspace',
+      );
+      expect(
+        OmnibotResourceService.androidPathForShellPath(
+          '/workspace/docs/spec.pdf',
+        ),
+        '/data/user/0/cn.com.omnimind.bot.debug/workspace/docs/spec.pdf',
+      );
+    },
+  );
 }

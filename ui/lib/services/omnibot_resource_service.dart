@@ -99,14 +99,23 @@ class OmnibotResourceService {
       );
       if (result != null) {
         _workspacePaths = OmnibotWorkspacePaths.fromMap(result);
+      } else {
+        _workspacePathsFuture = null;
       }
-    } catch (_) {}
+    } catch (_) {
+      _workspacePathsFuture = null;
+    }
     return _workspacePaths;
   }
 
   static void debugSetWorkspacePaths(OmnibotWorkspacePaths paths) {
     _workspacePaths = paths;
     _workspacePathsFuture = Future<OmnibotWorkspacePaths>.value(paths);
+  }
+
+  static void debugResetWorkspacePaths() {
+    _workspacePaths = _defaultWorkspacePaths;
+    _workspacePathsFuture = null;
   }
 
   static Future<bool> handleLinkTap(String href) async {
@@ -381,6 +390,33 @@ class OmnibotResourceService {
     if (path.startsWith('$internalRootPath/')) {
       final relative = path.substring(internalRootPath.length + 1);
       return '$shellRootPath/.omnibot/$relative';
+    }
+    return null;
+  }
+
+  static String? androidPathForShellPath(
+    String shellPath, {
+    OmnibotWorkspacePaths? workspacePaths,
+  }) {
+    final paths = workspacePaths ?? _workspacePaths;
+    final normalized = shellPath.trim();
+    if (normalized.isEmpty) {
+      return null;
+    }
+    final internalShellRoot = '${paths.shellRootPath}/.omnibot';
+    if (normalized == internalShellRoot) {
+      return paths.internalRootPath;
+    }
+    if (normalized.startsWith('$internalShellRoot/')) {
+      final relative = normalized.substring(internalShellRoot.length + 1);
+      return '${paths.internalRootPath}/$relative';
+    }
+    if (normalized == paths.shellRootPath) {
+      return paths.rootPath;
+    }
+    if (normalized.startsWith('${paths.shellRootPath}/')) {
+      final relative = normalized.substring(paths.shellRootPath.length + 1);
+      return '${paths.rootPath}/$relative';
     }
     return null;
   }

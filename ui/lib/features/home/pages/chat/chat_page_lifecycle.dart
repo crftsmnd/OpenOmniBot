@@ -640,9 +640,12 @@ mixin _ChatPageLifecycleMixin on _ChatPageStateBase {
 
     if (resolvedTargetMode == ChatSurfaceMode.workspace) {
       _inputFocusNode.unfocus();
+      final workspacePathsFuture =
+          OmnibotResourceService.ensureWorkspacePathsLoaded(forceRefresh: true);
       setState(() {
         _activeSurfaceMode = ChatSurfaceMode.workspace;
         _workspaceSurfaceSeed += 1;
+        _workspacePathsLoadFuture = workspacePathsFuture;
         _messageController.clear();
         _setChatIslandDisplayLayerForMode(
           ChatPageMode.normal,

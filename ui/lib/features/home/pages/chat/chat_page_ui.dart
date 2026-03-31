@@ -363,15 +363,33 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
 
   @override
   Widget _buildWorkspaceSurfacePage() {
-    return OmnibotWorkspaceBrowser(
-      key: ValueKey('workspace_surface_$_workspaceSurfaceSeed'),
-      workspacePath: OmnibotResourceService.rootPath,
-      workspaceShellPath: OmnibotResourceService.shellRootPath,
-      onCanGoUpChanged: (canGoUp) {
-        if (_workspaceBrowserCanGoUp == canGoUp || !mounted) return;
-        setState(() {
-          _workspaceBrowserCanGoUp = canGoUp;
-        });
+    final workspacePathsFuture = _workspacePathsLoadFuture ??=
+        OmnibotResourceService.ensureWorkspacePathsLoaded(forceRefresh: true);
+    return FutureBuilder<OmnibotWorkspacePaths>(
+      future: workspacePathsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator.adaptive());
+        }
+        final paths =
+            snapshot.data ??
+            const OmnibotWorkspacePaths(
+              rootPath: '/data/user/0/cn.com.omnimind.bot/workspace',
+              shellRootPath: '/workspace',
+              internalRootPath:
+                  '/data/user/0/cn.com.omnimind.bot/workspace/.omnibot',
+            );
+        return OmnibotWorkspaceBrowser(
+          key: ValueKey('workspace_surface_$_workspaceSurfaceSeed'),
+          workspacePath: paths.rootPath,
+          workspaceShellPath: paths.shellRootPath,
+          onCanGoUpChanged: (canGoUp) {
+            if (_workspaceBrowserCanGoUp == canGoUp || !mounted) return;
+            setState(() {
+              _workspaceBrowserCanGoUp = canGoUp;
+            });
+          },
+        );
       },
     );
   }

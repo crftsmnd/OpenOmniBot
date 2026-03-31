@@ -240,6 +240,7 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   );
   int _workspaceSurfaceSeed = 0;
   bool _workspaceBrowserCanGoUp = false;
+  Future<OmnibotWorkspacePaths>? _workspacePathsLoadFuture;
   bool _hasInitializedHalfScreen = false;
   bool _isCompanionModeEnabled = false;
   bool _isCompanionToggleLoading = false;
