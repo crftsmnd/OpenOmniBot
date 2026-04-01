@@ -351,7 +351,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
           Expanded(
             child: _buildQuickCard(
               title: '记忆中心',
-              subtitle: '已记忆 $_totalMemoryCount 个碎片',
+              subtitle: '记忆 $_totalMemoryCount 碎片',
               gradient: const LinearGradient(
                 begin: Alignment(-0.17, -0.47),
                 end: Alignment(1.48, 1.69),
@@ -367,7 +367,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
             child: _buildQuickCard(
               title: '技能仓库',
               subtitle:
-                  '启用 $_enabledSkillCount / 安装 $_installedSkillCount 个技能',
+                  '启用 $_enabledSkillCount / 安装 $_installedSkillCount 技能',
               gradient: const LinearGradient(
                 begin: Alignment(-0.17, -0.47),
                 end: Alignment(1.48, 1.69),
