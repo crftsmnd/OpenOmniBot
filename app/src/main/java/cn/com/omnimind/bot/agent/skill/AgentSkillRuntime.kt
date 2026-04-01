@@ -1,23 +1,234 @@
 package cn.com.omnimind.bot.agent
 
 import android.content.Context
+import android.content.res.AssetManager
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import java.io.File
 import kotlin.math.min
+
+private const val BUILTIN_SKILL_MANIFEST_ASSET = "builtin_skills/manifest.json"
+private const val BUILTIN_SOURCE = "builtin"
+private const val USER_SOURCE = "user"
+private const val INSTALL_STATE_INSTALLED = "installed"
+private const val INSTALL_STATE_REMOVED_BUILTIN = "removed_builtin"
+private const val SKILL_REGISTRY_FILE_NAME = ".skill_registry.json"
+
+private data class BuiltinSkillManifest(
+    val skills: List<BuiltinSkillAsset> = emptyList()
+)
+
+private data class BuiltinSkillAsset(
+    val id: String = "",
+    val name: String = "",
+    val description: String = "",
+    val assetPath: String = "",
+    val hasScripts: Boolean = false,
+    val hasReferences: Boolean = false,
+    val hasAssets: Boolean = false,
+    val hasEvals: Boolean = false
+)
+
+private data class SkillRegistryEntry(
+    val enabled: Boolean = true,
+    val source: String = USER_SOURCE,
+    val installState: String = INSTALL_STATE_INSTALLED
+)
+
+private class SkillRegistryStore(
+    private val registryFile: File
+) {
+    private val gson = Gson()
+    private val mapType = object : TypeToken<LinkedHashMap<String, SkillRegistryEntry>>() {}.type
+
+    fun read(): LinkedHashMap<String, SkillRegistryEntry> {
+        if (!registryFile.exists()) {
+            return linkedMapOf()
+        }
+        return runCatching {
+            gson.fromJson<LinkedHashMap<String, SkillRegistryEntry>>(
+                registryFile.readText(),
+                mapType
+            ) ?: linkedMapOf()
+        }.getOrElse {
+            linkedMapOf()
+        }
+    }
+
+    fun write(entries: Map<String, SkillRegistryEntry>) {
+        registryFile.parentFile?.mkdirs()
+        val ordered = linkedMapOf<String, SkillRegistryEntry>()
+        entries.toSortedMap().forEach { (key, value) ->
+            ordered[key] = value
+        }
+        registryFile.writeText(gson.toJson(ordered))
+    }
+
+    fun set(skillId: String, entry: SkillRegistryEntry) {
+        val updated = read()
+        updated[skillId] = entry
+        write(updated)
+    }
+
+    fun remove(skillId: String) {
+        val updated = read()
+        if (updated.remove(skillId) != null) {
+            write(updated)
+        }
+    }
+}
+
+private class BuiltinSkillAssetStore(
+    private val context: Context,
+    private val workspaceManager: AgentWorkspaceManager
+) {
+    private val gson = Gson()
+
+    fun listBuiltins(): List<BuiltinSkillAsset> {
+        return runCatching {
+            context.assets.open(BUILTIN_SKILL_MANIFEST_ASSET).bufferedReader().use { reader ->
+                gson.fromJson(reader, BuiltinSkillManifest::class.java)?.skills.orEmpty()
+            }
+        }.getOrElse {
+            emptyList()
+        }.filter { skill ->
+            skill.id.isNotBlank() && skill.assetPath.isNotBlank()
+        }
+    }
+
+    fun findBuiltin(skillId: String): BuiltinSkillAsset? {
+        return listBuiltins().firstOrNull { it.id == skillId }
+    }
+
+    fun seedMissingBuiltins(registryStore: SkillRegistryStore) {
+        val registry = registryStore.read()
+        var changed = false
+        listBuiltins().forEach { builtin ->
+            val targetDir = targetDirFor(builtin)
+            if (targetDir.exists()) {
+                return@forEach
+            }
+            if (registry.containsKey(builtin.id)) {
+                return@forEach
+            }
+            installBuiltinInternal(builtin)
+            registry[builtin.id] = SkillRegistryEntry(
+                enabled = true,
+                source = BUILTIN_SOURCE,
+                installState = INSTALL_STATE_INSTALLED
+            )
+            changed = true
+        }
+        if (changed) {
+            registryStore.write(registry)
+        }
+    }
+
+    fun installBuiltin(skillId: String, registryStore: SkillRegistryStore) {
+        val builtin = findBuiltin(skillId)
+            ?: throw IllegalArgumentException("未找到内置 skill：$skillId")
+        installBuiltinInternal(builtin)
+        registryStore.set(
+            skillId,
+            SkillRegistryEntry(
+                enabled = true,
+                source = BUILTIN_SOURCE,
+                installState = INSTALL_STATE_INSTALLED
+            )
+        )
+    }
+
+    fun targetDirFor(builtin: BuiltinSkillAsset): File {
+        return File(workspaceManager.skillsRoot(), builtin.id)
+    }
+
+    private fun installBuiltinInternal(builtin: BuiltinSkillAsset) {
+        val targetDir = targetDirFor(builtin)
+        if (targetDir.exists()) {
+            targetDir.deleteRecursively()
+        }
+        copyAssetRecursively(
+            assetManager = context.assets,
+            assetPath = builtin.assetPath,
+            target = targetDir
+        )
+    }
+
+    private fun copyAssetRecursively(
+        assetManager: AssetManager,
+        assetPath: String,
+        target: File
+    ) {
+        val children = assetManager.list(assetPath).orEmpty()
+        if (children.isEmpty()) {
+            target.parentFile?.mkdirs()
+            assetManager.open(assetPath).use { input ->
+                target.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return
+        }
+        if (!target.exists()) {
+            target.mkdirs()
+        }
+        children.forEach { child ->
+            val childAssetPath = "$assetPath/$child"
+            copyAssetRecursively(
+                assetManager = assetManager,
+                assetPath = childAssetPath,
+                target = File(target, child)
+            )
+        }
+    }
+}
 
 class SkillIndexService(
     private val context: Context,
     private val workspaceManager: AgentWorkspaceManager
 ) {
-    fun listInstalledSkills(): List<SkillIndexEntry> {
-        val root = workspaceManager.skillsRoot()
-        if (!root.exists()) return emptyList()
-        return root.walkTopDown()
-            .onEnter { directory -> directory.name != ".git" }
-            .filter { file -> file.isFile && file.name == "SKILL.md" }
-            .mapNotNull { skillFile -> buildIndexEntry(skillFile.parentFile ?: return@mapNotNull null) }
-            .distinctBy { it.rootPath }
-            .sortedBy { it.id }
+    private fun registryStore(): SkillRegistryStore {
+        return SkillRegistryStore(File(workspaceManager.skillsRoot(), SKILL_REGISTRY_FILE_NAME))
+    }
+
+    private fun builtinStore(): BuiltinSkillAssetStore {
+        return BuiltinSkillAssetStore(context.applicationContext, workspaceManager)
+    }
+
+    fun seedBuiltinSkillsIfNeeded() {
+        builtinStore().seedMissingBuiltins(registryStore())
+    }
+
+    fun listSkillsForManagement(): List<SkillIndexEntry> {
+        seedBuiltinSkillsIfNeeded()
+        val registryStore = registryStore()
+        val registry = registryStore.read()
+        val builtinAssets = builtinStore().listBuiltins().associateBy { it.id }
+        val installedEntries = scanInstalledEntries(registry, builtinAssets)
+        val installedIds = installedEntries.mapTo(mutableSetOf()) { it.id }
+        val removedBuiltinEntries = builtinAssets.values
+            .asSequence()
+            .filter { builtin ->
+                builtin.id !in installedIds &&
+                    registry[builtin.id]?.installState == INSTALL_STATE_REMOVED_BUILTIN
+            }
+            .map { builtin ->
+                buildBuiltinPlaceholderEntry(
+                    builtin = builtin,
+                    registryState = registry[builtin.id]
+                )
+            }
             .toList()
+
+        return (installedEntries + removedBuiltinEntries).sortedWith(
+            compareByDescending<SkillIndexEntry> { it.installed }
+                .thenBy { if (it.source == BUILTIN_SOURCE) 0 else 1 }
+                .thenBy { it.name.lowercase() }
+        )
+    }
+
+    fun listInstalledSkills(): List<SkillIndexEntry> {
+        return listSkillsForManagement().filter { it.installed }
     }
 
     fun findInstalledSkill(identifier: String): SkillIndexEntry? {
@@ -39,11 +250,94 @@ class SkillIndexService(
         require(skillFile.exists()) { "skill source 缺少 SKILL.md" }
         val targetDir = File(workspaceManager.skillsRoot(), sourceDir.name)
         copyRecursively(sourceDir, targetDir)
-        return buildIndexEntry(targetDir)
-            ?: throw IllegalStateException("安装 skill 后索引失败")
+        val entry = buildInstalledEntry(
+            skillDir = targetDir,
+            registry = registryStore().read(),
+            builtinAssets = builtinStore().listBuiltins().associateBy { it.id }
+        ) ?: throw IllegalStateException("安装 skill 后索引失败")
+        registryStore().set(
+            entry.id,
+            SkillRegistryEntry(
+                enabled = true,
+                source = USER_SOURCE,
+                installState = INSTALL_STATE_INSTALLED
+            )
+        )
+        return entry.copy(enabled = true, source = USER_SOURCE, installed = true)
     }
 
-    private fun buildIndexEntry(skillDir: File): SkillIndexEntry? {
+    fun setSkillEnabled(skillId: String, enabled: Boolean): SkillIndexEntry {
+        val entry = findInstalledSkill(skillId)
+            ?: throw IllegalArgumentException("未找到已安装 skill：$skillId")
+        registryStore().set(
+            entry.id,
+            SkillRegistryEntry(
+                enabled = enabled,
+                source = entry.source,
+                installState = INSTALL_STATE_INSTALLED
+            )
+        )
+        return entry.copy(enabled = enabled)
+    }
+
+    fun deleteSkill(skillId: String): Boolean {
+        val entry = listSkillsForManagement().firstOrNull { it.id == skillId && it.installed }
+            ?: return false
+        val targetDir = File(entry.rootPath)
+        if (entry.source == BUILTIN_SOURCE) {
+            if (targetDir.exists()) {
+                targetDir.deleteRecursively()
+                if (targetDir.exists()) {
+                    return false
+                }
+            }
+            registryStore().set(
+                entry.id,
+                SkillRegistryEntry(
+                    enabled = false,
+                    source = BUILTIN_SOURCE,
+                    installState = INSTALL_STATE_REMOVED_BUILTIN
+                )
+            )
+            return true
+        }
+        val deleted = !targetDir.exists() || targetDir.deleteRecursively()
+        registryStore().remove(entry.id)
+        return deleted
+    }
+
+    fun installBuiltinSkill(skillId: String): SkillIndexEntry {
+        val builtinStore = builtinStore()
+        builtinStore.installBuiltin(skillId, registryStore())
+        return findInstalledSkill(skillId)
+            ?: throw IllegalStateException("安装内置 skill 后索引失败：$skillId")
+    }
+
+    private fun scanInstalledEntries(
+        registry: Map<String, SkillRegistryEntry>,
+        builtinAssets: Map<String, BuiltinSkillAsset>
+    ): List<SkillIndexEntry> {
+        val root = workspaceManager.skillsRoot()
+        if (!root.exists()) return emptyList()
+        return root.walkTopDown()
+            .onEnter { directory -> directory.name != ".git" }
+            .filter { file -> file.isFile && file.name == "SKILL.md" }
+            .mapNotNull { skillFile ->
+                buildInstalledEntry(
+                    skillDir = skillFile.parentFile ?: return@mapNotNull null,
+                    registry = registry,
+                    builtinAssets = builtinAssets
+                )
+            }
+            .distinctBy { it.rootPath }
+            .toList()
+    }
+
+    private fun buildInstalledEntry(
+        skillDir: File,
+        registry: Map<String, SkillRegistryEntry>,
+        builtinAssets: Map<String, BuiltinSkillAsset>
+    ): SkillIndexEntry? {
         val canonicalSkillDir = skillDir.canonicalFile
         val skillFile = File(canonicalSkillDir, "SKILL.md")
         val parsed = parseSkillFile(skillFile) ?: return null
@@ -52,6 +346,8 @@ class SkillIndexService(
         val metadata = frontmatter["metadata"]
             ?.let { raw -> parseIndentedBlock(raw) }
             ?: emptyMap()
+        val registryState = registry[id]
+        val builtinAsset = builtinAssets[id]
         val shellRootPath = workspaceManager.shellPathForAndroid(canonicalSkillDir)
             ?: canonicalSkillDir.absolutePath
         val shellSkillFilePath = workspaceManager.shellPathForAndroid(skillFile)
@@ -69,7 +365,37 @@ class SkillIndexService(
             hasScripts = File(canonicalSkillDir, "scripts").isDirectory,
             hasReferences = File(canonicalSkillDir, "references").isDirectory,
             hasAssets = File(canonicalSkillDir, "assets").isDirectory,
-            hasEvals = File(canonicalSkillDir, "evals").isDirectory
+            hasEvals = File(canonicalSkillDir, "evals").isDirectory,
+            enabled = registryState?.enabled ?: true,
+            source = registryState?.source?.ifBlank { null }
+                ?: if (builtinAsset != null) BUILTIN_SOURCE else USER_SOURCE,
+            installed = true
+        )
+    }
+
+    private fun buildBuiltinPlaceholderEntry(
+        builtin: BuiltinSkillAsset,
+        registryState: SkillRegistryEntry?
+    ): SkillIndexEntry {
+        val targetDir = File(workspaceManager.skillsRoot(), builtin.id)
+        val skillFile = File(targetDir, "SKILL.md")
+        return SkillIndexEntry(
+            id = builtin.id,
+            name = builtin.name.ifBlank { builtin.id },
+            description = builtin.description,
+            rootPath = targetDir.absolutePath,
+            shellRootPath = workspaceManager.shellPathForAndroid(targetDir)
+                ?: targetDir.absolutePath,
+            skillFilePath = skillFile.absolutePath,
+            shellSkillFilePath = workspaceManager.shellPathForAndroid(skillFile)
+                ?: skillFile.absolutePath,
+            hasScripts = builtin.hasScripts,
+            hasReferences = builtin.hasReferences,
+            hasAssets = builtin.hasAssets,
+            hasEvals = builtin.hasEvals,
+            enabled = registryState?.enabled ?: false,
+            source = BUILTIN_SOURCE,
+            installed = false
         )
     }
 
@@ -109,6 +435,9 @@ class SkillLoader(
     private val workspaceManager: AgentWorkspaceManager
 ) {
     fun load(entry: SkillIndexEntry, triggerReason: String): ResolvedSkillContext? {
+        if (!entry.installed) {
+            return null
+        }
         val skillDir = File(entry.rootPath)
         val parsed = parseSkillFile(File(skillDir, "SKILL.md")) ?: return null
         val referencesDir = File(skillDir, "references")
@@ -177,6 +506,9 @@ object SkillTriggerMatcher {
         val normalizedMessage = normalize(userMessage)
         if (normalizedMessage.isBlank()) return emptyList()
         return entries.mapNotNull { entry ->
+            if (!entry.installed || !entry.enabled) {
+                return@mapNotNull null
+            }
             val confidence = score(entry, normalizedMessage)
             if (confidence <= 0.0) return@mapNotNull null
             val reason = when {

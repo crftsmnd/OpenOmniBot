@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:ui/core/router/go_router_manager.dart';
 import 'package:ui/features/home/widgets/conversation_mode_badge.dart';
+import 'package:ui/services/agent_skill_store_service.dart';
 import 'package:ui/theme/app_colors.dart';
 import 'package:ui/utils/cache_util.dart';
 import 'package:ui/utils/ui.dart';
@@ -35,6 +36,8 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
   static const double _conversationDeleteIconSize = 18;
   int _localMemoryCount = 0;
   int _cloudMemoryCount = 0;
+  int _installedSkillCount = 0;
+  int _enabledSkillCount = 0;
   List<ConversationModel> conversations = [];
   final Set<String> _deletingConversationKeys = <String>{};
   bool isLoadingConversations = true;
@@ -157,6 +160,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
       _loadMemoryCount();
     }
     _loadCloudMemoryCount();
+    _loadSkillCounts();
   }
 
   Future<void> _loadMemoryCount() async {
@@ -211,6 +215,21 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
           isLoadingConversations = false;
         });
       }
+    }
+  }
+
+  Future<void> _loadSkillCounts() async {
+    try {
+      final skills = await AgentSkillStoreService.listSkills();
+      if (!mounted) return;
+      setState(() {
+        _installedSkillCount = skills.where((item) => item.installed).length;
+        _enabledSkillCount = skills
+            .where((item) => item.installed && item.enabled)
+            .length;
+      });
+    } catch (e) {
+      debugPrint('Error loading skill count: $e');
     }
   }
 
@@ -327,17 +346,39 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
   Widget _buildQuickAccessCards(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: _buildQuickCard(
-        title: '记忆中心',
-        subtitle: '已记忆 $_totalMemoryCount 个碎片',
-        gradient: const LinearGradient(
-          begin: Alignment(-0.17, -0.47),
-          end: Alignment(1.48, 1.69),
-          colors: [const Color(0xFF0056FA), const Color(0xB2609CF7)],
-        ),
-        onTap: () {
-          GoRouterManager.push("/memory/memory_center_page");
-        },
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildQuickCard(
+              title: '记忆中心',
+              subtitle: '已记忆 $_totalMemoryCount 个碎片',
+              gradient: const LinearGradient(
+                begin: Alignment(-0.17, -0.47),
+                end: Alignment(1.48, 1.69),
+                colors: [Color(0xFF0056FA), Color(0xB2609CF7)],
+              ),
+              onTap: () {
+                GoRouterManager.push("/memory/memory_center_page");
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _buildQuickCard(
+              title: '技能仓库',
+              subtitle:
+                  '已启用 $_enabledSkillCount / 已安装 $_installedSkillCount 个技能',
+              gradient: const LinearGradient(
+                begin: Alignment(-0.17, -0.47),
+                end: Alignment(1.48, 1.69),
+                colors: [Color(0xFF0E7A5F), Color(0xB223B2A1)],
+              ),
+              onTap: () {
+                GoRouterManager.push('/home/skill_store');
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -375,6 +416,8 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
             const SizedBox(height: 2),
             Text(
               subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w400,

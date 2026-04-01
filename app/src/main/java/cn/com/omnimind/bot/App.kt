@@ -5,6 +5,7 @@ import cn.com.omnimind.baselib.database.DatabaseHelper
 import cn.com.omnimind.baselib.util.OmniLog
 import cn.com.omnimind.bot.agent.AgentWorkspaceManager
 import cn.com.omnimind.bot.agent.AgentAiCapabilityConfigSync
+import cn.com.omnimind.bot.agent.SkillIndexService
 import cn.com.omnimind.bot.agent.WorkspaceMemoryRollupScheduler
 import cn.com.omnimind.bot.agent.WorkspaceScheduledTaskScheduler
 import cn.com.omnimind.bot.mcp.McpServerManager
@@ -126,7 +127,9 @@ class App : BaseApplication() {
             "ModelSceneRegistry.init cost: ${System.currentTimeMillis() - registryStart}ms"
         )
         runCatching {
-            AgentWorkspaceManager(this).ensureRuntimeDirectories()
+            val workspaceManager = AgentWorkspaceManager(this)
+            workspaceManager.ensureRuntimeDirectories()
+            SkillIndexService(this, workspaceManager).seedBuiltinSkillsIfNeeded()
         }
         runCatching {
             AgentAiCapabilityConfigSync.get(this).initialize()

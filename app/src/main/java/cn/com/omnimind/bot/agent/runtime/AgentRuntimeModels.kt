@@ -105,7 +105,10 @@ data class SkillIndexEntry(
     val hasScripts: Boolean,
     val hasReferences: Boolean,
     val hasAssets: Boolean,
-    val hasEvals: Boolean
+    val hasEvals: Boolean,
+    val enabled: Boolean = true,
+    val source: String = "user",
+    val installed: Boolean = true
 )
 
 data class ResolvedSkillContext(

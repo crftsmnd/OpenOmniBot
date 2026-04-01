@@ -9,12 +9,13 @@ object AgentSystemPrompt {
         resolvedSkills: List<ResolvedSkillContext>,
         memoryContext: WorkspaceMemoryPromptContext?
     ): String {
-        val installedSkillSection = if (installedSkills.isEmpty()) {
+        val visibleInstalledSkills = installedSkills.filter { it.installed && it.enabled }
+        val installedSkillSection = if (visibleInstalledSkills.isEmpty()) {
             "当前未安装额外 skills。"
         } else {
             buildString {
                 appendLine("已安装 skills 索引：")
-                installedSkills.forEach { skill ->
+                visibleInstalledSkills.forEach { skill ->
                     val compatibility = SkillCompatibilityChecker.evaluate(skill)
                     val status = if (compatibility.available) {
                         "available"

@@ -20,6 +20,7 @@ import 'pages/omnibot_workspace/omnibot_workspace_page.dart';
 import 'pages/webview/webview_page.dart';
 import 'pages/settings/settings_page.dart';
 import 'pages/mcp/remote_mcp_servers_page.dart';
+import 'pages/skill_store/skill_store_page.dart';
 import 'pages/termux_setting/termux_setting_page.dart';
 import 'pages/scene_model_setting/scene_model_setting_page.dart';
 import 'pages/vlm_model_setting/vlm_model_setting_page.dart';
@@ -270,6 +271,16 @@ List<GoRoute> homeRoutes = [
       key: state.pageKey,
       name: 'home/mcp_tools',
       child: const RemoteMcpServersPage(),
+    ),
+  ),
+
+  GoRoute(
+    path: '/home/skill_store',
+    name: 'home/skill_store',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/skill_store',
+      child: const SkillStorePage(),
     ),
   ),
 

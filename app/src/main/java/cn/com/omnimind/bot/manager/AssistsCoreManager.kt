@@ -53,6 +53,7 @@ import cn.com.omnimind.bot.agent.AgentRuntimeContextRepository
 import cn.com.omnimind.bot.agent.AgentScheduleToolBridge
 import cn.com.omnimind.bot.agent.AgentWorkspaceManager
 import cn.com.omnimind.bot.agent.OmniAgentExecutor
+import cn.com.omnimind.bot.agent.SkillIndexEntry
 import cn.com.omnimind.bot.agent.SkillIndexService
 import cn.com.omnimind.bot.agent.ToolExecutionResult
 import cn.com.omnimind.bot.agent.WorkspaceMemoryRollupScheduler
@@ -3208,20 +3209,7 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                 }
                 val workspaceManager = AgentWorkspaceManager(context)
                 val skillIndexService = SkillIndexService(context, workspaceManager)
-                val payload = skillIndexService.listInstalledSkills().map { entry ->
-                    mapOf(
-                        "id" to entry.id,
-                        "name" to entry.name,
-                        "description" to entry.description,
-                        "compatibility" to entry.compatibility,
-                        "metadata" to entry.metadata,
-                        "rootPath" to entry.rootPath,
-                        "hasScripts" to entry.hasScripts,
-                        "hasReferences" to entry.hasReferences,
-                        "hasAssets" to entry.hasAssets,
-                        "hasEvals" to entry.hasEvals
-                    )
-                }
+                val payload = skillIndexService.listSkillsForManagement().map(::skillEntryPayload)
                 withContext(Dispatchers.Main) {
                     result.success(payload)
                 }
@@ -3247,6 +3235,27 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
         }
     }
 
+    private fun skillEntryPayload(entry: SkillIndexEntry): Map<String, Any?> {
+        return mapOf(
+            "id" to entry.id,
+            "name" to entry.name,
+            "description" to entry.description,
+            "compatibility" to entry.compatibility,
+            "metadata" to entry.metadata,
+            "rootPath" to entry.rootPath,
+            "shellRootPath" to entry.shellRootPath,
+            "skillFilePath" to entry.skillFilePath,
+            "shellSkillFilePath" to entry.shellSkillFilePath,
+            "hasScripts" to entry.hasScripts,
+            "hasReferences" to entry.hasReferences,
+            "hasAssets" to entry.hasAssets,
+            "hasEvals" to entry.hasEvals,
+            "enabled" to entry.enabled,
+            "source" to entry.source,
+            "installed" to entry.installed
+        )
+    }
+
     fun agentSkillInstall(call: MethodCall, result: MethodChannel.Result) {
         val sourcePath = call.argument<String>("sourcePath")?.trim().orEmpty()
         if (sourcePath.isBlank()) {
@@ -3269,20 +3278,7 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                 val skillIndexService = SkillIndexService(context, workspaceManager)
                 val entry = skillIndexService.installSkillFromDirectory(sourcePath)
                 withContext(Dispatchers.Main) {
-                    result.success(
-                        mapOf(
-                            "id" to entry.id,
-                            "name" to entry.name,
-                            "description" to entry.description,
-                            "compatibility" to entry.compatibility,
-                            "metadata" to entry.metadata,
-                            "rootPath" to entry.rootPath,
-                            "hasScripts" to entry.hasScripts,
-                            "hasReferences" to entry.hasReferences,
-                            "hasAssets" to entry.hasAssets,
-                            "hasEvals" to entry.hasEvals
-                        )
-                    )
+                    result.success(skillEntryPayload(entry))
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -3293,6 +3289,145 @@ class AssistsCoreManager(private val context: Context) : OnMessagePushListener {
                             "WORKSPACE_STORAGE_PERMISSION_REQUIRED"
                         } else {
                             "AGENT_SKILL_INSTALL_ERROR"
+                        },
+                        if (isWorkspacePermissionError) {
+                            WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME
+                        } else {
+                            e.message
+                        },
+                        null
+                    )
+                }
+            }
+        }
+    }
+
+    fun agentSkillSetEnabled(call: MethodCall, result: MethodChannel.Result) {
+        val skillId = call.argument<String>("skillId")?.trim().orEmpty()
+        val enabled = call.argument<Boolean>("enabled") ?: true
+        if (skillId.isBlank()) {
+            result.error("INVALID_ARGS", "skillId is required", null)
+            return
+        }
+        mainJob.launch {
+            try {
+                if (!WorkspaceStorageAccess.isGranted(context)) {
+                    withContext(Dispatchers.Main) {
+                        result.error(
+                            "WORKSPACE_STORAGE_PERMISSION_REQUIRED",
+                            WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME,
+                            null
+                        )
+                    }
+                    return@launch
+                }
+                val workspaceManager = AgentWorkspaceManager(context)
+                val skillIndexService = SkillIndexService(context, workspaceManager)
+                val entry = skillIndexService.setSkillEnabled(skillId, enabled)
+                withContext(Dispatchers.Main) {
+                    result.success(skillEntryPayload(entry))
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    val isWorkspacePermissionError =
+                        WorkspaceStorageAccess.looksLikePermissionError(e)
+                    result.error(
+                        if (isWorkspacePermissionError) {
+                            "WORKSPACE_STORAGE_PERMISSION_REQUIRED"
+                        } else {
+                            "AGENT_SKILL_SET_ENABLED_ERROR"
+                        },
+                        if (isWorkspacePermissionError) {
+                            WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME
+                        } else {
+                            e.message
+                        },
+                        null
+                    )
+                }
+            }
+        }
+    }
+
+    fun agentSkillDelete(call: MethodCall, result: MethodChannel.Result) {
+        val skillId = call.argument<String>("skillId")?.trim().orEmpty()
+        if (skillId.isBlank()) {
+            result.error("INVALID_ARGS", "skillId is required", null)
+            return
+        }
+        mainJob.launch {
+            try {
+                if (!WorkspaceStorageAccess.isGranted(context)) {
+                    withContext(Dispatchers.Main) {
+                        result.error(
+                            "WORKSPACE_STORAGE_PERMISSION_REQUIRED",
+                            WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME,
+                            null
+                        )
+                    }
+                    return@launch
+                }
+                val workspaceManager = AgentWorkspaceManager(context)
+                val skillIndexService = SkillIndexService(context, workspaceManager)
+                val deleted = skillIndexService.deleteSkill(skillId)
+                withContext(Dispatchers.Main) {
+                    result.success(mapOf("deleted" to deleted, "id" to skillId))
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    val isWorkspacePermissionError =
+                        WorkspaceStorageAccess.looksLikePermissionError(e)
+                    result.error(
+                        if (isWorkspacePermissionError) {
+                            "WORKSPACE_STORAGE_PERMISSION_REQUIRED"
+                        } else {
+                            "AGENT_SKILL_DELETE_ERROR"
+                        },
+                        if (isWorkspacePermissionError) {
+                            WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME
+                        } else {
+                            e.message
+                        },
+                        null
+                    )
+                }
+            }
+        }
+    }
+
+    fun agentSkillInstallBuiltin(call: MethodCall, result: MethodChannel.Result) {
+        val skillId = call.argument<String>("skillId")?.trim().orEmpty()
+        if (skillId.isBlank()) {
+            result.error("INVALID_ARGS", "skillId is required", null)
+            return
+        }
+        mainJob.launch {
+            try {
+                if (!WorkspaceStorageAccess.isGranted(context)) {
+                    withContext(Dispatchers.Main) {
+                        result.error(
+                            "WORKSPACE_STORAGE_PERMISSION_REQUIRED",
+                            WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME,
+                            null
+                        )
+                    }
+                    return@launch
+                }
+                val workspaceManager = AgentWorkspaceManager(context)
+                val skillIndexService = SkillIndexService(context, workspaceManager)
+                val entry = skillIndexService.installBuiltinSkill(skillId)
+                withContext(Dispatchers.Main) {
+                    result.success(skillEntryPayload(entry))
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    val isWorkspacePermissionError =
+                        WorkspaceStorageAccess.looksLikePermissionError(e)
+                    result.error(
+                        if (isWorkspacePermissionError) {
+                            "WORKSPACE_STORAGE_PERMISSION_REQUIRED"
+                        } else {
+                            "AGENT_SKILL_INSTALL_BUILTIN_ERROR"
                         },
                         if (isWorkspacePermissionError) {
                             WorkspaceStorageAccess.REQUIRED_PERMISSION_NAME

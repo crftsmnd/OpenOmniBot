@@ -1284,6 +1284,53 @@ class AssistsMessageService {
     }
   }
 
+  static Future<Map<String, dynamic>?> setAgentSkillEnabled({
+    required String skillId,
+    required bool enabled,
+  }) async {
+    try {
+      final result = await assistCore.invokeMethod<Map<dynamic, dynamic>>(
+        'agentSkillSetEnabled',
+        {'skillId': skillId, 'enabled': enabled},
+      );
+      if (result == null) return null;
+      return result.map((k, v) => MapEntry(k.toString(), v));
+    } on PlatformException catch (e) {
+      print('切换 Agent skill 启用状态失败: ${e.message}');
+      return null;
+    }
+  }
+
+  static Future<bool> deleteAgentSkill({required String skillId}) async {
+    try {
+      final result = await assistCore.invokeMethod<Map<dynamic, dynamic>>(
+        'agentSkillDelete',
+        {'skillId': skillId},
+      );
+      if (result == null) return false;
+      return result['deleted'] == true;
+    } on PlatformException catch (e) {
+      print('删除 Agent skill 失败: ${e.message}');
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>?> installBuiltinAgentSkill({
+    required String skillId,
+  }) async {
+    try {
+      final result = await assistCore.invokeMethod<Map<dynamic, dynamic>>(
+        'agentSkillInstallBuiltin',
+        {'skillId': skillId},
+      );
+      if (result == null) return null;
+      return result.map((k, v) => MapEntry(k.toString(), v));
+    } on PlatformException catch (e) {
+      print('安装内置 Agent skill 失败: ${e.message}');
+      return null;
+    }
+  }
+
   /// 检测自定义 VLM 模型可用性（OpenAI-compatible）
   static Future<ModelAvailabilityCheckResult> checkVlmModelAvailability({
     required String model,
