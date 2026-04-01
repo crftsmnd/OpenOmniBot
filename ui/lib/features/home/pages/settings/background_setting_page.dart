@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,52 @@ import 'package:ui/theme/app_colors.dart';
 import 'package:ui/utils/ui.dart';
 import 'package:ui/widgets/app_background_widgets.dart';
 import 'package:ui/widgets/common_app_bar.dart';
+
+class _AppearanceTextColorPreset {
+  final String label;
+  final String hex;
+  final Color color;
+
+  const _AppearanceTextColorPreset({
+    required this.label,
+    required this.hex,
+    required this.color,
+  });
+}
+
+const List<_AppearanceTextColorPreset> _kAppearanceTextColorPresets =
+    <_AppearanceTextColorPreset>[
+      _AppearanceTextColorPreset(
+        label: '白',
+        hex: '#FFFFFF',
+        color: Color(0xFFFFFFFF),
+      ),
+      _AppearanceTextColorPreset(
+        label: '深灰',
+        hex: '#353E53',
+        color: Color(0xFF353E53),
+      ),
+      _AppearanceTextColorPreset(
+        label: '浅蓝',
+        hex: '#DCEBFF',
+        color: Color(0xFFDCEBFF),
+      ),
+      _AppearanceTextColorPreset(
+        label: '藏蓝',
+        hex: '#1D3E7B',
+        color: Color(0xFF1D3E7B),
+      ),
+      _AppearanceTextColorPreset(
+        label: '青绿',
+        hex: '#2F7A4A',
+        color: Color(0xFF2F7A4A),
+      ),
+      _AppearanceTextColorPreset(
+        label: '暖黄',
+        hex: '#F59E0B',
+        color: Color(0xFFF59E0B),
+      ),
+    ];
 
 class BackgroundSettingPage extends StatefulWidget {
   const BackgroundSettingPage({super.key});
@@ -18,18 +65,53 @@ class BackgroundSettingPage extends StatefulWidget {
 class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
   final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _remoteUrlController = TextEditingController();
+  final TextEditingController _textColorController = TextEditingController();
 
   late AppBackgroundConfig _savedConfig;
   late AppBackgroundConfig _draftConfig;
+  AppBackgroundVisualProfile _draftVisualProfile =
+      AppBackgroundVisualProfile.defaultProfile;
   BackgroundPreviewKind _previewKind = BackgroundPreviewKind.chat;
   bool _saving = false;
   String? _sessionImportedLocalPath;
-
-  bool get _isDirty =>
-      _savedConfig.toJson().toString() != _draftConfig.toJson().toString();
+  Timer? _previewProfileDebounceTimer;
+  Timer? _autoSaveDebounceTimer;
+  int _previewProfileToken = 0;
+  int _autoSaveRequestId = 0;
 
   AppBackgroundConfig get _previewConfig {
-    return _draftConfig.copyWith(enabled: _draftConfig.hasResolvedImage);
+    return _draftConfig;
+  }
+
+  String get _autoSaveHint => _saving ? '正在自动保存…' : '更改会自动保存';
+
+  String? get _remoteUrlErrorText {
+    if (_draftConfig.sourceType != AppBackgroundSourceType.remote) {
+      return null;
+    }
+    final raw = _remoteUrlController.text.trim();
+    if (raw.isEmpty) {
+      return _draftConfig.enabled ? '请输入有效的 http(s) 图片直链' : null;
+    }
+    final uri = Uri.tryParse(raw);
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        uri.host.isEmpty) {
+      return '请输入有效的 http(s) 图片直链';
+    }
+    return null;
+  }
+
+  String? get _textColorErrorText {
+    final raw = _textColorController.text.trim();
+    if (_draftConfig.chatTextColorMode != AppBackgroundTextColorMode.custom &&
+        raw.isEmpty) {
+      return null;
+    }
+    if (raw.isEmpty) {
+      return '请输入 #RRGGBB 或 #AARRGGBB';
+    }
+    return normalizeAppBackgroundHexColor(raw) == null ? '色号格式不正确' : null;
   }
 
   @override
@@ -37,34 +119,65 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
     super.initState();
     _savedConfig = AppBackgroundService.current;
     _draftConfig = _savedConfig;
+    _draftVisualProfile = AppBackgroundService.currentVisualProfile;
     _remoteUrlController.text = _draftConfig.remoteImageUrl;
+    _textColorController.text = _draftConfig.chatTextHexColor;
     _remoteUrlController.addListener(_handleRemoteUrlChanged);
+    _textColorController.addListener(_handleTextColorChanged);
+    _scheduleDraftVisualProfileRefresh();
   }
 
   @override
   void dispose() {
+    _previewProfileDebounceTimer?.cancel();
+    _autoSaveDebounceTimer?.cancel();
     _remoteUrlController
       ..removeListener(_handleRemoteUrlChanged)
       ..dispose();
-    final sessionImportedLocalPath = _sessionImportedLocalPath;
-    if (sessionImportedLocalPath != null &&
-        sessionImportedLocalPath != _savedConfig.localImagePath) {
-      AppBackgroundService.deleteManagedLocalImage(sessionImportedLocalPath);
-    }
+    _textColorController
+      ..removeListener(_handleTextColorChanged)
+      ..dispose();
     super.dispose();
   }
 
   void _handleRemoteUrlChanged() {
-    if (_draftConfig.sourceType != AppBackgroundSourceType.remote) {
+    final nextUrl = _remoteUrlController.text.trim();
+    if (_draftConfig.sourceType != AppBackgroundSourceType.remote ||
+        nextUrl == _draftConfig.remoteImageUrl) {
       return;
     }
-    final nextUrl = _remoteUrlController.text.trim();
-    if (nextUrl == _draftConfig.remoteImageUrl) {
+    _applyDraftConfig(_draftConfig.copyWith(remoteImageUrl: nextUrl));
+  }
+
+  void _handleTextColorChanged() {
+    final normalized = normalizeAppBackgroundHexColor(
+      _textColorController.text.trim(),
+    );
+    if (normalized == null ||
+        (_draftConfig.chatTextColorMode == AppBackgroundTextColorMode.custom &&
+            normalized == _draftConfig.chatTextHexColor)) {
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    _applyDraftConfig(
+      _draftConfig.copyWith(
+        chatTextColorMode: AppBackgroundTextColorMode.custom,
+        chatTextHexColor: normalized,
+      ),
+    );
+  }
+
+  void _applyDraftConfig(AppBackgroundConfig nextConfig) {
+    if (_draftConfig.toJson().toString() == nextConfig.toJson().toString()) {
       return;
     }
     setState(() {
-      _draftConfig = _draftConfig.copyWith(remoteImageUrl: nextUrl);
+      _draftConfig = nextConfig;
     });
+    _scheduleDraftVisualProfileRefresh();
+    _scheduleAutoSave();
   }
 
   Future<void> _pickLocalImage() async {
@@ -100,17 +213,17 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
         );
         _remoteUrlController.text = '';
       });
+      _scheduleDraftVisualProfileRefresh();
+      _scheduleAutoSave();
     } catch (error) {
       showToast('选择图片失败：$error', type: ToastType.error);
     }
   }
 
   void _setSourceType(AppBackgroundSourceType sourceType) {
-    setState(() {
-      _draftConfig = _draftConfig.copyWith(
-        enabled: sourceType == AppBackgroundSourceType.none
-            ? false
-            : _draftConfig.enabled,
+    _applyDraftConfig(
+      _draftConfig.copyWith(
+        enabled: true,
         sourceType: sourceType,
         localImagePath: sourceType == AppBackgroundSourceType.local
             ? _draftConfig.localImagePath
@@ -118,69 +231,8 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
         remoteImageUrl: sourceType == AppBackgroundSourceType.remote
             ? _remoteUrlController.text.trim()
             : '',
-      );
-    });
-  }
-
-  void _restoreDefaults() {
-    final previousImported = _sessionImportedLocalPath;
-    setState(() {
-      _draftConfig = AppBackgroundConfig.defaults;
-      _remoteUrlController.text = '';
-      _sessionImportedLocalPath = null;
-    });
-    if (previousImported != null &&
-        previousImported != _savedConfig.localImagePath) {
-      AppBackgroundService.deleteManagedLocalImage(previousImported);
-    }
-  }
-
-  Future<void> _save() async {
-    if (_saving) {
-      return;
-    }
-    final normalized = _normalizedDraft();
-    final validationError = await _validateConfig(normalized);
-    if (validationError != null) {
-      showToast(validationError, type: ToastType.warning);
-      return;
-    }
-
-    setState(() => _saving = true);
-    final previousSaved = _savedConfig;
-    final unusedImported = _sessionImportedLocalPath;
-    try {
-      if (previousSaved.sourceType == AppBackgroundSourceType.local &&
-          previousSaved.localImagePath.isNotEmpty &&
-          previousSaved.localImagePath != normalized.localImagePath) {
-        await AppBackgroundService.deleteManagedLocalImage(
-          previousSaved.localImagePath,
-        );
-      }
-      if (unusedImported != null &&
-          unusedImported != normalized.localImagePath) {
-        await AppBackgroundService.deleteManagedLocalImage(unusedImported);
-      }
-      await AppBackgroundService.save(normalized);
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _savedConfig = normalized;
-        _draftConfig = normalized;
-        _sessionImportedLocalPath = null;
-      });
-      showToast('背景设置已保存', type: ToastType.success);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      showToast('保存失败：$error', type: ToastType.error);
-    } finally {
-      if (mounted) {
-        setState(() => _saving = false);
-      }
-    }
+      ),
+    );
   }
 
   AppBackgroundConfig _normalizedDraft() {
@@ -224,11 +276,86 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
     return null;
   }
 
+  void _scheduleAutoSave() {
+    _autoSaveDebounceTimer?.cancel();
+    final snapshot = _normalizedDraft();
+    final requestId = ++_autoSaveRequestId;
+    _autoSaveDebounceTimer = Timer(const Duration(milliseconds: 220), () {
+      unawaited(_persistAutoSave(requestId, snapshot));
+    });
+  }
+
+  Future<void> _persistAutoSave(
+    int requestId,
+    AppBackgroundConfig snapshot,
+  ) async {
+    final validationError = await _validateConfig(snapshot);
+    if (validationError != null ||
+        _savedConfig.toJson().toString() == snapshot.toJson().toString()) {
+      if (requestId == _autoSaveRequestId) {
+        if (mounted) {
+          setState(() => _saving = false);
+        } else {
+          _saving = false;
+        }
+      }
+      return;
+    }
+
+    if (mounted && requestId == _autoSaveRequestId) {
+      setState(() => _saving = true);
+    } else if (!mounted) {
+      _saving = true;
+    }
+
+    final previousSaved = _savedConfig;
+    final importedPath = _sessionImportedLocalPath;
+    try {
+      await AppBackgroundService.save(snapshot);
+      if (requestId != _autoSaveRequestId) {
+        return;
+      }
+
+      if (previousSaved.sourceType == AppBackgroundSourceType.local &&
+          previousSaved.localImagePath.isNotEmpty &&
+          previousSaved.localImagePath != snapshot.localImagePath) {
+        await AppBackgroundService.deleteManagedLocalImage(
+          previousSaved.localImagePath,
+        );
+      }
+      if (importedPath != null && importedPath != snapshot.localImagePath) {
+        await AppBackgroundService.deleteManagedLocalImage(importedPath);
+      }
+
+      if (!mounted) {
+        _savedConfig = snapshot;
+        _draftConfig = snapshot;
+        _sessionImportedLocalPath = null;
+        return;
+      }
+      setState(() {
+        _savedConfig = snapshot;
+        _draftConfig = snapshot;
+        _sessionImportedLocalPath = null;
+      });
+    } catch (error) {
+      if (mounted && requestId == _autoSaveRequestId) {
+        showToast('自动保存失败：$error', type: ToastType.error);
+      }
+    } finally {
+      if (mounted && requestId == _autoSaveRequestId) {
+        setState(() => _saving = false);
+      } else if (!mounted) {
+        _saving = false;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CommonAppBar(title: '背景设置', primary: true),
+      appBar: const CommonAppBar(title: '外观设置', primary: true),
       body: SafeArea(
         top: false,
         child: SingleChildScrollView(
@@ -236,38 +363,22 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 12),
+                child: Text(
+                  _autoSaveHint,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.text.withValues(alpha: 0.65),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
               _buildSourceCard(),
               const SizedBox(height: 12),
               _buildPreviewCard(),
               const SizedBox(height: 12),
               _buildAdjustCard(),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      key: const ValueKey('background-reset-button'),
-                      onPressed: _saving ? null : _restoreDefaults,
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      child: const Text('恢复默认'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      key: const ValueKey('background-save-button'),
-                      onPressed: !_isDirty || _saving ? null : _save,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primaryBlue,
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      child: Text(_saving ? '保存中...' : '保存'),
-                    ),
-                  ),
-                ],
-              ),
             ],
           ),
         ),
@@ -314,14 +425,16 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
           AppBackgroundPreview(
             config: _previewConfig,
             kind: _previewKind,
+            visualProfile: _draftVisualProfile,
             showDragHint: true,
-            onFocalPointChanged: (offset) {
-              setState(() {
-                _draftConfig = _draftConfig.copyWith(
+            onViewportChanged: (offset, imageScale) {
+              _applyDraftConfig(
+                _draftConfig.copyWith(
                   focalX: offset.dx,
                   focalY: offset.dy,
-                );
-              });
+                  imageScale: imageScale,
+                ),
+              );
             },
           ),
         ],
@@ -347,14 +460,12 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
               ),
             ),
             subtitle: const Text(
-              '同时作用于聊天页和 Workspace 页面',
+              '同时作用于聊天页和 Workspace 页面，并自动保存',
               style: TextStyle(fontSize: 12, color: AppColors.text70),
             ),
             value: _draftConfig.enabled,
             onChanged: (value) {
-              setState(() {
-                _draftConfig = _draftConfig.copyWith(enabled: value);
-              });
+              _applyDraftConfig(_draftConfig.copyWith(enabled: value));
             },
           ),
           const SizedBox(height: 8),
@@ -362,12 +473,6 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              ChoiceChip(
-                key: const ValueKey('background-source-none'),
-                label: const Text('不使用'),
-                selected: sourceType == AppBackgroundSourceType.none,
-                onSelected: (_) => _setSourceType(AppBackgroundSourceType.none),
-              ),
               ChoiceChip(
                 key: const ValueKey('background-source-local'),
                 label: const Text('本地图片'),
@@ -405,10 +510,11 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
             TextField(
               key: const ValueKey('background-remote-url-field'),
               controller: _remoteUrlController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: '图片直链',
                 hintText: 'https://example.com/background.jpg',
                 border: OutlineInputBorder(),
+                errorText: _remoteUrlErrorText,
               ),
             ),
           ],
@@ -438,9 +544,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
             min: 0,
             max: 24,
             onChanged: (value) {
-              setState(() {
-                _draftConfig = _draftConfig.copyWith(blurSigma: value);
-              });
+              _applyDraftConfig(_draftConfig.copyWith(blurSigma: value));
             },
           ),
           _buildSliderRow(
@@ -450,9 +554,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
             min: 0,
             max: 0.55,
             onChanged: (value) {
-              setState(() {
-                _draftConfig = _draftConfig.copyWith(frostOpacity: value);
-              });
+              _applyDraftConfig(_draftConfig.copyWith(frostOpacity: value));
             },
           ),
           _buildSliderRow(
@@ -462,14 +564,25 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
             min: 0.5,
             max: 1.5,
             onChanged: (value) {
-              setState(() {
-                _draftConfig = _draftConfig.copyWith(brightness: value);
-              });
+              _applyDraftConfig(_draftConfig.copyWith(brightness: value));
             },
           ),
-          const SizedBox(height: 4),
+          _buildSliderRow(
+            label: '聊天文本大小',
+            subtitle: '仅调整用户消息、AI 回复与思考区字号',
+            value: _draftConfig.chatTextSize,
+            min: 12,
+            max: 22,
+            valueFormatter: (value) => '${value.toStringAsFixed(1)}sp',
+            onChanged: (value) {
+              _applyDraftConfig(_draftConfig.copyWith(chatTextSize: value));
+            },
+          ),
+          const SizedBox(height: 8),
+          _buildTextColorSection(),
+          const SizedBox(height: 6),
           Text(
-            '图片位置请直接在上方预览区域里拖动调整。',
+            '图片可直接在上方预览里拖动和双指缩放，预览会尽量贴近实际效果。',
             style: TextStyle(
               fontSize: 12,
               color: AppColors.text.withValues(alpha: 0.6),
@@ -487,6 +600,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
     required double min,
     required double max,
     required ValueChanged<double> onChanged,
+    String Function(double value)? valueFormatter,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
@@ -505,7 +619,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
               ),
               const Spacer(),
               Text(
-                value.toStringAsFixed(2),
+                valueFormatter?.call(value) ?? value.toStringAsFixed(2),
                 style: const TextStyle(fontSize: 12, color: AppColors.text70),
               ),
             ],
@@ -521,6 +635,105 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
     );
   }
 
+  Widget _buildTextColorSection() {
+    final selectedHex = normalizeAppBackgroundHexColor(
+      _draftConfig.chatTextHexColor,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '聊天文本颜色',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: AppColors.text,
+          ),
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          '默认会自动跟随背景明暗，也可以改成固定颜色',
+          style: TextStyle(fontSize: 12, color: AppColors.text70),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            ChoiceChip(
+              key: const ValueKey('appearance-text-color-auto'),
+              label: const Text('自动'),
+              selected:
+                  _draftConfig.chatTextColorMode ==
+                  AppBackgroundTextColorMode.auto,
+              onSelected: (_) {
+                _textColorController.text = '';
+                _applyDraftConfig(
+                  _draftConfig.copyWith(
+                    chatTextColorMode: AppBackgroundTextColorMode.auto,
+                    chatTextHexColor: '',
+                  ),
+                );
+              },
+            ),
+            ..._kAppearanceTextColorPresets.map((preset) {
+              final selected =
+                  _draftConfig.chatTextColorMode ==
+                      AppBackgroundTextColorMode.custom &&
+                  selectedHex == preset.hex;
+              return InkWell(
+                key: ValueKey('appearance-text-color-${preset.hex}'),
+                onTap: () {
+                  _textColorController.text = preset.hex;
+                  _applyDraftConfig(
+                    _draftConfig.copyWith(
+                      chatTextColorMode: AppBackgroundTextColorMode.custom,
+                      chatTextHexColor: preset.hex,
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(999),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: preset.color,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: selected
+                          ? AppColors.primaryBlue
+                          : const Color(0xFFD9E2EF),
+                      width: selected ? 3 : 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ],
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          key: const ValueKey('appearance-text-color-field'),
+          controller: _textColorController,
+          decoration: InputDecoration(
+            labelText: '自定义色号',
+            hintText: '#FFFFFF 或 #FF112233',
+            border: const OutlineInputBorder(),
+            errorText: _textColorErrorText,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildCard({required Widget child}) {
     return Container(
       width: double.infinity,
@@ -532,5 +745,39 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
       ),
       child: child,
     );
+  }
+
+  void _scheduleDraftVisualProfileRefresh() {
+    final previewConfig = _previewConfig;
+    _previewProfileDebounceTimer?.cancel();
+    final fallbackProfile = AppBackgroundVisualProfile.derive(
+      config: previewConfig,
+    );
+    if (mounted) {
+      setState(() {
+        _draftVisualProfile = fallbackProfile;
+      });
+    } else {
+      _draftVisualProfile = fallbackProfile;
+    }
+    final token = ++_previewProfileToken;
+    _previewProfileDebounceTimer = Timer(const Duration(milliseconds: 140), () {
+      unawaited(_refreshDraftVisualProfile(token, previewConfig));
+    });
+  }
+
+  Future<void> _refreshDraftVisualProfile(
+    int token,
+    AppBackgroundConfig previewConfig,
+  ) async {
+    final analyzed = await AppBackgroundService.analyzeVisualProfile(
+      previewConfig,
+    );
+    if (!mounted || token != _previewProfileToken) {
+      return;
+    }
+    setState(() {
+      _draftVisualProfile = analyzed;
+    });
   }
 }

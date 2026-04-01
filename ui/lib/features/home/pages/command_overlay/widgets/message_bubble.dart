@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../../../../models/chat_message_model.dart';
+import '../../../../../services/app_background_service.dart';
 import '../../../../../widgets/streaming_text.dart';
 import 'thinking_dots_indicator.dart';
 import 'cards/card_widget_factory.dart';
@@ -34,6 +35,8 @@ class MessageBubble extends StatelessWidget {
   final OnRequestAuthorize? onRequestAuthorize;
   final void Function(ChatMessageModel message, LongPressStartDetails details)?
   onUserMessageLongPressStart;
+  final AppBackgroundVisualProfile visualProfile;
+  final AppBackgroundConfig appearanceConfig;
 
   const MessageBubble({
     super.key,
@@ -44,7 +47,12 @@ class MessageBubble extends StatelessWidget {
     this.parentScrollController,
     this.onRequestAuthorize,
     this.onUserMessageLongPressStart,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
+    this.appearanceConfig = AppBackgroundConfig.defaults,
   });
+
+  double get _chatTextSize => appearanceConfig.chatTextSize;
+  double get _chatTextScale => resolvedChatTextScale(appearanceConfig);
 
   @override
   Widget build(BuildContext context) {
@@ -114,7 +122,7 @@ class MessageBubble extends StatelessWidget {
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           decoration: ShapeDecoration(
-            color: const Color(0xCCF1F8FF), // rgba(241,248,255,0.8)
+            color: visualProfile.userBubbleColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(4),
             ),
@@ -178,9 +186,12 @@ class MessageBubble extends StatelessWidget {
       height: 84,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: const Color(0xFFEAF2FF),
+        color: visualProfile.attachmentSurfaceColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFD0DEFA), width: 1),
+        border: Border.all(
+          color: visualProfile.attachmentBorderColor,
+          width: 1,
+        ),
       ),
       child: _buildAttachmentImageWidget(item),
     );
@@ -230,11 +241,11 @@ class MessageBubble extends StatelessWidget {
   }
 
   Widget _buildImageFallback() {
-    return const Center(
+    return Center(
       child: Icon(
         Icons.image_not_supported_outlined,
         size: 20,
-        color: Color(0xFF6A83AA),
+        color: visualProfile.attachmentIconColor,
       ),
     );
   }
@@ -247,17 +258,20 @@ class MessageBubble extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 220, minHeight: 40),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFE4EEFF),
+        color: visualProfile.attachmentSurfaceColor,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFD0DEFA), width: 1),
+        border: Border.all(
+          color: visualProfile.attachmentBorderColor,
+          width: 1,
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(
+          Icon(
             Icons.insert_drive_file_outlined,
             size: 15,
-            color: Color(0xFF375EAF),
+            color: visualProfile.attachmentIconColor,
           ),
           const SizedBox(width: 6),
           Flexible(
@@ -265,8 +279,8 @@ class MessageBubble extends StatelessWidget {
               sizeText.isEmpty ? displayName : '$displayName\n$sizeText',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF35517A),
+              style: TextStyle(
+                color: visualProfile.attachmentTextColor,
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
                 height: 1.25,
@@ -350,9 +364,9 @@ class MessageBubble extends StatelessWidget {
   Widget _buildUserText(String text) {
     return Text(
       text,
-      style: const TextStyle(
-        color: Color(0xFF353E53), // #353E53
-        fontSize: 14,
+      style: TextStyle(
+        color: visualProfile.primaryTextColor,
+        fontSize: _chatTextSize,
         fontFamily: 'PingFang SC',
         fontWeight: FontWeight.w400,
         height: 1.43,
@@ -366,9 +380,11 @@ class MessageBubble extends StatelessWidget {
   Widget _buildAiText(String text) {
     // 如果是 loading 状态，显示浮动三个点动画（左对齐，与回复文本位置一致）
     if (message.isLoading) {
-      return const Align(
+      return Align(
         alignment: Alignment.centerLeft,
-        child: ThinkingDotsIndicator(),
+        child: ThinkingDotsIndicator(
+          dotColor: visualProfile.secondaryTextColor,
+        ),
       );
     }
 
@@ -392,9 +408,9 @@ class MessageBubble extends StatelessWidget {
             enableMarkdown: true,
             fullText: text,
             selectable: true,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Color(0xFF353E53), // #353E53
+            style: TextStyle(
+              fontSize: _chatTextSize,
+              color: visualProfile.primaryTextColor,
               height: 1.57,
             ),
           ),
@@ -406,9 +422,9 @@ class MessageBubble extends StatelessWidget {
       enableMarkdown: true,
       fullText: text,
       selectable: true,
-      style: const TextStyle(
-        fontSize: 14,
-        color: Color(0xFF353E53), // #353E53
+      style: TextStyle(
+        fontSize: _chatTextSize,
+        color: visualProfile.primaryTextColor,
         height: 1.57,
       ),
     );
@@ -423,23 +439,23 @@ class MessageBubble extends StatelessWidget {
           'assets/common/summary_loading.svg',
           width: 16,
           height: 16,
-          colorFilter: const ColorFilter.mode(
-            Color(0xFF4F83FF),
+          colorFilter: ColorFilter.mode(
+            visualProfile.accentBlue,
             BlendMode.srcIn,
           ),
         ),
         const SizedBox(width: 6),
-        const Text(
+        Text(
           kSummarizingText,
           style: TextStyle(
-            fontSize: 14,
-            color: Color(0xFF4F83FF),
+            fontSize: 14 * _chatTextScale,
+            color: visualProfile.accentBlue,
             fontWeight: FontWeight.w500,
           ),
         ),
         const SizedBox(width: 8),
-        const ThinkingDotsIndicator(
-          dotColor: Color(0xFF4F83FF),
+        ThinkingDotsIndicator(
+          dotColor: visualProfile.accentBlue,
           dotSize: 6.0,
           spacing: 3.0,
         ),
@@ -456,17 +472,17 @@ class MessageBubble extends StatelessWidget {
           'assets/common/summary_complete.svg',
           width: 16,
           height: 16,
-          colorFilter: const ColorFilter.mode(
-            Color(0xFF52C41A),
+          colorFilter: ColorFilter.mode(
+            visualProfile.accentGreen,
             BlendMode.srcIn,
           ),
         ),
         const SizedBox(width: 6),
-        const Text(
+        Text(
           kSummaryCompleteText,
           style: TextStyle(
-            fontSize: 14,
-            color: Color(0xFF52C41A),
+            fontSize: 14 * _chatTextScale,
+            color: visualProfile.accentGreen,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -488,6 +504,8 @@ class MessageBubble extends StatelessWidget {
         onCancelTask: onCancelTask,
         enableThinkingCollapse: enableThinkingCollapse,
         parentScrollController: parentScrollController,
+        appearanceConfig: appearanceConfig,
+        visualProfile: visualProfile,
       ),
     );
   }

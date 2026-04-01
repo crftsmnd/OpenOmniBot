@@ -49,8 +49,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadAutoBackToChatAfterTaskState();
     _loadMcpServerState();
     _loadWorkspaceMemoryState();
-    _configChangedSubscription =
-        AssistsMessageService.agentAiConfigChangedStream.listen((event) {
+    _configChangedSubscription = AssistsMessageService
+        .agentAiConfigChangedStream
+        .listen((event) {
           if (event.source != 'file' || !mounted) {
             return;
           }
@@ -419,8 +420,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           _SettingItem(
             icon: Icons.wallpaper_outlined,
-            title: '背景设置',
-            subtitle: '为聊天页和 Workspace 页面设置共享背景图',
+            title: '外观设置',
+            subtitle: '配置共享背景图、聊天字号和文本颜色',
             onTap: () {
               GoRouterManager.push('/home/background_setting');
             },

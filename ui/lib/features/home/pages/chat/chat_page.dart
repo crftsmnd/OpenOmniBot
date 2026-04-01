@@ -1421,7 +1421,11 @@ abstract class _ChatPageStateBase extends State<ChatPage>
 
   Widget _buildSlashCommandPanel();
 
-  Widget _buildModeMessagePage(ChatPageMode mode);
+  Widget _buildModeMessagePage(
+    ChatPageMode mode,
+    AppBackgroundConfig appearanceConfig,
+    AppBackgroundVisualProfile visualProfile,
+  );
 
   Widget _buildWorkspaceSurfacePage();
 }

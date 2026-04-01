@@ -42,14 +42,14 @@ void main() {
     AppBackgroundService.notifier.value = AppBackgroundConfig.defaults;
   });
 
-  testWidgets('supports switching preview source and resetting the draft', (
+  testWidgets('supports auto-saving appearance updates from the preview', (
     tester,
   ) async {
     AppBackgroundService.notifier.value = const AppBackgroundConfig(
       enabled: true,
-      sourceType: AppBackgroundSourceType.local,
-      localImagePath: '/tmp/existing-background.png',
-      remoteImageUrl: '',
+      sourceType: AppBackgroundSourceType.remote,
+      localImagePath: '',
+      remoteImageUrl: 'https://example.com/existing-background.png',
       blurSigma: 10,
       frostOpacity: 0.2,
       brightness: 1,
@@ -66,24 +66,12 @@ void main() {
       ),
     );
 
-    expect(find.text('背景设置'), findsOneWidget);
+    expect(find.text('外观设置'), findsOneWidget);
     expect(find.byType(AppBackgroundPreview), findsOneWidget);
-
-    final previewDragArea = find.byKey(
-      const ValueKey('app-background-preview-drag-chat'),
-    );
-    await tester.ensureVisible(previewDragArea);
-    await tester.drag(previewDragArea, const Offset(36, 54));
-    await tester.pump();
-
-    expect(
-      tester
-          .widget<FilledButton>(
-            find.byKey(const ValueKey('background-save-button')),
-          )
-          .onPressed,
-      isNotNull,
-    );
+    expect(find.textContaining('聊天文本 ·'), findsOneWidget);
+    expect(find.byKey(const ValueKey('background-save-button')), findsNothing);
+    expect(find.byKey(const ValueKey('background-reset-button')), findsNothing);
+    expect(find.byKey(const ValueKey('background-source-none')), findsNothing);
 
     final workspacePreviewChip = find.byKey(
       const ValueKey('background-preview-kind-workspace'),
@@ -106,22 +94,24 @@ void main() {
       findsOneWidget,
     );
 
-    await tester.ensureVisible(find.byType(Switch).first);
-    await tester.tap(find.byType(Switch).first);
-    await tester.pumpAndSettle();
-
-    final resetButton = find.byKey(const ValueKey('background-reset-button'));
-    await tester.ensureVisible(resetButton);
-    await tester.tap(resetButton);
+    await tester.enterText(
+      find.byKey(const ValueKey('appearance-text-color-field')),
+      '#1D3E7B',
+    );
+    await tester.pump(const Duration(milliseconds: 260));
     await tester.pumpAndSettle();
 
     expect(
-      tester
-          .widget<FilledButton>(
-            find.byKey(const ValueKey('background-save-button')),
-          )
-          .onPressed,
-      isNotNull,
+      AppBackgroundService.current.chatTextColorMode,
+      AppBackgroundTextColorMode.custom,
     );
+    expect(AppBackgroundService.current.chatTextHexColor, '#1D3E7B');
+
+    await tester.ensureVisible(find.byType(Switch).first);
+    await tester.tap(find.byType(Switch).first);
+    await tester.pump(const Duration(milliseconds: 260));
+    await tester.pumpAndSettle();
+
+    expect(AppBackgroundService.current.enabled, isFalse);
   });
 }
