@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:ui/features/home/pages/chat/tool_activity_utils.dart';
+import 'package:ui/features/home/pages/command_overlay/services/tool_card_detail_gesture_gate.dart';
 import 'package:ui/features/home/pages/command_overlay/widgets/cards/terminal_output_utils.dart';
 import 'package:ui/models/chat_message_model.dart';
 import 'package:ui/theme/app_colors.dart';
@@ -24,7 +25,7 @@ const double _kToolActivitySurfaceRadius = 18;
 const double _kToolActivityPreviewWidth = 102;
 const double _kToolActivityPreviewHeight = 56;
 const double _kToolActivityPreviewOverlap = 31;
-const double _kToolActivitySurfaceHorizontalInset = 7;
+const double _kToolActivitySurfaceHorizontalInset = 20;
 const double _kToolActivityDrawerMaxHeight = 228;
 const double _kToolActivityTypeSlotWidth = 34;
 const double _kToolActivityStatusSlotWidth = 42;
@@ -44,11 +45,15 @@ class ChatToolActivityStrip extends StatefulWidget {
     required this.messages,
     this.anchorRect,
     this.onOccupiedHeightChanged,
+    this.expanded,
+    this.onExpandedChanged,
   });
 
   final List<ChatMessageModel> messages;
   final Rect? anchorRect;
   final ValueChanged<double>? onOccupiedHeightChanged;
+  final bool? expanded;
+  final ValueChanged<bool>? onExpandedChanged;
 
   @override
   State<ChatToolActivityStrip> createState() => _ChatToolActivityStripState();
@@ -57,12 +62,16 @@ class ChatToolActivityStrip extends StatefulWidget {
 class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
   bool _expanded = false;
   double? _lastReportedOccupiedHeight;
+  final Set<int> _heldPointerIds = <int>{};
+
+  bool get _resolvedExpanded => widget.expanded ?? _expanded;
 
   @override
   Widget build(BuildContext context) {
     final cards = extractAgentToolCards(widget.messages);
     final activeCard = resolveActiveAgentToolCard(cards);
     if (activeCard == null) {
+      _scheduleExpandedResetIfNeeded();
       _reportOccupiedHeight(0);
       return const SizedBox.shrink();
     }
@@ -74,7 +83,10 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
         .reversed
         .toList(growable: false);
     final canExpand = historyCards.isNotEmpty;
-    final isExpanded = _expanded && canExpand;
+    final isExpanded = _resolvedExpanded && canExpand;
+    if (!canExpand && _resolvedExpanded) {
+      _scheduleExpandedResetIfNeeded();
+    }
     final historyHeight = isExpanded
         ? _resolveHistoryHeight(historyCards)
         : 0.0;
@@ -117,9 +129,11 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
                 expanded: isExpanded,
                 canExpand: canExpand,
                 leadingInset: isExpanded ? 0 : collapsedLeadingInset,
-                onToggle: () => setState(() => _expanded = !_expanded),
+                onToggle: () => _handleExpandedChanged(!isExpanded),
                 onOpenCard: (cardData) =>
                     _openCardDetailDialog(context, cardData: cardData),
+                onHistoryPointerDown: _handleHistoryPointerDown,
+                onHistoryPointerEnd: _handleHistoryPointerEnd,
               ),
             ),
             Positioned(
@@ -163,6 +177,15 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
     if (widget.messages.isEmpty && _lastReportedOccupiedHeight != 0) {
       _reportOccupiedHeight(0);
     }
+    if (oldWidget.expanded == true && widget.expanded != true) {
+      _releaseHeldPointers();
+    }
+  }
+
+  @override
+  void dispose() {
+    _releaseHeldPointers();
+    super.dispose();
   }
 
   String _cardIdentity(Map<String, dynamic> cardData) {
@@ -210,6 +233,58 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
     final visibleCount = cards.length.clamp(1, 5);
     final estimated = visibleCount * _kToolActivityRowHeight;
     return math.min(_kToolActivityDrawerMaxHeight, estimated.toDouble());
+  }
+
+  void _handleExpandedChanged(bool expanded) {
+    if (_resolvedExpanded == expanded && widget.expanded != null) {
+      return;
+    }
+    if (widget.expanded == null) {
+      if (_expanded == expanded) {
+        return;
+      }
+      setState(() {
+        _expanded = expanded;
+      });
+    }
+    if (!expanded) {
+      _releaseHeldPointers();
+    }
+    widget.onExpandedChanged?.call(expanded);
+  }
+
+  void _scheduleExpandedResetIfNeeded() {
+    if (!_resolvedExpanded) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_resolvedExpanded) {
+        return;
+      }
+      _handleExpandedChanged(false);
+    });
+  }
+
+  void _handleHistoryPointerDown(int pointer) {
+    if (_heldPointerIds.add(pointer)) {
+      ToolCardDetailGestureGate.holdPointer(pointer);
+    }
+  }
+
+  void _handleHistoryPointerEnd(int pointer) {
+    if (_heldPointerIds.remove(pointer)) {
+      ToolCardDetailGestureGate.releasePointer(pointer);
+    }
+  }
+
+  void _releaseHeldPointers() {
+    if (_heldPointerIds.isEmpty) {
+      return;
+    }
+    for (final pointer in _heldPointerIds.toList(growable: false)) {
+      ToolCardDetailGestureGate.releasePointer(pointer);
+    }
+    _heldPointerIds.clear();
   }
 
   void _reportOccupiedHeight(double height) {
@@ -365,6 +440,8 @@ class _ActivityDrawerSurface extends StatelessWidget {
     required this.leadingInset,
     required this.onToggle,
     required this.onOpenCard,
+    required this.onHistoryPointerDown,
+    required this.onHistoryPointerEnd,
   });
 
   final Map<String, dynamic> activeCard;
@@ -375,6 +452,8 @@ class _ActivityDrawerSurface extends StatelessWidget {
   final double leadingInset;
   final VoidCallback onToggle;
   final ValueChanged<Map<String, dynamic>> onOpenCard;
+  final ValueChanged<int> onHistoryPointerDown;
+  final ValueChanged<int> onHistoryPointerEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -407,6 +486,8 @@ class _ActivityDrawerSurface extends StatelessWidget {
                 child: _HistoryDrawer(
                   cards: historyCards,
                   onOpenCard: onOpenCard,
+                  onPointerDown: onHistoryPointerDown,
+                  onPointerEnd: onHistoryPointerEnd,
                 ),
               ),
             ),
@@ -468,10 +549,17 @@ class _ActivityBarTrailing extends StatelessWidget {
 }
 
 class _HistoryDrawer extends StatelessWidget {
-  const _HistoryDrawer({required this.cards, required this.onOpenCard});
+  const _HistoryDrawer({
+    required this.cards,
+    required this.onOpenCard,
+    required this.onPointerDown,
+    required this.onPointerEnd,
+  });
 
   final List<Map<String, dynamic>> cards;
   final ValueChanged<Map<String, dynamic>> onOpenCard;
+  final ValueChanged<int> onPointerDown;
+  final ValueChanged<int> onPointerEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -479,37 +567,43 @@ class _HistoryDrawer extends StatelessWidget {
     return Container(
       key: kChatToolActivityPanelKey,
       padding: EdgeInsets.zero,
-      child: ListView.separated(
-        padding: EdgeInsets.zero,
-        shrinkWrap: true,
-        physics: scrollable
-            ? const BouncingScrollPhysics(parent: ClampingScrollPhysics())
-            : const NeverScrollableScrollPhysics(),
-        itemBuilder: (context, index) {
-          final card = cards[index];
-          final isLast = index == cards.length - 1;
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              border: isLast
-                  ? null
-                  : Border(
-                      bottom: BorderSide(
-                        color: const Color(0x140F2034),
-                        width: 1,
+      child: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (event) => onPointerDown(event.pointer),
+        onPointerUp: (event) => onPointerEnd(event.pointer),
+        onPointerCancel: (event) => onPointerEnd(event.pointer),
+        child: ListView.separated(
+          padding: EdgeInsets.zero,
+          shrinkWrap: true,
+          physics: scrollable
+              ? const BouncingScrollPhysics(parent: ClampingScrollPhysics())
+              : const NeverScrollableScrollPhysics(),
+          itemBuilder: (context, index) {
+            final card = cards[index];
+            final isLast = index == cards.length - 1;
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                border: isLast
+                    ? null
+                    : Border(
+                        bottom: BorderSide(
+                          color: const Color(0x140F2034),
+                          width: 1,
+                        ),
                       ),
-                    ),
-            ),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => onOpenCard(card),
-                child: ToolActivityRow(card: card),
               ),
-            ),
-          );
-        },
-        separatorBuilder: (_, __) => const SizedBox.shrink(),
-        itemCount: cards.length,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => onOpenCard(card),
+                  child: ToolActivityRow(card: card),
+                ),
+              ),
+            );
+          },
+          separatorBuilder: (_, __) => const SizedBox.shrink(),
+          itemCount: cards.length,
+        ),
       ),
     );
   }

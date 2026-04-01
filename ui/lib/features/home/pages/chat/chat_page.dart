@@ -182,6 +182,10 @@ abstract class _ChatPageStateBase extends State<ChatPage>
     ChatPageMode.normal: 0,
     ChatPageMode.openclaw: 0,
   };
+  final Map<ChatPageMode, bool> _toolActivityExpandedByMode = {
+    ChatPageMode.normal: false,
+    ChatPageMode.openclaw: false,
+  };
   final Map<ChatPageMode, double> _inputAreaHeightByMode = {
     ChatPageMode.normal: 0,
     ChatPageMode.openclaw: 0,
@@ -345,6 +349,8 @@ abstract class _ChatPageStateBase extends State<ChatPage>
       _activeRuntime?.messages ?? _messagesByMode[_activeMode]!;
   double get _toolActivityOccupiedHeight =>
       _toolActivityOccupiedHeightByMode[_activeMode] ?? 0;
+  bool get _isToolActivityExpanded =>
+      _toolActivityExpandedByMode[_activeMode] ?? false;
   double get _inputAreaHeight => _inputAreaHeightByMode[_activeMode] ?? 0;
   bool get _isAiResponding =>
       _activeRuntime?.isAiResponding ??

@@ -124,6 +124,19 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
     });
   }
 
+  void _setToolActivityExpanded(bool expanded) {
+    if (_isToolActivityExpanded == expanded) {
+      return;
+    }
+    if (!mounted) {
+      _toolActivityExpandedByMode[_activeMode] = expanded;
+      return;
+    }
+    setState(() {
+      _toolActivityExpandedByMode[_activeMode] = expanded;
+    });
+  }
+
   void _handleInputAreaHeightChanged(double height) {
     final normalized = height.isFinite ? height : 0.0;
     if ((_inputAreaHeight - normalized).abs() < 0.5) {
@@ -500,6 +513,8 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                               final toolActivityCards = !_isWorkspaceSurface
                                   ? extractAgentToolCards(_messages)
                                   : const <Map<String, dynamic>>[];
+                              final toolActivityCanExpand =
+                                  toolActivityCards.length > 1;
                               final newConversationPullIndicatorTopOffset =
                                   _resolveNewConversationPullIndicatorTop(
                                     layoutContext: context,
@@ -520,6 +535,14 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                               if (toolActivityCards.isEmpty &&
                                   _toolActivityOccupiedHeight > 0) {
                                 _scheduleToolActivityInsetSync(0);
+                              }
+                              if (!toolActivityCanExpand &&
+                                  _isToolActivityExpanded) {
+                                WidgetsBinding.instance.addPostFrameCallback((
+                                  _,
+                                ) {
+                                  _setToolActivityExpanded(false);
+                                });
                               }
                               final showAppUpdateIndicator =
                                   !_isWorkspaceSurface &&
@@ -723,6 +746,16 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                                     ],
                                   ),
                                   if (!_isWorkspaceSurface &&
+                                      toolActivityCanExpand &&
+                                      _isToolActivityExpanded)
+                                    Positioned.fill(
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.translucent,
+                                        onTap: () =>
+                                            _setToolActivityExpanded(false),
+                                      ),
+                                    ),
+                                  if (!_isWorkspaceSurface &&
                                       _isInputAreaVisible &&
                                       toolActivityCards.isNotEmpty)
                                     Positioned(
@@ -739,6 +772,9 @@ mixin _ChatPageUiMixin on _ChatPageStateBase {
                                         anchorRect: toolActivityAnchor?.rect,
                                         onOccupiedHeightChanged:
                                             _scheduleToolActivityInsetSync,
+                                        expanded: _isToolActivityExpanded,
+                                        onExpandedChanged:
+                                            _setToolActivityExpanded,
                                       ),
                                     ),
                                   if (!_isWorkspaceSurface)

@@ -94,6 +94,7 @@ class CardWidgetFactory {
         return AgentToolSummaryCard(
           cardData: cardData,
           parentScrollController: parentScrollController,
+          visualProfile: visualProfile,
         );
       case 'artifact_card':
         final artifact = cardData['artifact'] as Map<String, dynamic>? ?? {};
