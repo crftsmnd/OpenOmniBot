@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/widgets/omnibot_markdown_body.dart';
 
@@ -100,5 +101,33 @@ $$
     tester,
   ) async {
     await expectNoException(tester, data: mixedSample, selectable: true);
+  });
+
+  testWidgets('markdown headings and table text inherit base text color', (
+    tester,
+  ) async {
+    const customColor = Color(0xFFE8E0CF);
+    late MarkdownStyleSheet styleSheet;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            styleSheet = buildOmnibotMarkdownStyleSheet(
+              context,
+              const TextStyle(fontSize: 14, color: customColor),
+            );
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+
+    expect(styleSheet.h3?.color, customColor);
+    expect(styleSheet.h4?.color, customColor);
+    expect(styleSheet.h5?.color, customColor);
+    expect(styleSheet.h6?.color, customColor);
+    expect(styleSheet.tableHead?.color, customColor);
+    expect(styleSheet.tableBody?.color, customColor);
   });
 }
