@@ -63,6 +63,10 @@ class OmnibotResourceService {
   static const MethodChannel _fileChannel = MethodChannel(
     'cn.com.omnimind.bot/file_save',
   );
+  static const List<String> _publicStoragePathPrefixes = <String>[
+    '/storage',
+    '/sdcard',
+  ];
   static const OmnibotWorkspacePaths _defaultWorkspacePaths =
       OmnibotWorkspacePaths(
         rootPath: '/data/user/0/cn.com.omnimind.bot/workspace',
@@ -132,11 +136,11 @@ class OmnibotResourceService {
 
   static Future<void> openUri(String uri) async {
     await ensureWorkspacePathsLoaded();
-    if (!await _ensureWorkspaceStorageAccess()) {
-      return;
-    }
     final metadata = resolveUri(uri);
     if (metadata == null) return;
+    if (!await _ensureResourceAccess(path: metadata.path, uri: uri)) {
+      return;
+    }
     if (metadata.isDirectory) {
       openWorkspace(
         absolutePath: metadata.path,
@@ -169,7 +173,7 @@ class OmnibotResourceService {
     bool startInEditMode = false,
   }) async {
     await ensureWorkspacePathsLoaded();
-    if (!await _ensureWorkspaceStorageAccess()) {
+    if (!await _ensureResourceAccess(path: path, uri: uri)) {
       return;
     }
     final metadata = describePath(
@@ -203,12 +207,12 @@ class OmnibotResourceService {
     String? uri,
   }) async {
     await ensureWorkspacePathsLoaded();
-    if (!await _ensureWorkspaceStorageAccess()) {
-      return;
-    }
     final path = absolutePath ?? resolveUriToPath(uri ?? '') ?? rootPath;
     final resolvedShellPath =
         shellPath ?? resolveUriToShellPath(uri ?? '') ?? shellRootPath;
+    if (!await _ensureResourceAccess(path: path, uri: uri)) {
+      return;
+    }
     final effectiveWorkspaceId = path == rootPath ? null : workspaceId;
     GoRouterManager.push(
       '/home/omnibot_workspace',
@@ -226,7 +230,7 @@ class OmnibotResourceService {
     required String mimeType,
   }) async {
     await ensureWorkspacePathsLoaded();
-    if (!await _ensureWorkspaceStorageAccess()) {
+    if (!await _ensureResourceAccess(path: sourcePath)) {
       return null;
     }
     return _fileChannel.invokeMethod<String>('saveFileWithSystemDialog', {
@@ -241,7 +245,7 @@ class OmnibotResourceService {
     required String mimeType,
   }) async {
     await ensureWorkspacePathsLoaded();
-    if (!await _ensureWorkspaceStorageAccess()) {
+    if (!await _ensureResourceAccess(path: sourcePath)) {
       return false;
     }
     final result = await _fileChannel.invokeMethod<dynamic>('openFile', {
@@ -257,7 +261,7 @@ class OmnibotResourceService {
     required String mimeType,
   }) async {
     await ensureWorkspacePathsLoaded();
-    if (!await _ensureWorkspaceStorageAccess()) {
+    if (!await _ensureResourceAccess(path: sourcePath)) {
       return false;
     }
     final result = await _fileChannel.invokeMethod<dynamic>('shareFile', {
@@ -268,21 +272,54 @@ class OmnibotResourceService {
     return result == true;
   }
 
-  static Future<bool> _ensureWorkspaceStorageAccess() async {
-    final granted = await isWorkspaceStorageAccessGranted();
+  static Future<bool> _ensureResourceAccess({
+    String? path,
+    String? uri,
+  }) async {
+    final requiredPermissionId = _requiredPermissionIdForPathOrUri(
+      path: path,
+      uri: uri,
+    );
+    if (requiredPermissionId == null) {
+      return true;
+    }
+
+    final granted = switch (requiredPermissionId) {
+      kPublicStoragePermissionId => await isPublicStorageAccessGranted(),
+      _ => await isWorkspaceStorageAccessGranted(),
+    };
     if (granted) {
       return true;
     }
     final result = await GoRouterManager.pushForResult<bool>(
       '/home/authorize',
-      extra: const AuthorizePageArgs(
-        requiredPermissionIds: <String>[kWorkspaceStoragePermissionId],
+      extra: AuthorizePageArgs(
+        requiredPermissionIds: <String>[requiredPermissionId],
       ),
     );
     if (result == true) {
-      return await isWorkspaceStorageAccessGranted();
+      return switch (requiredPermissionId) {
+        kPublicStoragePermissionId => await isPublicStorageAccessGranted(),
+        _ => await isWorkspaceStorageAccessGranted(),
+      };
     }
     return false;
+  }
+
+  static String? _requiredPermissionIdForPathOrUri({
+    String? path,
+    String? uri,
+  }) {
+    final resolvedPath = path?.trim().isNotEmpty == true
+        ? path!.trim()
+        : resolveUriToPath(uri ?? '');
+    if (resolvedPath == null || resolvedPath.isEmpty) {
+      return null;
+    }
+    if (_isPublicAndroidPath(resolvedPath)) {
+      return kPublicStoragePermissionId;
+    }
+    return kWorkspaceStoragePermissionId;
   }
 
   static OmnibotResourceMetadata? resolveUri(String uri) {
@@ -347,6 +384,7 @@ class OmnibotResourceService {
     final base = switch (authority) {
       'attachments' => '$internalRootPath/attachments',
       'workspace' => rootPath,
+      'public' => '/storage',
       'shared' => '$internalRootPath/shared',
       'offloads' => '$internalRootPath/offloads',
       'browser' => '$internalRootPath/browser',
@@ -370,13 +408,18 @@ class OmnibotResourceService {
     final suffix = (parsed?.pathSegments ?? const <String>[])
         .where((segment) => segment.isNotEmpty && segment != '..')
         .join('/');
-    final base = authority == 'workspace'
-        ? shellRootPath
-        : '$shellRootPath/.omnibot/$authority';
+    final base = switch (authority) {
+      'workspace' => shellRootPath,
+      'public' => '/storage',
+      _ => '$shellRootPath/.omnibot/$authority',
+    };
     return suffix.isEmpty ? base : '$base/$suffix';
   }
 
   static String? shellPathForAndroidPath(String path) {
+    if (_isPublicAndroidPath(path)) {
+      return path;
+    }
     if (path == rootPath) {
       return shellRootPath;
     }
@@ -402,6 +445,9 @@ class OmnibotResourceService {
     final normalized = shellPath.trim();
     if (normalized.isEmpty) {
       return null;
+    }
+    if (_isPublicShellPath(normalized)) {
+      return normalized;
     }
     final internalShellRoot = '${paths.shellRootPath}/.omnibot';
     if (normalized == internalShellRoot) {
@@ -538,5 +584,19 @@ class OmnibotResourceService {
 
   static bool _matchesAny(String value, List<String> suffixes) {
     return suffixes.any(value.endsWith);
+  }
+
+  static bool _isPublicAndroidPath(String path) {
+    final normalized = path.trim();
+    return _publicStoragePathPrefixes.any(
+      (prefix) => normalized == prefix || normalized.startsWith('$prefix/'),
+    );
+  }
+
+  static bool _isPublicShellPath(String shellPath) {
+    final normalized = shellPath.trim();
+    return _publicStoragePathPrefixes.any(
+      (prefix) => normalized == prefix || normalized.startsWith('$prefix/'),
+    );
   }
 }

@@ -15,11 +15,13 @@ import 'pages/chat/chat_page.dart';
 import 'pages/command_overlay/command_overlay.dart';
 import 'pages/edit_profile/edit_profile_page.dart';
 import 'pages/settings/workspace_memory_setting_page.dart';
+import 'pages/settings/background_setting_page.dart';
 import 'pages/omnibot_workspace/omnibot_artifact_preview_page.dart';
 import 'pages/omnibot_workspace/omnibot_workspace_page.dart';
 import 'pages/webview/webview_page.dart';
 import 'pages/settings/settings_page.dart';
 import 'pages/mcp/remote_mcp_servers_page.dart';
+import 'pages/skill_store/skill_store_page.dart';
 import 'pages/termux_setting/termux_setting_page.dart';
 import 'pages/scene_model_setting/scene_model_setting_page.dart';
 import 'pages/vlm_model_setting/vlm_model_setting_page.dart';
@@ -274,12 +276,32 @@ List<GoRoute> homeRoutes = [
   ),
 
   GoRoute(
+    path: '/home/skill_store',
+    name: 'home/skill_store',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/skill_store',
+      child: const SkillStorePage(),
+    ),
+  ),
+
+  GoRoute(
     path: '/home/workspace_memory_setting',
     name: 'home/workspace_memory_setting',
     pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
       key: state.pageKey,
       name: 'home/workspace_memory_setting',
       child: const WorkspaceMemorySettingPage(),
+    ),
+  ),
+
+  GoRoute(
+    path: '/home/background_setting',
+    name: 'home/background_setting',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/background_setting',
+      child: const BackgroundSettingPage(),
     ),
   ),
 

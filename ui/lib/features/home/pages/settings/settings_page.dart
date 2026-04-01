@@ -49,8 +49,9 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadAutoBackToChatAfterTaskState();
     _loadMcpServerState();
     _loadWorkspaceMemoryState();
-    _configChangedSubscription =
-        AssistsMessageService.agentAiConfigChangedStream.listen((event) {
+    _configChangedSubscription = AssistsMessageService
+        .agentAiConfigChangedStream
+        .listen((event) {
           if (event.source != 'file' || !mounted) {
             return;
           }
@@ -415,6 +416,14 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: '配置默认铃声、本地 mp3 或 mp3 直链',
             onTap: () {
               GoRouterManager.push('/home/alarm_setting');
+            },
+          ),
+          _SettingItem(
+            icon: Icons.wallpaper_outlined,
+            title: '外观设置',
+            subtitle: '配置共享背景图、聊天字号和文本颜色',
+            onTap: () {
+              GoRouterManager.push('/home/background_setting');
             },
           ),
           _SettingItem(

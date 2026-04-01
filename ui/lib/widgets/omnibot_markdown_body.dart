@@ -72,10 +72,21 @@ MarkdownStyleSheet buildOmnibotMarkdownStyleSheet(
   BuildContext context,
   TextStyle baseStyle,
 ) {
+  final baseColor = baseStyle.color;
+  TextStyle headingStyle(double fontSize) => baseStyle.copyWith(
+    fontSize: fontSize,
+    fontWeight: FontWeight.bold,
+    color: baseColor,
+  );
+
   return MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
     p: baseStyle.copyWith(height: 1.5),
-    h1: baseStyle.copyWith(fontSize: 24, fontWeight: FontWeight.bold),
-    h2: baseStyle.copyWith(fontSize: 20, fontWeight: FontWeight.bold),
+    h1: headingStyle(24),
+    h2: headingStyle(20),
+    h3: headingStyle(18),
+    h4: headingStyle(16),
+    h5: headingStyle(15),
+    h6: headingStyle(baseStyle.fontSize ?? 14),
     code: baseStyle.copyWith(
       fontFamily: 'monospace',
       fontSize: (baseStyle.fontSize ?? 14) * 0.92,
@@ -97,6 +108,11 @@ MarkdownStyleSheet buildOmnibotMarkdownStyleSheet(
     ),
     tableColumnWidth: const IntrinsicColumnWidth(),
     tableCellsPadding: const EdgeInsets.all(6),
+    tableHead: baseStyle.copyWith(
+      color: baseColor,
+      fontWeight: FontWeight.w600,
+    ),
+    tableBody: baseStyle.copyWith(color: baseColor),
   );
 }
 

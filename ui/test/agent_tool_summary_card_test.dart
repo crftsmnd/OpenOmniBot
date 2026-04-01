@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/features/home/pages/command_overlay/widgets/cards/agent_tool_summary_card.dart';
 import 'package:ui/features/home/pages/command_overlay/widgets/cards/terminal_output_utils.dart';
+import 'package:ui/services/app_background_service.dart';
 
 void main() {
   test('TerminalOutputUtils builds readable output from result json', () {
@@ -112,5 +113,34 @@ void main() {
 
     expect(find.text('查看配置'), findsOneWidget);
     expect(find.text('工作区'), findsOneWidget);
+  });
+
+  testWidgets('tool card title follows appearance text color', (tester) async {
+    const customTextColor = Color(0xFFEEE6D7);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AgentToolSummaryCard(
+            cardData: {
+              'status': 'success',
+              'toolTitle': '同步索引',
+              'toolType': 'workspace',
+              'summary': '已完成同步',
+            },
+            visualProfile: const AppBackgroundVisualProfile(
+              sampledImageLuminance: 0.12,
+              effectiveLuminance: 0.24,
+              textTone: AppBackgroundTextTone.light,
+              customPrimaryTextColor: customTextColor,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final title = tester.widget<Text>(find.text('同步索引'));
+    expect(title.style?.color, customTextColor);
+    expect(title.style?.fontSize, 12);
   });
 }

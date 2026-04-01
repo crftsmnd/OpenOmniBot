@@ -55,6 +55,15 @@ class AssistsCoreChannel {
                 "agentSkillInstall" -> {
                     assistsCoreManager!!.agentSkillInstall(call, result)
                 }
+                "agentSkillSetEnabled" -> {
+                    assistsCoreManager!!.agentSkillSetEnabled(call, result)
+                }
+                "agentSkillDelete" -> {
+                    assistsCoreManager!!.agentSkillDelete(call, result)
+                }
+                "agentSkillInstallBuiltin" -> {
+                    assistsCoreManager!!.agentSkillInstallBuiltin(call, result)
+                }
                 "getModelProviderConfig" -> {
                     assistsCoreManager!!.getModelProviderConfig(call, result)
                 }

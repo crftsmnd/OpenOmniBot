@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ui/features/home/pages/chat/tool_activity_utils.dart';
+import 'package:ui/services/app_background_service.dart';
 import 'package:ui/theme/app_colors.dart';
 
 const Color _interruptedStatusColor = Color(0xFFFFAA2C);
@@ -9,10 +10,12 @@ class AgentToolSummaryCard extends StatelessWidget {
     super.key,
     required this.cardData,
     this.parentScrollController,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
   });
 
   final Map<String, dynamic> cardData;
   final ScrollController? parentScrollController;
+  final AppBackgroundVisualProfile visualProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -54,8 +57,8 @@ class AgentToolSummaryCard extends StatelessWidget {
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.text,
+                    style: TextStyle(
+                      color: visualProfile.primaryTextColor,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       height: 1.15,

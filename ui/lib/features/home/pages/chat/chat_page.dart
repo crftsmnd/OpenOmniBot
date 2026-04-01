@@ -25,6 +25,7 @@ import 'package:ui/core/router/go_router_manager.dart';
 import 'package:ui/features/home/widgets/permission_bottom_sheet.dart';
 import 'package:ui/services/app_state_service.dart';
 import 'package:ui/services/app_update_service.dart';
+import 'package:ui/services/app_background_service.dart';
 import 'package:ui/services/agent_browser_session_service.dart';
 import 'package:ui/services/chat_terminal_environment_service.dart';
 import 'package:ui/services/conversation_model_override_service.dart';
@@ -57,6 +58,7 @@ import 'widgets/chat_widgets.dart';
 import 'widgets/chat_browser_overlay.dart';
 import 'widgets/chat_tool_activity_strip.dart';
 import 'package:ui/widgets/app_update_dialog.dart';
+import 'package:ui/widgets/app_background_widgets.dart';
 
 part 'chat_page_browser.dart';
 part 'chat_page_lifecycle.dart';
@@ -179,6 +181,10 @@ abstract class _ChatPageStateBase extends State<ChatPage>
   final Map<ChatPageMode, double> _toolActivityOccupiedHeightByMode = {
     ChatPageMode.normal: 0,
     ChatPageMode.openclaw: 0,
+  };
+  final Map<ChatPageMode, bool> _toolActivityExpandedByMode = {
+    ChatPageMode.normal: false,
+    ChatPageMode.openclaw: false,
   };
   final Map<ChatPageMode, double> _inputAreaHeightByMode = {
     ChatPageMode.normal: 0,
@@ -343,6 +349,8 @@ abstract class _ChatPageStateBase extends State<ChatPage>
       _activeRuntime?.messages ?? _messagesByMode[_activeMode]!;
   double get _toolActivityOccupiedHeight =>
       _toolActivityOccupiedHeightByMode[_activeMode] ?? 0;
+  bool get _isToolActivityExpanded =>
+      _toolActivityExpandedByMode[_activeMode] ?? false;
   double get _inputAreaHeight => _inputAreaHeightByMode[_activeMode] ?? 0;
   bool get _isAiResponding =>
       _activeRuntime?.isAiResponding ??
@@ -1419,7 +1427,11 @@ abstract class _ChatPageStateBase extends State<ChatPage>
 
   Widget _buildSlashCommandPanel();
 
-  Widget _buildModeMessagePage(ChatPageMode mode);
+  Widget _buildModeMessagePage(
+    ChatPageMode mode,
+    AppBackgroundConfig appearanceConfig,
+    AppBackgroundVisualProfile visualProfile,
+  );
 
   Widget _buildWorkspaceSurfacePage();
 }

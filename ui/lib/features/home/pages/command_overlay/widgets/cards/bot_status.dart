@@ -6,13 +6,15 @@ class BotStatus extends StatelessWidget {
   final BotStatusType status;
   final String? hintText;
   final String? costTime;
+  final TextStyle? textStyle;
 
   const BotStatus({
-    Key? key,
+    super.key,
     required this.status,
     this.hintText,
     this.costTime,
-  }) : super(key: key);
+    this.textStyle,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +25,7 @@ class BotStatus extends StatelessWidget {
           customIcon: const ThinkingAnimation(isThinking: false),
           text: '思考完成',
           timeDesc: '用时',
-          costTime: costTime
+          costTime: costTime,
         );
       case BotStatusType.hint:
         return _buildStatusRow(
@@ -36,24 +38,31 @@ class BotStatus extends StatelessWidget {
     }
   }
 
-  Widget _buildStatusRow(BuildContext context, {
+  Widget _buildStatusRow(
+    BuildContext context, {
     IconData? icon,
     String? svgPath,
     Widget? customIcon,
     required String text,
     String? timeDesc,
     String? costTime,
-    String? timeDescSuffix = ''
+    String? timeDescSuffix = '',
   }) {
+    final resolvedTextStyle =
+        textStyle ??
+        const TextStyle(
+          color: Color(0x80353E53),
+          fontSize: 12,
+          fontFamily: 'PingFang SC',
+          fontWeight: FontWeight.w400,
+          height: 1.50,
+          letterSpacing: 0.33,
+        );
     Widget iconWidget;
     if (customIcon != null) {
       iconWidget = customIcon;
     } else if (svgPath != null) {
-      iconWidget = SvgPicture.asset(
-        svgPath,
-        width: 16,
-        height: 16,
-      );
+      iconWidget = SvgPicture.asset(svgPath, width: 16, height: 16);
     } else if (icon != null) {
       iconWidget = Icon(icon, size: 16);
     } else {
@@ -61,35 +70,18 @@ class BotStatus extends StatelessWidget {
     }
 
     return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8.0),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(8.0)),
       child: Row(
         children: [
           iconWidget,
           const SizedBox(width: 4.0),
-          Text(
-            text,
-            style: const TextStyle(
-              color: Color(0x80353E53), // rgba(53,62,83,0.5)
-              fontSize: 12,
-              fontFamily: 'PingFang SC',
-              fontWeight: FontWeight.w400,
-              height: 1.50,
-              letterSpacing: 0.33,
-            ),
-          ),
+          Text(text, style: resolvedTextStyle),
           const SizedBox(width: 4.0),
           Text(
-            timeDesc != null ? '($timeDesc${costTime ?? ''})$timeDescSuffix' : '',
-            style: const TextStyle(
-              color: Color(0x80353E53), // rgba(53,62,83,0.5)
-              fontSize: 12,
-              fontFamily: 'PingFang SC',
-              fontWeight: FontWeight.w400,
-              height: 1.50,
-              letterSpacing: 0.33,
-            ),
+            timeDesc != null
+                ? '($timeDesc${costTime ?? ''})$timeDescSuffix'
+                : '',
+            style: resolvedTextStyle,
           ),
         ],
       ),
@@ -97,7 +89,4 @@ class BotStatus extends StatelessWidget {
   }
 }
 
-enum BotStatusType {
-  completed,
-  hint,
-}
+enum BotStatusType { completed, hint }

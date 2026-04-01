@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ui/services/app_background_service.dart';
 import 'artifact_card.dart';
 import 'agent_tool_summary_card.dart';
 import 'deep_thinking_card.dart';
@@ -24,6 +25,9 @@ class CardWidgetFactory {
     void Function(String taskId)? onCancelTask,
     bool enableThinkingCollapse = false,
     ScrollController? parentScrollController,
+    AppBackgroundConfig appearanceConfig = AppBackgroundConfig.defaults,
+    AppBackgroundVisualProfile visualProfile =
+        AppBackgroundVisualProfile.defaultProfile,
   }) {
     final type = cardData['type'] as String? ?? 'unknown';
 
@@ -65,6 +69,8 @@ class CardWidgetFactory {
           isExecutable: isExecutable,
           isCollapsible: isCollapsible,
           parentScrollController: parentScrollController,
+          textScale: resolvedChatTextScale(appearanceConfig),
+          textColor: visualProfile.primaryTextColor,
         );
       case 'stage_hint':
         final hint = cardData['hint'] as String? ?? '';
@@ -88,6 +94,7 @@ class CardWidgetFactory {
         return AgentToolSummaryCard(
           cardData: cardData,
           parentScrollController: parentScrollController,
+          visualProfile: visualProfile,
         );
       case 'artifact_card':
         final artifact = cardData['artifact'] as Map<String, dynamic>? ?? {};

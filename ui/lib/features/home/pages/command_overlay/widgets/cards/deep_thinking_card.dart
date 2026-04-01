@@ -38,6 +38,8 @@ class DeepThinkingCard extends StatefulWidget {
 
   /// 外层消息列表滚动控制器，用于内外滚动联动
   final ScrollController? parentScrollController;
+  final double textScale;
+  final Color textColor;
 
   const DeepThinkingCard({
     super.key,
@@ -52,6 +54,8 @@ class DeepThinkingCard extends StatefulWidget {
     this.isExecutable = false,
     this.isCollapsible = false,
     this.parentScrollController,
+    this.textScale = 1,
+    this.textColor = const Color(0x80353E53),
   });
 
   @override
@@ -250,7 +254,7 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
       text,
       style: TextStyle(
         color: textColor,
-        fontSize: 12,
+        fontSize: 12 * widget.textScale,
         fontFamily: 'PingFang SC',
         fontWeight: FontWeight.w400,
         height: 1.50,
@@ -265,7 +269,7 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
         widget.parentScrollController?.hasClients == true
         ? widget.parentScrollController!.position
         : Scrollable.maybeOf(context)?.position;
-    const textColor = Color(0x80353E53); // rgba(53,62,83,0.5)
+    final secondaryTextColor = widget.textColor.withValues(alpha: 0.68);
     final bool hasContent = widget.thinkingText.isNotEmpty;
     final bool canCollapse = widget.isCollapsible && widget.stage == 4;
     final sizeAnimationDuration = canCollapse
@@ -309,6 +313,14 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                           : BotStatusType.hint,
                       hintText: hintText,
                       costTime: _formatTime(_elapsedSeconds),
+                      textStyle: TextStyle(
+                        color: secondaryTextColor,
+                        fontSize: 12 * widget.textScale,
+                        fontFamily: 'PingFang SC',
+                        fontWeight: FontWeight.w400,
+                        height: 1.50,
+                        letterSpacing: 0.33,
+                      ),
                     ),
                     const SizedBox(width: 2),
                     Icon(
@@ -316,7 +328,7 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                           ? Icons.keyboard_arrow_down_rounded
                           : Icons.keyboard_arrow_up_rounded,
                       size: 16,
-                      color: const Color(0x80353E53),
+                      color: secondaryTextColor,
                     ),
                   ],
                 ),
@@ -329,6 +341,14 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                 : BotStatusType.hint,
             hintText: hintText,
             costTime: _formatTime(_elapsedSeconds),
+            textStyle: TextStyle(
+              color: secondaryTextColor,
+              fontSize: 12 * widget.textScale,
+              fontFamily: 'PingFang SC',
+              fontWeight: FontWeight.w400,
+              height: 1.50,
+              letterSpacing: 0.33,
+            ),
           );
     final content = AnimatedSize(
       duration: sizeAnimationDuration,
@@ -363,7 +383,7 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            _buildText(widget.thinkingText, textColor),
+                            _buildText(widget.thinkingText, widget.textColor),
                           ],
                         ),
                       ),
@@ -409,8 +429,8 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                 Text(
                   '准备执行任务...',
                   style: TextStyle(
-                    color: textColor,
-                    fontSize: 12,
+                    color: secondaryTextColor,
+                    fontSize: 12 * widget.textScale,
                     fontFamily: 'PingFang SC',
                     fontWeight: FontWeight.w500,
                     height: 1.67,
@@ -420,11 +440,11 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
                   onTap: widget.taskId != null && widget.onCancelTask != null
                       ? () => widget.onCancelTask!(widget.taskId!)
                       : null,
-                  child: const Text(
+                  child: Text(
                     '取消任务',
                     style: TextStyle(
                       color: Color(0xFF576B95),
-                      fontSize: 12,
+                      fontSize: 12 * widget.textScale,
                       fontFamily: 'PingFang SC',
                       fontWeight: FontWeight.w500,
                       height: 1.50,
@@ -440,8 +460,8 @@ class _DeepThinkingCardState extends State<DeepThinkingCard> {
             child: Text(
               '任务已取消',
               style: TextStyle(
-                color: Colors.black,
-                fontSize: 12,
+                color: secondaryTextColor,
+                fontSize: 12 * widget.textScale,
                 fontFamily: 'PingFang SC',
                 fontWeight: FontWeight.w500,
                 height: 1.83,

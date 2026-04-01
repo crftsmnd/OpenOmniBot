@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../../../../models/chat_message_model.dart';
+import '../../../../../services/app_background_service.dart';
+import '../../../../../widgets/app_background_widgets.dart';
 import '../chat_page_models.dart';
 import '../../command_overlay/widgets/message_bubble.dart';
 import '../../command_overlay/widgets/chat_input_area.dart';
@@ -48,6 +50,8 @@ class ChatAppBar extends StatelessWidget {
   final bool showAppUpdateIndicator;
   final VoidCallback? onAppUpdateTap;
   final String? appUpdateTooltip;
+  final bool translucent;
+  final AppBackgroundVisualProfile visualProfile;
 
   const ChatAppBar({
     super.key,
@@ -71,14 +75,18 @@ class ChatAppBar extends StatelessWidget {
     this.showAppUpdateIndicator = false,
     this.onAppUpdateTap,
     this.appUpdateTooltip,
+    this.translucent = false,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
   });
 
   @override
   Widget build(BuildContext context) {
-    final iconTint = Colors.grey[800]!;
+    final iconTint = translucent
+        ? visualProfile.appBarIconColor
+        : Colors.grey[800]!;
     const updateTint = Color(0xFFD4A017);
     return ColoredBox(
-      color: const Color(0xFFF9FCFF),
+      color: translucent ? Colors.transparent : const Color(0xFFF9FCFF),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: SizedBox(
@@ -119,6 +127,8 @@ class ChatAppBar extends StatelessWidget {
                     hasTerminalEnvironment: hasTerminalEnvironment,
                     isBrowserEnabled: isBrowserEnabled,
                     activeToolType: activeToolType,
+                    translucent: translucent,
+                    visualProfile: visualProfile,
                   ),
                 ),
               ),
@@ -205,6 +215,8 @@ class _ChatModeModelSwitcher extends StatefulWidget {
     required this.hasTerminalEnvironment,
     required this.isBrowserEnabled,
     this.activeToolType,
+    this.translucent = false,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
   });
 
   final ChatSurfaceMode activeMode;
@@ -220,6 +232,8 @@ class _ChatModeModelSwitcher extends StatefulWidget {
   final bool hasTerminalEnvironment;
   final bool isBrowserEnabled;
   final String? activeToolType;
+  final bool translucent;
+  final AppBackgroundVisualProfile visualProfile;
 
   @override
   State<_ChatModeModelSwitcher> createState() => _ChatModeModelSwitcherState();
@@ -368,9 +382,11 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textAlign: TextAlign.center,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: Color(0xFF9DA9BB),
+            color: widget.translucent
+                ? widget.visualProfile.subtleTextColor
+                : const Color(0xFF9DA9BB),
             fontWeight: FontWeight.w500,
           ),
         );
@@ -407,6 +423,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
         widget.onBrowserTap();
       },
       onInteracted: _handleSliderInteraction,
+      visualProfile: widget.visualProfile,
     );
     final currentOrder = _layerOrder(widget.displayLayer);
 
@@ -419,9 +436,17 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: backgroundSurfaceColor(
+          translucent: widget.translucent,
+          opacity: 0.78,
+        ),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFFD9E6FB), width: 1),
+        border: Border.all(
+          color: widget.translucent
+              ? widget.visualProfile.islandBorderColor
+              : const Color(0xFFD9E6FB),
+          width: 1,
+        ),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(999),
@@ -452,6 +477,7 @@ class _ChatModeModelSwitcherState extends State<_ChatModeModelSwitcher> {
                       activeMode: widget.activeMode,
                       onChanged: widget.onModeChanged,
                       onInteracted: _handleSliderInteraction,
+                      visualProfile: widget.visualProfile,
                     ),
                   ),
                 ),
@@ -493,6 +519,7 @@ class _ChatToolSlider extends StatelessWidget {
   final VoidCallback onTerminalTap;
   final VoidCallback onBrowserTap;
   final VoidCallback? onInteracted;
+  final AppBackgroundVisualProfile visualProfile;
 
   const _ChatToolSlider({
     required this.environmentIconSvg,
@@ -505,6 +532,7 @@ class _ChatToolSlider extends StatelessWidget {
     required this.onTerminalTap,
     required this.onBrowserTap,
     this.onInteracted,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
   });
 
   bool get _isBrowserActive => activeToolType?.trim() == 'browser';
@@ -614,8 +642,8 @@ class _ChatToolSlider extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: ColorFiltered(
-                  colorFilter: const ColorFilter.mode(
-                    Color(0xFF617390),
+                  colorFilter: ColorFilter.mode(
+                    visualProfile.secondaryTextColor,
                     BlendMode.srcIn,
                   ),
                   child: SvgPicture.string(
@@ -641,10 +669,10 @@ class _ChatToolSlider extends StatelessWidget {
     required Widget child,
   }) {
     final color = !isEnabled
-        ? const Color(0xFFB8C4D8)
+        ? visualProfile.subtleTextColor.withValues(alpha: 0.72)
         : isSelected
         ? Colors.white
-        : const Color(0xFF617390);
+        : visualProfile.secondaryTextColor;
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -676,12 +704,14 @@ class ChatModeSlider extends StatefulWidget {
   final ChatSurfaceMode activeMode;
   final ValueChanged<ChatSurfaceMode> onChanged;
   final VoidCallback? onInteracted;
+  final AppBackgroundVisualProfile visualProfile;
 
   const ChatModeSlider({
     super.key,
     required this.activeMode,
     required this.onChanged,
     this.onInteracted,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
   });
 
   @override
@@ -823,7 +853,9 @@ class _ChatModeSliderState extends State<ChatModeSlider> {
   }
 
   Widget _buildModeIcon({required bool isSelected, required Widget child}) {
-    final color = isSelected ? Colors.white : const Color(0xFF617390);
+    final color = isSelected
+        ? Colors.white
+        : widget.visualProfile.secondaryTextColor;
     return Center(
       child: AnimatedScale(
         duration: const Duration(milliseconds: 220),
@@ -848,6 +880,8 @@ class ChatMessageList extends StatefulWidget {
   final double bottomOverlayInset;
   final void Function(ChatMessageModel message, LongPressStartDetails details)?
   onUserMessageLongPressStart;
+  final AppBackgroundVisualProfile visualProfile;
+  final AppBackgroundConfig appearanceConfig;
 
   const ChatMessageList({
     super.key,
@@ -858,6 +892,8 @@ class ChatMessageList extends StatefulWidget {
     this.onRequestAuthorize,
     this.bottomOverlayInset = 0,
     this.onUserMessageLongPressStart,
+    this.visualProfile = AppBackgroundVisualProfile.defaultProfile,
+    this.appearanceConfig = AppBackgroundConfig.defaults,
   });
 
   @override
@@ -917,10 +953,13 @@ class _ChatMessageListState extends State<ChatMessageList> {
       return GestureDetector(
         onVerticalDragUpdate: (_) {},
         behavior: HitTestBehavior.opaque,
-        child: const Center(
+        child: Center(
           child: Text(
             '有什么可以帮助你的？',
-            style: TextStyle(color: Color(0xFF999999), fontSize: 14),
+            style: TextStyle(
+              color: widget.visualProfile.secondaryTextColor,
+              fontSize: 14,
+            ),
           ),
         ),
       );
@@ -961,6 +1000,8 @@ class _ChatMessageListState extends State<ChatMessageList> {
                 parentScrollController: widget.scrollController,
                 onRequestAuthorize: widget.onRequestAuthorize,
                 onUserMessageLongPressStart: widget.onUserMessageLongPressStart,
+                visualProfile: widget.visualProfile,
+                appearanceConfig: widget.appearanceConfig,
               ),
             );
           },
@@ -1072,6 +1113,7 @@ class ChatInputWrapper extends StatelessWidget {
   final String? contextUsageTooltipMessage;
   final VoidCallback? onLongPressContextUsageRing;
   final ValueChanged<double>? onInputHeightChanged;
+  final bool translucent;
 
   const ChatInputWrapper({
     super.key,
@@ -1097,6 +1139,7 @@ class ChatInputWrapper extends StatelessWidget {
     this.contextUsageTooltipMessage,
     this.onLongPressContextUsageRing,
     this.onInputHeightChanged,
+    this.translucent = false,
   });
 
   @override
@@ -1119,6 +1162,7 @@ class ChatInputWrapper extends StatelessWidget {
             openClawEnabled: openClawEnabled,
             onToggleOpenClaw: onToggleOpenClaw,
             onLongPressOpenClaw: onLongPressOpenClaw,
+            useFrostedGlass: translucent,
             useLargeComposerStyle: useLargeComposerStyle,
             useAttachmentPickerForPlus: useAttachmentPickerForPlus,
             onPickAttachment: onPickAttachment,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ui/features/home/pages/chat/widgets/chat_tool_activity_strip.dart';
+import 'package:ui/features/home/pages/command_overlay/services/tool_card_detail_gesture_gate.dart';
 import 'package:ui/models/chat_message_model.dart';
 
 void main() {
@@ -257,12 +258,132 @@ void main() {
 
       expect(previewTopLeft.dx, 52);
       expect(previewTopLeft.dy, lessThan(barTopLeft.dy));
-      expect(barTopLeft.dx, greaterThan(52));
-      expect(barSize.width, lessThan(280));
+      expect(barTopLeft.dx, closeTo(72, 0.1));
+      expect(barSize.width, closeTo(240, 0.1));
       expect(titleTopLeft.dx, greaterThan(previewTopRight.dx - 12));
       expect(barShape.color, const Color(0xFFF9FCFF));
       expect(find.text('运行中'), findsOneWidget);
       expect(find.text('1/2'), findsNothing);
     },
   );
+
+  testWidgets('expanded strip can be dismissed by tapping outside', (
+    tester,
+  ) async {
+    var expanded = true;
+    final messages = [
+      ChatMessageModel.cardMessage({
+        'type': 'agent_tool_summary',
+        'status': 'running',
+        'toolType': 'terminal',
+        'toolTitle': '检查 git 状态',
+        'summary': '终端正在运行',
+      }),
+      ChatMessageModel.cardMessage({
+        'type': 'agent_tool_summary',
+        'status': 'success',
+        'toolType': 'workspace',
+        'toolTitle': '读取配置文件',
+        'summary': '已读取 app.yaml',
+      }),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            return Scaffold(
+              body: Stack(
+                children: [
+                  if (expanded)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: () => setState(() => expanded = false),
+                      ),
+                    ),
+                  Positioned(
+                    left: 52,
+                    bottom: 24,
+                    width: 280,
+                    child: ChatToolActivityStrip(
+                      messages: messages,
+                      anchorRect: const Rect.fromLTWH(52, 0, 280, 0),
+                      expanded: expanded,
+                      onExpandedChanged: (value) =>
+                          setState(() => expanded = value),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(kChatToolActivityPanelKey), findsOneWidget);
+
+    await tester.tapAt(const Offset(12, 12));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(kChatToolActivityPreviewKey), findsOneWidget);
+  });
+
+  testWidgets('expanded history drawer holds gesture gate while dragging', (
+    tester,
+  ) async {
+    final messages = List<ChatMessageModel>.generate(6, (index) {
+      return ChatMessageModel.cardMessage({
+        'type': 'agent_tool_summary',
+        'status': index == 0 ? 'running' : 'success',
+        'toolType': 'workspace',
+        'toolTitle': '工具调用 ${index + 1}',
+        'summary': '结果 ${index + 1}',
+      });
+    });
+
+    addTearDown(() {
+      if (ToolCardDetailGestureGate.hasActivePointers) {
+        fail('gesture gate should be released after the drag completes');
+      }
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              Positioned(
+                left: 52,
+                bottom: 24,
+                width: 280,
+                child: ChatToolActivityStrip(
+                  messages: messages,
+                  anchorRect: const Rect.fromLTWH(52, 0, 280, 0),
+                  expanded: true,
+                  onExpandedChanged: (_) {},
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final panelCenter = tester.getCenter(find.byKey(kChatToolActivityPanelKey));
+    final gesture = await tester.startGesture(panelCenter);
+    await tester.pump();
+
+    expect(ToolCardDetailGestureGate.hasActivePointers, isTrue);
+
+    await gesture.moveBy(const Offset(0, -48));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(ToolCardDetailGestureGate.hasActivePointers, isFalse);
+  });
 }
