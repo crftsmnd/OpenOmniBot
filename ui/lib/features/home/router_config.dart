@@ -21,6 +21,7 @@ import 'pages/webview/webview_page.dart';
 import 'pages/settings/settings_page.dart';
 import 'pages/mcp/remote_mcp_servers_page.dart';
 import 'pages/termux_setting/termux_setting_page.dart';
+import 'pages/utg/utg_dashboard_page.dart';
 import 'pages/scene_model_setting/scene_model_setting_page.dart';
 import 'pages/vlm_model_setting/vlm_model_setting_page.dart';
 
@@ -276,6 +277,16 @@ List<GoRoute> homeRoutes = [
       key: state.pageKey,
       name: 'home/workspace_memory_setting',
       child: const WorkspaceMemorySettingPage(),
+    ),
+  ),
+
+  GoRoute(
+    path: '/home/utg',
+    name: 'home/utg',
+    pageBuilder: (context, state) => GoRouterManager.buildActivitySlidePage(
+      key: state.pageKey,
+      name: 'home/utg',
+      child: const UtgDashboardPage(),
     ),
   ),
 

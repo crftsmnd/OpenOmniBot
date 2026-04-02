@@ -29,6 +29,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _mcpLoaded = false;
   bool _mcpBusy = false;
   McpServerInfo? _mcpInfo;
+  bool _utgLoaded = false;
+  UtgBridgeConfig? _utgConfig;
   bool _workspaceMemoryLoaded = false;
   WorkspaceMemoryEmbeddingConfig? _embeddingConfig;
   WorkspaceMemoryRollupStatus? _rollupStatus;
@@ -46,6 +48,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadHideFromRecentsState();
     _loadAutoBackToChatAfterTaskState();
     _loadMcpServerState();
+    _loadUtgBridgeConfig();
     _loadWorkspaceMemoryState();
   }
 
@@ -159,6 +162,23 @@ class _SettingsPageState extends State<SettingsPage> {
       if (!mounted) return;
       setState(() {
         _workspaceMemoryLoaded = true;
+      });
+    }
+  }
+
+  Future<void> _loadUtgBridgeConfig() async {
+    try {
+      final config = await AssistsMessageService.getUtgBridgeConfig();
+      if (!mounted) return;
+      setState(() {
+        _utgConfig = config;
+        _utgLoaded = true;
+      });
+    } catch (e) {
+      debugPrint('Load UTG bridge config failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _utgLoaded = true;
       });
     }
   }
@@ -278,6 +298,22 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  String _buildUtgSubtitle() {
+    if (!_utgLoaded) {
+      return '加载中...';
+    }
+    final config = _utgConfig;
+    if (config == null) {
+      return '配置 OmniCloud UTG provider 与 run_log';
+    }
+    final enabled = config.utgEnabled ? 'UTG 已开启' : 'UTG 已关闭';
+    final autoStart = config.providerAutoStartEnabled ? '自动拉起' : '手动拉起';
+    final fallback =
+        config.fallbackToVlmOnFailureEnabled ? '失败回退 VLM' : '失败不回退';
+    final health = config.providerHealthy ? 'provider 正常' : 'provider 不可达';
+    return '$enabled，$autoStart，$fallback，$health';
+  }
+
   @override
   Widget build(BuildContext context) {
     final workspaceMemoryConfigured = _embeddingConfig?.configured == true;
@@ -341,6 +377,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 '/home/workspace_memory_setting',
               );
               _loadWorkspaceMemoryState();
+            },
+          ),
+          _SettingItem(
+            icon: Icons.route_outlined,
+            title: 'UTG',
+            subtitle: _buildUtgSubtitle(),
+            onTap: () async {
+              await GoRouterManager.pushForResult('/home/utg');
+              _loadUtgBridgeConfig();
             },
           ),
         ],
