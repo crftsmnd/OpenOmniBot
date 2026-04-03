@@ -211,6 +211,15 @@ class _ToastContainerState extends State<_ToastContainer>
   @override
   Widget build(BuildContext context) {
     final _colors = _ToastColors.of(widget.type);
+    final message = widget.message.trim();
+    final isMultiLine = message.contains('\n') || message.length > 26;
+    final maxWidth = (MediaQuery.sizeOf(context).width - 32).clamp(
+      220.0,
+      360.0,
+    ).toDouble();
+    final fontSize = _fontSizeFor(message);
+    final lineHeight = isMultiLine ? 1.3 : 1.0;
+
     return Align(
       alignment: widget.alignment,
       child: Container(
@@ -224,55 +233,73 @@ class _ToastContainerState extends State<_ToastContainer>
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Container(
-                  height: 36,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                  decoration: ShapeDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment(0.25, 0.21),
-                      end: Alignment(0.97, 1.01),
-                      colors: [Colors.white, Colors.white.withValues(alpha: 0.80)],
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(50),
-                    ),
-                    shadows: [
-                      BoxShadow(
-                        color: Color(0x0C000000),
-                        blurRadius: 10,
-                        offset: Offset(5, 5),
-                        spreadRadius: 0,
-                      )
-                    ],
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: maxWidth,
+                    minHeight: 36,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Transform.translate(
-                        offset: const Offset(0, -1),
-                        child: Icon(
-                          _colors.icon,
-                          color: _colors.color,
-                          size: 14,
-                        ),
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: isMultiLine ? 10 : 8,
+                    ),
+                    decoration: ShapeDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment(0.25, 0.21),
+                        end: Alignment(0.97, 1.01),
+                        colors: [
+                          Colors.white,
+                          Colors.white.withValues(alpha: 0.80),
+                        ],
                       ),
-                      const SizedBox(width: 10),
-                      Text(
-                        widget.message,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(
-                          color: Colors.black.withValues(alpha: 0.50),
-                          fontSize: 14,
-                          fontFamily: 'PingFang SC',
-                          fontWeight: FontWeight.w400,
-                          height: 1.0,
-                          letterSpacing: 0.50,
-                          decoration: TextDecoration.none,
-                        ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(isMultiLine ? 18 : 50),
                       ),
-                    ],
+                      shadows: [
+                        BoxShadow(
+                          color: Color(0x0C000000),
+                          blurRadius: 10,
+                          offset: Offset(5, 5),
+                          spreadRadius: 0,
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: isMultiLine
+                          ? CrossAxisAlignment.start
+                          : CrossAxisAlignment.center,
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.only(top: isMultiLine ? 1 : 0),
+                          child: Icon(
+                            _colors.icon,
+                            color: _colors.color,
+                            size: 14,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(
+                            message,
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: true,
+                            textAlign: TextAlign.left,
+                            style: TextStyle(
+                              color: Colors.black.withValues(alpha: 0.50),
+                              fontSize: fontSize,
+                              fontFamily: 'PingFang SC',
+                              fontWeight: FontWeight.w400,
+                              height: lineHeight,
+                              letterSpacing: fontSize <= 12 ? 0.2 : 0.4,
+                              decoration: TextDecoration.none,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -281,6 +308,16 @@ class _ToastContainerState extends State<_ToastContainer>
         ),
       ),
     );
+  }
+
+  double _fontSizeFor(String message) {
+    if (message.length > 120) {
+      return 12;
+    }
+    if (message.length > 60) {
+      return 13;
+    }
+    return 14;
   }
 }
 
