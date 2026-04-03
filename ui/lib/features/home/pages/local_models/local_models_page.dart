@@ -141,6 +141,11 @@ class _LocalModelsPageState extends State<LocalModelsPage>
   List<MnnLocalModel> get _installedTtsModels =>
       _installedModels.where((item) => item.category == 'tts').toList();
 
+  List<MnnLocalModel> get _serviceModels => _installedModels.where((item) {
+    final category = item.category.trim().toLowerCase();
+    return category == 'llm' || category == 'diffusion';
+  }).toList();
+
   void _syncConfigControllers(MnnLocalConfig config) {
     if (!_portFocusNode.hasFocus &&
         _portController.text != config.apiPort.toString()) {
@@ -491,6 +496,77 @@ class _LocalModelsPageState extends State<LocalModelsPage>
     }
   }
 
+  String _apiServiceStateLabel(MnnLocalConfig config) {
+    if (config.apiReady) {
+      return 'READY';
+    }
+    switch (config.apiState.trim().toLowerCase()) {
+      case 'starting':
+        return '启动中';
+      case 'started':
+      case 'running':
+        return '运行中';
+      case 'stopped':
+        return '已停止';
+      case 'failed':
+        return '启动失败';
+      default:
+        return config.apiState.trim().isEmpty ? '未知' : config.apiState;
+    }
+  }
+
+  Color _apiServiceStateBackgroundColor(MnnLocalConfig config) {
+    if (config.apiReady) {
+      return const Color(0xFFE8F5E9);
+    }
+    switch (config.apiState.trim().toLowerCase()) {
+      case 'starting':
+        return const Color(0xFFFFF4E5);
+      case 'started':
+      case 'running':
+        return const Color(0xFFE3F2FD);
+      case 'failed':
+        return const Color(0xFFFDECEC);
+      default:
+        return const Color(0xFFF2F4F7);
+    }
+  }
+
+  Color _apiServiceStateTextColor(MnnLocalConfig config) {
+    if (config.apiReady) {
+      return const Color(0xFF2E7D32);
+    }
+    switch (config.apiState.trim().toLowerCase()) {
+      case 'starting':
+        return const Color(0xFFB26A00);
+      case 'started':
+      case 'running':
+        return const Color(0xFF1565C0);
+      case 'failed':
+        return const Color(0xFFB42318);
+      default:
+        return AppColors.text70;
+    }
+  }
+
+  Widget _buildApiServiceStateTag(MnnLocalConfig config) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: _apiServiceStateBackgroundColor(config),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        _apiServiceStateLabel(config),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: _apiServiceStateTextColor(config),
+        ),
+      ),
+    );
+  }
+
   Future<void> _setActiveModel(String? modelId) async {
     try {
       final config = await MnnLocalModelsService.setActiveModel(modelId);
@@ -821,7 +897,13 @@ class _LocalModelsPageState extends State<LocalModelsPage>
     final installedModels = _filteredInstalledModels;
     final installedAsrModels = _installedAsrModels;
     final installedTtsModels = _installedTtsModels;
+    final serviceModels = _serviceModels;
     final isApiServiceActive = _isApiServiceActive(resolvedConfig);
+    final selectedServiceModelId =
+        resolvedConfig.activeModelId.isNotEmpty &&
+            serviceModels.any((item) => item.id == resolvedConfig.activeModelId)
+        ? resolvedConfig.activeModelId
+        : '';
     final selectedAsrModelId =
         resolvedConfig.defaultAsrModelId.isNotEmpty &&
             installedAsrModels.any(
@@ -845,7 +927,15 @@ class _LocalModelsPageState extends State<LocalModelsPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('状态：${resolvedConfig.apiState}'),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  const Text('状态'),
+                  _buildApiServiceStateTag(resolvedConfig),
+                ],
+              ),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 4,
@@ -871,9 +961,39 @@ class _LocalModelsPageState extends State<LocalModelsPage>
                 ],
               ),
               const SizedBox(height: 6),
-              Text(
-                '后台服务模型：${resolvedConfig.activeModelId.isEmpty ? '未选择' : resolvedConfig.activeModelId}',
-              ),
+              if (serviceModels.isEmpty)
+                const Text(
+                  '服务模型：暂无可用模型，请先安装可用于服务的模型。',
+                  style: TextStyle(color: AppColors.text50),
+                )
+              else
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'service-model-${resolvedConfig.activeModelId}',
+                  ),
+                  initialValue: selectedServiceModelId,
+                  decoration: const InputDecoration(
+                    labelText: '服务模型',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: '',
+                      child: Text('未选择'),
+                    ),
+                    ...serviceModels.map(
+                      (item) => DropdownMenuItem<String>(
+                        value: item.id,
+                        child: Text(item.name),
+                      ),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    _setActiveModel(
+                      value == null || value.isEmpty ? null : value,
+                    );
+                  },
+                ),
               const SizedBox(height: 12),
               FilledButton(
                 onPressed: _togglingApiService
@@ -1357,44 +1477,20 @@ class _LocalModelsPageState extends State<LocalModelsPage>
               ),
             ],
             const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (model.category == 'llm' || model.category == 'diffusion')
-                  FilledButton.tonal(
-                    onPressed: () => _setActiveModel(model.id),
-                    child: const Text('设为服务模型'),
-                  ),
-                if (model.category == 'llm')
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() {
-                        _benchmarkModelId = model.id;
-                      });
-                      _startBenchmark(modelId: model.id);
-                    },
-                    child: const Text('Benchmark'),
-                  ),
-                if (model.category == 'asr')
-                  FilledButton.tonal(
-                    onPressed: () => _updateVoiceDefault(asrModelId: model.id),
-                    child: const Text('设为默认 ASR'),
-                  ),
-                if (model.category == 'tts')
-                  FilledButton.tonal(
-                    onPressed: () => _updateVoiceDefault(ttsModelId: model.id),
-                    child: const Text('设为默认 TTS'),
-                  ),
-                OutlinedButton(
-                  onPressed: () async {
-                    await MnnLocalModelsService.deleteModel(model.id);
-                    _refreshInstalled(silent: true);
-                    _refreshMarket(silent: true);
-                  },
-                  child: const Text('删除'),
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                tooltip: '删除模型',
+                onPressed: () async {
+                  await MnnLocalModelsService.deleteModel(model.id);
+                  _refreshInstalled(silent: true);
+                  _refreshMarket(silent: true);
+                },
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Color(0xFFB42318),
                 ),
-              ],
+              ),
             ),
           ],
         ),

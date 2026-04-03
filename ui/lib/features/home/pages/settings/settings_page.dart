@@ -338,7 +338,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           _SettingItem(
             icon: Icons.memory_outlined,
-            iconSvg: 'assets/home/vlm_model_setting_icon.svg',
+            iconSvg: 'assets/home/local_model_cpu_icon.svg',
             title: '本地模型服务',
             subtitle: '管理本地模型、推理、API 服务与语音模型',
             onTap: () {

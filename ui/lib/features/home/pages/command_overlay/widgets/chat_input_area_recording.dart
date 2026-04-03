@@ -5,25 +5,31 @@ mixin _ChatInputAreaRecordingMixin on _ChatInputAreaStateBase {
 
   /// 切换录音状态（开始/停止）
   Future<void> toggleRecording() async {
+    final shouldStop = _recordingState != RecordingState.idle;
+
     // Flutter 侧互斥：同一时刻只允许一个 start/stop 逻辑在跑
     if (_toggleInProgress) {
-      _showFastTapToast();
+      if (!shouldStop) {
+        _showFastTapToast();
+      }
       return;
     }
 
-    // Flutter 侧时间窗口限流：频繁点击不下发到原生
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastToggleAcceptedAtMs < _toggleMinIntervalMs) {
-      _showFastTapToast();
-      return;
+    if (!shouldStop) {
+      // Flutter 侧时间窗口限流：频繁点击不下发到原生
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastToggleAcceptedAtMs < _toggleMinIntervalMs) {
+        _showFastTapToast();
+        return;
+      }
+      _lastToggleAcceptedAtMs = now;
     }
-    _lastToggleAcceptedAtMs = now;
 
     _toggleInProgress = true;
     try {
       widget.focusNode.unfocus();
 
-      if (_recordingState == RecordingState.recording) {
+      if (shouldStop) {
         await _stopRecording();
         return;
       }
