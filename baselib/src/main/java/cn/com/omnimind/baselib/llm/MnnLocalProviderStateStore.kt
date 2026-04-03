@@ -4,7 +4,7 @@ import com.tencent.mmkv.MMKV
 
 object MnnLocalProviderStateStore {
     const val BUILTIN_PROFILE_ID = "mnn-local"
-    const val BUILTIN_PROFILE_NAME = "MNN 本地模型"
+    const val BUILTIN_PROFILE_NAME = "Mnn Local"
 
     private const val KEY_PORT = "mnn_local_provider_port"
     private const val KEY_API_KEY = "mnn_local_provider_api_key"
