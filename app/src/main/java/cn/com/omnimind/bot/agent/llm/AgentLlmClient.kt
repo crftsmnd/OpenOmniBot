@@ -3,7 +3,7 @@ package cn.com.omnimind.bot.agent
 import cn.com.omnimind.assists.controller.http.HttpController
 import cn.com.omnimind.baselib.llm.ChatCompletionRequest
 import cn.com.omnimind.baselib.llm.ChatCompletionTurn
-import cn.com.omnimind.baselib.llm.MnnLocalProviderStateStore
+import cn.com.omnimind.baselib.llm.LocalModelProviderBridge
 import cn.com.omnimind.baselib.util.OmniLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -120,8 +120,9 @@ class HttpAgentLlmClient(
         val completed = AtomicBoolean(false)
         val accumulator = AgentLlmStreamAccumulator(
             json = json,
-            preferInlineThinkTags = MnnLocalProviderStateStore.isBuiltinProfileId(
-                modelOverride?.providerProfileId
+            preferInlineThinkTags = LocalModelProviderBridge.isBuiltinLocalProvider(
+                modelOverride?.providerProfileId,
+                modelOverride?.apiBase
             )
         )
         var lastReasoning = ""

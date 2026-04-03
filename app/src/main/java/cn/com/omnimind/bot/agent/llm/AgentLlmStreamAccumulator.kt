@@ -22,11 +22,12 @@ class AgentLlmStreamAccumulator(
     companion object {
         private const val THINK_OPEN_TAG = "<think>"
         private const val THINK_CLOSE_TAG = "</think>"
+        private val INLINE_THINK_TAGS = listOf(THINK_OPEN_TAG, THINK_CLOSE_TAG)
     }
 
     private val contentBuffer = StringBuilder()
     private val reasoningBuffer = StringBuilder()
-    private val pendingLeadingTextBuffer = StringBuilder()
+    private val inlineTextBuffer = StringBuilder()
     private val toolCallBuilders: SortedMap<Int, MutableToolCallBuilder> = TreeMap()
     private var finishReason: String? = null
     private var usage: ChatCompletionUsage? = null
@@ -169,7 +170,7 @@ class AgentLlmStreamAccumulator(
         if (!seenChunk) {
             throw IllegalStateException("chat completion stream ended without chunks")
         }
-        flushPendingInlineThinkText()
+        flushInlineTextBuffer(final = true)
         val toolCalls = toolCallBuilders.entries.map { (index, builder) ->
             val name = builder.name?.trim().orEmpty()
             if (name.isBlank()) {
@@ -376,60 +377,98 @@ class AgentLlmStreamAccumulator(
             contentBuffer.append(text)
             return
         }
-        var remaining = text
-        while (remaining.isNotEmpty()) {
+        inlineTextBuffer.append(text)
+        flushInlineTextBuffer(final = false)
+    }
+
+    private fun flushInlineTextBuffer(final: Boolean) {
+        if (!preferInlineThinkTags) {
+            if (inlineTextBuffer.isNotEmpty()) {
+                appendVisibleText(inlineTextBuffer.toString())
+                inlineTextBuffer.setLength(0)
+            }
+            return
+        }
+
+        while (inlineTextBuffer.isNotEmpty()) {
+            val bufferText = inlineTextBuffer.toString()
             if (thinkSectionOpen) {
-                val closeIndex = remaining.indexOf(THINK_CLOSE_TAG)
-                if (closeIndex < 0) {
-                    appendReasoningText(remaining)
+                val closeIndex = bufferText.indexOf(THINK_CLOSE_TAG)
+                if (closeIndex >= 0) {
+                    appendReasoningText(bufferText.substring(0, closeIndex))
+                    inlineTextBuffer.delete(0, closeIndex + THINK_CLOSE_TAG.length)
+                    thinkSectionOpen = false
+                    inlineThinkTagObserved = true
+                    continue
+                }
+
+                if (final) {
+                    appendReasoningText(bufferText)
+                    inlineTextBuffer.setLength(0)
                     return
                 }
-                appendReasoningText(remaining.substring(0, closeIndex))
-                remaining = remaining.substring(closeIndex + THINK_CLOSE_TAG.length)
-                thinkSectionOpen = false
-                inlineThinkTagObserved = true
-                continue
+
+                val retainedLength = partialInlineTagSuffixLength(bufferText)
+                val safeLength = inlineTextBuffer.length - retainedLength
+                if (safeLength <= 0) {
+                    return
+                }
+                appendReasoningText(bufferText.substring(0, safeLength))
+                inlineTextBuffer.delete(0, safeLength)
+                return
             }
 
-            val openIndex = remaining.indexOf(THINK_OPEN_TAG)
-            val closeIndex = remaining.indexOf(THINK_CLOSE_TAG)
+            val openIndex = bufferText.indexOf(THINK_OPEN_TAG)
+            val closeIndex = bufferText.indexOf(THINK_CLOSE_TAG)
 
             if (openIndex >= 0 && (closeIndex < 0 || openIndex < closeIndex)) {
-                flushPendingInlineThinkText()
-                appendVisibleText(remaining.substring(0, openIndex))
-                remaining = remaining.substring(openIndex + THINK_OPEN_TAG.length)
+                appendVisibleText(bufferText.substring(0, openIndex))
+                inlineTextBuffer.delete(0, openIndex + THINK_OPEN_TAG.length)
                 thinkSectionOpen = true
                 inlineThinkTagObserved = true
                 continue
             }
 
             if (closeIndex >= 0 && contentBuffer.isEmpty()) {
-                pendingLeadingTextBuffer.append(remaining.substring(0, closeIndex))
-                if (pendingLeadingTextBuffer.isNotEmpty()) {
-                    appendReasoningText(pendingLeadingTextBuffer.toString())
-                    pendingLeadingTextBuffer.setLength(0)
-                }
-                remaining = remaining.substring(closeIndex + THINK_CLOSE_TAG.length)
+                appendReasoningText(bufferText.substring(0, closeIndex))
+                inlineTextBuffer.delete(0, closeIndex + THINK_CLOSE_TAG.length)
                 inlineThinkTagObserved = true
                 continue
             }
 
-            if (!inlineThinkTagObserved && contentBuffer.isEmpty()) {
-                pendingLeadingTextBuffer.append(remaining)
+            if (final) {
+                appendVisibleText(bufferText)
+                inlineTextBuffer.setLength(0)
                 return
             }
 
-            appendVisibleText(remaining)
+            if (!inlineThinkTagObserved && contentBuffer.isEmpty()) {
+                return
+            }
+
+            val retainedLength = partialInlineTagSuffixLength(bufferText)
+            val safeLength = inlineTextBuffer.length - retainedLength
+            if (safeLength <= 0) {
+                return
+            }
+            appendVisibleText(bufferText.substring(0, safeLength))
+            inlineTextBuffer.delete(0, safeLength)
             return
         }
     }
 
-    private fun flushPendingInlineThinkText() {
-        if (pendingLeadingTextBuffer.isEmpty()) {
-            return
+    private fun partialInlineTagSuffixLength(text: String): Int {
+        var longest = 0
+        INLINE_THINK_TAGS.forEach { tag ->
+            val upperBound = minOf(text.length, tag.length - 1)
+            for (candidate in upperBound downTo 1) {
+                if (text.endsWith(tag.substring(0, candidate))) {
+                    longest = maxOf(longest, candidate)
+                    break
+                }
+            }
         }
-        appendVisibleText(pendingLeadingTextBuffer.toString())
-        pendingLeadingTextBuffer.setLength(0)
+        return longest
     }
 
     private fun appendVisibleText(text: String) {

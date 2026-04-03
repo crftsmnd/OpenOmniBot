@@ -1,6 +1,7 @@
 package com.alibaba.mnnllm.api.openai.network.models
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
 /** * OpenAI Chat API responsedatamodel * responsible fordefinechatcompleteresponsedatastructure*/
 
@@ -23,7 +24,10 @@ data class Choice(
 
 @Serializable
 data class Delta(
-    val content: String
+    val content: String? = null,
+    @SerialName("reasoning_content")
+    val reasoningContent: String? = null,
+    val reasoning: String? = null
 )
 
 /** * Tokenusestatisticsinfo * comply withOpenAI APIstandard*/
@@ -55,7 +59,10 @@ data class CompletionChoice(
 @Serializable
 data class Message(
     val role: String,
-    val content: String
+    val content: String? = null,
+    @SerialName("reasoning_content")
+    val reasoningContent: String? = null,
+    val reasoning: String? = null
 )
 
 /**

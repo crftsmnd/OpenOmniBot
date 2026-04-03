@@ -107,8 +107,9 @@ class MnnLocalModelsChannel {
                 )
             }
 
-            "getConfig" -> {
-                result.success(MnnLocalModelsManager.getConfig())
+            "getConfig" -> runSuspend(result) {
+                MnnLocalModelsManager.ensureInitialized()
+                MnnLocalModelsManager.getConfig()
             }
 
             "saveConfig" -> {

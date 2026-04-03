@@ -5,6 +5,7 @@ import com.alibaba.mnnllm.android.llm.LlmSession
 import com.alibaba.mnnllm.api.openai.di.ServiceLocator
 import com.alibaba.mnnllm.api.openai.network.logging.ChatLogger
 import com.alibaba.mnnllm.api.openai.network.utils.ChatResponseFormatter
+import com.alibaba.mnnllm.api.openai.network.utils.ThinkingContentStreamParser
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.respond
@@ -39,6 +40,7 @@ class ResponseHandler {
         traceId: String
     ) {
         val responseMetadata = createResponseMetadata()
+        val parser = ThinkingContentStreamParser()
         
         call.respond(SSEServerContent(call) {
             //set heartbeenat
@@ -66,22 +68,21 @@ class ResponseHandler {
                                         progress != null -> {
                                             // Send progress token
                                             logger.logStreamDelta(traceId, progress)
-                                            val json = chatResponseFormatter.createDeltaResponse(
-                                                responseMetadata.responseId,
-                                                responseMetadata.created,
-                                                progress,
-                                                false
-                                            )
-                                            // Send to channel non-blocking
-                                            val sendResult = channel.trySend(ServerSentEvent(data = json))
-                                            
-                                            // If channel is closed (consumer failed/disconnected), stop generation
-                                            if (sendResult.isClosed) {
-                                                logger.logWarning(traceId, "Channel closed, stopping generation")
-                                                true
-                                            } else {
-                                                false // Continue generation
+                                            val deltas = parser.append(progress)
+                                            for (delta in deltas) {
+                                                val json = chatResponseFormatter.createDeltaResponse(
+                                                    responseMetadata.responseId,
+                                                    responseMetadata.created,
+                                                    content = delta.content,
+                                                    reasoningContent = delta.reasoningContent,
+                                                )
+                                                val sendResult = channel.trySend(ServerSentEvent(data = json))
+                                                if (sendResult.isClosed) {
+                                                    logger.logWarning(traceId, "Channel closed, stopping generation")
+                                                    return true
+                                                }
                                             }
+                                            false // Continue generation
                                         }
                                         else -> {
                                             // Generation complete (callback signal)
@@ -99,12 +100,23 @@ class ResponseHandler {
                         
                         // Generation complete, send final chunk with usage
                         if (isFinished) {
+                            parser.finish().forEach { delta ->
+                                channel.send(
+                                    ServerSentEvent(
+                                        data = chatResponseFormatter.createDeltaResponse(
+                                            responseMetadata.responseId,
+                                            responseMetadata.created,
+                                            content = delta.content,
+                                            reasoningContent = delta.reasoningContent,
+                                        )
+                                    )
+                                )
+                            }
                             val usage = chatResponseFormatter.createUsageFromMetrics(result)
                             val finalJson = chatResponseFormatter.createDeltaResponse(
                                 responseMetadata.responseId,
                                 responseMetadata.created,
-                                "",
-                                true,
+                                isLast = true,
                                 usage = usage
                             )
                             channel.send(ServerSentEvent(data = finalJson))
@@ -120,8 +132,8 @@ class ResponseHandler {
                         val errorJson = chatResponseFormatter.createDeltaResponse(
                             responseMetadata.responseId,
                             responseMetadata.created,
-                            "LlmSession not available",
-                            true
+                            content = "LlmSession not available",
+                            isLast = true
                         )
                         channel.send(ServerSentEvent(data = errorJson))
                     }
@@ -132,9 +144,8 @@ class ResponseHandler {
                          try {
                              val finalJson = chatResponseFormatter.createDeltaResponse(
                                  responseMetadata.responseId,
-                                 responseMetadata.created,
-                                 "",
-                                 true
+                                  responseMetadata.created,
+                                 isLast = true
                              )
                              channel.send(ServerSentEvent(data = finalJson))
                              delay(DONE_DELAY_MS)
@@ -177,22 +188,29 @@ class ResponseHandler {
         call: ApplicationCall,
         history: List<android.util.Pair<String, String>>
     ) {
-        val fullResponse = StringBuilder()
+        val parser = ThinkingContentStreamParser()
         val responseMetadata = createResponseMetadata()
         
         var result = HashMap<String, Any>()
         try {
             val llmSession = getLlmSession()
             if (llmSession != null) {
-                result = processNonStreamGeneration(llmSession, history, fullResponse)
+                result = processNonStreamGeneration(llmSession, history, parser)
             } else {
-                fullResponse.append("Error: LlmSession not available")
+                parser.append("Error: LlmSession not available")
             }
         } catch (e: Exception) {
-            fullResponse.append("Error: ${e.message}")
+            parser.append("Error: ${e.message}")
         }
+        parser.finish()
+        val parsedResult = parser.result()
 
-        val response = createNonStreamResponse(responseMetadata, fullResponse.toString(), result)
+        val response = createNonStreamResponse(
+            responseMetadata,
+            content = parsedResult.content,
+            reasoningContent = parsedResult.reasoningContent.ifBlank { null },
+            metrics = result
+        )
         //set correctContent-Typeas application/json
         call.response.headers.append("Content-Type", "application/json")
         call.respondText(response, io.ktor.http.ContentType.Application.Json)
@@ -229,11 +247,11 @@ class ResponseHandler {
     private fun processNonStreamGeneration(
         llmSession: LlmSession,
         history: List<android.util.Pair<String, String>>,
-        fullResponse: StringBuilder
+        parser: ThinkingContentStreamParser
     ): HashMap<String, Any> {
         return llmSession.submitFullHistory(history, object : GenerateProgressListener {
             override fun onProgress(progress: String?): Boolean {
-                progress?.let { fullResponse.append(it) }
+                progress?.let { parser.append(it) }
                 return false //continuegenerate
             }
         })
@@ -243,9 +261,16 @@ class ResponseHandler {
     private fun createNonStreamResponse(
         responseMetadata: ResponseMetadata,
         content: String,
+        reasoningContent: String?,
         metrics: HashMap<String, Any>
     ): String {
         val usage = chatResponseFormatter.createUsageFromMetrics(metrics)
-        return chatResponseFormatter.createChatCompletionResponse(responseMetadata.responseId, responseMetadata.created, content, usage)
+        return chatResponseFormatter.createChatCompletionResponse(
+            responseMetadata.responseId,
+            responseMetadata.created,
+            content,
+            reasoningContent,
+            usage
+        )
     }
 }

@@ -216,13 +216,35 @@ class MnnLocalMarketPayload {
   factory MnnLocalMarketPayload.fromMap(Map<dynamic, dynamic>? map) {
     return MnnLocalMarketPayload(
       source: (map?['source'] ?? '').toString(),
-      category: (map?['category'] ?? 'all').toString(),
+      category: (map?['category'] ?? 'llm').toString(),
       availableSources: ((map?['availableSources'] as List?) ?? const [])
           .map((item) => item.toString())
           .toList(),
       models: ((map?['models'] as List?) ?? const [])
           .map((item) => MnnLocalModel.fromMap(item as Map?))
           .toList(),
+    );
+  }
+}
+
+class MnnLocalOverviewPayload {
+  final MnnLocalConfig config;
+  final List<MnnLocalModel> installedModels;
+  final MnnLocalMarketPayload market;
+
+  const MnnLocalOverviewPayload({
+    required this.config,
+    required this.installedModels,
+    required this.market,
+  });
+
+  factory MnnLocalOverviewPayload.fromMap(Map<dynamic, dynamic>? map) {
+    return MnnLocalOverviewPayload(
+      config: MnnLocalConfig.fromMap(map?['config'] as Map?),
+      installedModels: ((map?['installedModels'] as List?) ?? const [])
+          .map((item) => MnnLocalModel.fromMap(item as Map?))
+          .toList(),
+      market: MnnLocalMarketPayload.fromMap(map?['market'] as Map?),
     );
   }
 }
@@ -406,6 +428,20 @@ class MnnLocalModelsService {
   static Stream<MnnLocalEvent> get eventStream =>
       _events.receiveBroadcastStream().map(MnnLocalEvent.fromDynamic);
 
+  static Future<MnnLocalOverviewPayload> getOverview({
+    String installedQuery = '',
+    String marketQuery = '',
+    String marketCategory = 'llm',
+  }) async {
+    final result = await _channel
+        .invokeMethod<Map<dynamic, dynamic>>('getOverview', {
+          'installedQuery': installedQuery,
+          'marketQuery': marketQuery,
+          'marketCategory': marketCategory.trim().toLowerCase(),
+        });
+    return MnnLocalOverviewPayload.fromMap(result);
+  }
+
   static Future<List<MnnLocalModel>> listInstalledModels({
     String query = '',
     String category = 'all',
@@ -430,54 +466,13 @@ class MnnLocalModelsService {
 
   static Future<MnnLocalMarketPayload> listMarketModels({
     String query = '',
-    String category = 'all',
+    String category = 'llm',
     bool refresh = false,
   }) async {
     final normalizedCategory = category.trim().toLowerCase();
-    if (normalizedCategory != 'all') {
-      return _listSingleMarketCategory(
-        query: query,
-        category: normalizedCategory,
-        refresh: refresh,
-      );
-    }
-
-    final llmPayload = await _listSingleMarketCategory(
-      query: query,
-      category: 'llm',
-      refresh: refresh,
-    );
-    final results = await Future.wait<MnnLocalMarketPayload>([
-      _listSingleMarketCategory(query: query, category: 'asr'),
-      _listSingleMarketCategory(query: query, category: 'tts'),
-      _listSingleMarketCategory(query: query, category: 'libs'),
-    ]);
-    final merged = <MnnLocalModel>[];
-    final seen = <String>{};
-    for (final model in [
-      ...llmPayload.models,
-      ...results.expand((item) => item.models),
-    ]) {
-      if (seen.add(model.id)) {
-        merged.add(model);
-      }
-    }
-    return MnnLocalMarketPayload(
-      source: llmPayload.source,
-      category: 'all',
-      availableSources: llmPayload.availableSources,
-      models: merged,
-    );
-  }
-
-  static Future<MnnLocalMarketPayload> _listSingleMarketCategory({
-    required String query,
-    required String category,
-    bool refresh = false,
-  }) async {
     final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
       'listMarketModels',
-      {'query': query, 'category': category, 'refresh': refresh},
+      {'query': query, 'category': normalizedCategory, 'refresh': refresh},
     );
     return MnnLocalMarketPayload.fromMap(result);
   }

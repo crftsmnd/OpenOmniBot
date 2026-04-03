@@ -49,7 +49,7 @@ class _LocalModelsPageState extends State<LocalModelsPage>
   bool _startingBenchmark = false;
 
   String _installedCategory = 'all';
-  String _marketCategory = 'all';
+  String _marketCategory = 'llm';
   String _benchmarkBackend = 'cpu';
   String? _benchmarkModelId;
 
@@ -98,12 +98,47 @@ class _LocalModelsPageState extends State<LocalModelsPage>
   }
 
   Future<void> _bootstrap() async {
-    await Future.wait([
-      _refreshConfig(),
-      _refreshInstalled(),
-      _refreshMarket(),
-      _refreshBenchmarkState(),
-    ]);
+    try {
+      final overview = await MnnLocalModelsService.getOverview(
+        installedQuery: _installedSearchController.text.trim(),
+        marketQuery: _marketSearchController.text.trim(),
+        marketCategory: _marketCategory,
+      );
+      if (!mounted) return;
+      setState(() {
+        _config = overview.config;
+        _installedModels = overview.installedModels;
+        _marketModels = overview.market.models;
+        _loadingConfig = false;
+        _loadingInstalled = false;
+        _loadingMarket = false;
+        final benchmarkModelStillExists =
+            _benchmarkModelId != null &&
+            overview.installedModels.any(
+              (item) => item.id == _benchmarkModelId,
+            );
+        if (!benchmarkModelStillExists) {
+          final llmModels = overview.installedModels.where(
+            (item) => item.category == 'llm',
+          );
+          _benchmarkModelId = llmModels.isNotEmpty ? llmModels.first.id : null;
+        }
+      });
+      if (_portController.text != overview.config.apiPort.toString()) {
+        _portController.text = overview.config.apiPort.toString();
+      }
+      if (_apiKeyController.text != overview.config.apiKey) {
+        _apiKeyController.text = overview.config.apiKey;
+      }
+    } catch (_) {
+      await Future.wait([
+        _refreshConfig(silent: true),
+        _refreshInstalled(silent: true),
+        _refreshMarket(silent: true),
+      ]);
+    } finally {
+      await _refreshBenchmarkState(silent: true);
+    }
   }
 
   void _handleTabChanged() {
@@ -632,7 +667,7 @@ class _LocalModelsPageState extends State<LocalModelsPage>
         ),
         _buildCategoryChips(
           current: _marketCategory,
-          categories: const ['all', 'llm', 'asr', 'tts', 'libs'],
+          categories: const ['llm', 'asr', 'tts', 'libs'],
           onSelected: (value) {
             setState(() => _marketCategory = value);
             _refreshMarket();

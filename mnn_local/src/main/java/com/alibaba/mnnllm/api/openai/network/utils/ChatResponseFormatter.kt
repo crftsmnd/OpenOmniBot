@@ -12,13 +12,17 @@ import kotlinx.serialization.json.Json
 /** * responseformattool * responsible forcreateandformatvariousresponsedata*/
 class ChatResponseFormatter {
 
-    private val json = Json { prettyPrint = false }
+    private val json = Json {
+        prettyPrint = false
+        explicitNulls = false
+    }
 
     /** * createDeltaresponse * @param responseId responseID * @param created creation timestamp * @param content content * @param isLast whether aslastchunk * @param usage usage statisticsinfo（only inlastchunkprovide） * @return formatted JSONstring*/
     fun createDeltaResponse(
         responseId: String,
         created: Long,
-        content: String,
+        content: String? = null,
+        reasoningContent: String? = null,
         isLast: Boolean = false,
         usage: Usage? = null
     ): String {
@@ -30,7 +34,10 @@ class ChatResponseFormatter {
                 model = "mnn-local",
                 choices = listOf(
                     Choice(
-                        delta = Delta(content),
+                        delta = Delta(
+                            content = content,
+                            reasoningContent = reasoningContent
+                        ),
                         finish_reason = if (isLast) "stop" else null,
                         // index = 0
                     )
@@ -45,6 +52,7 @@ class ChatResponseFormatter {
         responseId: String,
         created: Long,
         content: String,
+        reasoningContent: String? = null,
         usage: Usage
     ): String {
         return json.encodeToString(
@@ -57,7 +65,8 @@ class ChatResponseFormatter {
                     CompletionChoice(
                         message = Message(
                             role = "assistant",
-                            content = content
+                            content = content.ifEmpty { null },
+                            reasoningContent = reasoningContent
                         ),
                         finish_reason = "stop",
                         index = 0
