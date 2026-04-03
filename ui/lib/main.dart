@@ -174,7 +174,7 @@ class _MyAppState extends ConsumerState<MyApp> {
               fit: StackFit.expand,
               children: [
                 child ?? const SizedBox.shrink(),
-                const EmbeddedTerminalInitOverlay(),
+                const EmbeddedTerminalInitToastListener(),
               ],
             ),
           );
