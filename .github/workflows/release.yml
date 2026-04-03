@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+env:
+  JAVA_VERSION: '17'
+  FLUTTER_VERSION: '3.38.7'
+  NDK_VERSION: '28.2.13676358'
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,25 +27,42 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
-          cache: gradle
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.38.7'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Android NDK
+        id: cache-android-ndk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_SDK_ROOT }}/licenses
+          key: ${{ runner.os }}-android-ndk-${{ env.NDK_VERSION }}
+
       - name: Install Android NDK
+        if: steps.cache-android-ndk.outputs.cache-hit != 'true'
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "ndk;28.2.13676358"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          sdkmanager "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Export Android NDK environment
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
 
       - name: Install Flutter dependencies
         working-directory: ui
@@ -52,11 +74,20 @@ jobs:
 
       - name: Build production release APK
         env:
-          # Reduce OOM risk for R8/lint on GitHub-hosted runners.
+          # Keep enough heap for R8 while still leaving room for parallel workers.
           GRADLE_OPTS: >-
-            -Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 --enable-native-access=ALL-UNNAMED
+            -Dorg.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 --enable-native-access=ALL-UNNAMED
         run: |
-          ./gradlew --no-daemon --max-workers=2 assembleProductionRelease \
+          CPU_COUNT="$(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 4)"
+          if [ "$CPU_COUNT" -ge 4 ]; then
+            MAX_WORKERS=4
+          elif [ "$CPU_COUNT" -ge 2 ]; then
+            MAX_WORKERS="$CPU_COUNT"
+          else
+            MAX_WORKERS=2
+          fi
+          echo "Using Gradle max workers: ${MAX_WORKERS}"
+          ./gradlew --no-daemon --parallel --build-cache --max-workers="${MAX_WORKERS}" assembleProductionRelease \
             -POMNI_RELEASE_STORE_FILE=${{ runner.temp }}/release.jks \
             -POMNI_RELEASE_STORE_PWD=${{ secrets.RELEASE_PASSWORD }} \
             -POMNI_RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }} \

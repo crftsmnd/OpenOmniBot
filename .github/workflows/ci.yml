@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  JAVA_VERSION: '17'
+  FLUTTER_VERSION: '3.38.7'
+  NDK_VERSION: '28.2.13676358'
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -30,25 +35,40 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: '3.38.7'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Cache Android NDK
+        id: cache-android-ndk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_SDK_ROOT }}/licenses
+          key: ${{ runner.os }}-android-ndk-${{ env.NDK_VERSION }}
+
       - name: Install Android NDK
+        if: steps.cache-android-ndk.outputs.cache-hit != 'true'
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "ndk;28.2.13676358"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          sdkmanager "ndk;${{ env.NDK_VERSION }}"
+
+      - name: Export Android NDK environment
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}" >> "$GITHUB_ENV"
 
       - name: Install Flutter dependencies
         working-directory: ui
@@ -59,10 +79,10 @@ jobs:
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Gradle unit tests
-        run: ./gradlew --no-daemon :app:testDevelopDebugUnitTest
+        run: ./gradlew --no-daemon --parallel --build-cache :app:testDevelopDebugUnitTest
 
       - name: Assemble develop debug APK
-        run: ./gradlew --no-daemon :app:assembleDevelopDebug
+        run: ./gradlew --no-daemon --parallel --build-cache :app:assembleDevelopDebug
 
       - name: Lint develop debug
-        run: ./gradlew --no-daemon :app:lintDevelopDebug
+        run: ./gradlew --no-daemon --parallel --build-cache :app:lintDevelopDebug
