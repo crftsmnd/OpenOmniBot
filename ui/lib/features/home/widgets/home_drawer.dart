@@ -41,7 +41,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
   List<ConversationModel> conversations = [];
   final Set<String> _busyConversationKeys = <String>{};
   bool isLoadingConversations = true;
-  static const BorderRadius _drawerDeleteActionRadius = BorderRadius.only(
+  static const BorderRadius _drawerTrailingActionRadius = BorderRadius.only(
     topRight: Radius.circular(4),
     bottomRight: Radius.circular(4),
   );
@@ -831,11 +831,11 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
   ) {
     return [
       ConversationSlideAction(
-        onPressed: () => _archiveConversation(conversation),
-        backgroundColor: AppColors.buttonPrimary,
+        onPressed: () => _deleteConversation(conversation),
+        backgroundColor: AppColors.alertRed,
         child: Center(
           child: SvgPicture.asset(
-            'assets/home/archive_icon.svg',
+            'assets/memory/memory_delete.svg',
             width: _conversationActionIconSize,
             height: _conversationActionIconSize,
             colorFilter: const ColorFilter.mode(
@@ -846,12 +846,12 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
         ),
       ),
       ConversationSlideAction(
-        onPressed: () => _deleteConversation(conversation),
-        backgroundColor: AppColors.alertRed,
-        borderRadius: _drawerDeleteActionRadius,
+        onPressed: () => _archiveConversation(conversation),
+        backgroundColor: AppColors.buttonPrimary,
+        borderRadius: _drawerTrailingActionRadius,
         child: Center(
           child: SvgPicture.asset(
-            'assets/memory/memory_delete.svg',
+            'assets/home/archive_icon.svg',
             width: _conversationActionIconSize,
             height: _conversationActionIconSize,
             colorFilter: const ColorFilter.mode(
@@ -875,6 +875,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
       isBusy: isBusy,
       actions: _buildDrawerActions(conversation),
       onDismissed: () => _deleteConversation(conversation),
+      onFullSwipe: () => _archiveConversation(conversation),
       margin: const EdgeInsets.only(bottom: 6),
       child: Container(
         decoration: BoxDecoration(

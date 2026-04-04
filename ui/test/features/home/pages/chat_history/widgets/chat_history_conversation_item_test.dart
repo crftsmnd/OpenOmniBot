@@ -82,6 +82,55 @@ void main() {
     expect(deleteCount, 1);
   });
 
+  testWidgets('full swipe uses the override callback when provided', (
+    tester,
+  ) async {
+    var deleteCount = 0;
+    var archiveCount = 0;
+
+    await tester.pumpWidget(
+      _buildTestApp(
+        child: ConversationSlidable(
+          itemKey: 'conversation-override',
+          groupTag: 'test-group',
+          actions: _deleteActions(() => deleteCount++),
+          onDismissed: () => deleteCount++,
+          onFullSwipe: () => archiveCount++,
+          child: const SizedBox(height: 64, child: Text('Conversation E')),
+        ),
+      ),
+    );
+
+    await tester.drag(find.byType(Slidable), const Offset(-800, 0));
+    await tester.pumpAndSettle();
+
+    expect(archiveCount, 1);
+    expect(deleteCount, 0);
+  });
+
+  testWidgets('full swipe still falls back to onDismissed by default', (
+    tester,
+  ) async {
+    var deleteCount = 0;
+
+    await tester.pumpWidget(
+      _buildTestApp(
+        child: ConversationSlidable(
+          itemKey: 'conversation-default',
+          groupTag: 'test-group',
+          actions: _deleteActions(() => deleteCount++),
+          onDismissed: () => deleteCount++,
+          child: const SizedBox(height: 64, child: Text('Conversation F')),
+        ),
+      ),
+    );
+
+    await tester.drag(find.byType(Slidable), const Offset(-800, 0));
+    await tester.pumpAndSettle();
+
+    expect(deleteCount, 1);
+  });
+
   testWidgets('renders a mode badge for OpenClaw threads', (tester) async {
     await tester.pumpWidget(
       _buildTestApp(
