@@ -2,10 +2,11 @@
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 package com.alibaba.mls.api
 
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
-import retrofit2.Call
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
+import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
@@ -13,18 +14,12 @@ import java.util.concurrent.TimeUnit
  * Only includes repo info fetching, no model search functionality
  */
 class HfApiClient(val host: String) {
-    private val apiService: HfApiService
+    private val gson = Gson()
     var okHttpClient: OkHttpClient? = null
         private set
 
     init {
-        // Initialize Retrofit
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://$host")
-            .addConverterFactory(GsonConverterFactory.create())
-            .client(createOkHttpClient())
-            .build()
-        apiService = retrofit.create(HfApiService::class.java)
+        createOkHttpClient()
     }
 
     private fun createOkHttpClient(): OkHttpClient? {
@@ -36,8 +31,35 @@ class HfApiClient(val host: String) {
     }
 
     // Get repo file tree
-    fun getRepoTree(repoId: String, revision: String = "main"): Call<List<HfTreeItem>> {
-        return apiService.getRepoTree(repoId, revision)
+    fun getRepoTree(repoId: String, revision: String = "main"): List<HfTreeItem> {
+        val baseUrl = "https://$host/".toHttpUrl()
+        val urlBuilder = baseUrl.newBuilder()
+            .addPathSegment("api")
+            .addPathSegment("models")
+        repoId.split("/").filter { it.isNotBlank() }.forEach { segment ->
+            urlBuilder.addPathSegment(segment)
+        }
+        val url = urlBuilder
+            .addPathSegment("tree")
+            .addPathSegment(revision)
+            .addQueryParameter("recursive", "true")
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        okHttpClient!!.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("HF repo tree request failed with code ${response.code}: ${response.message}")
+            }
+            val body = response.body?.string()
+                ?: throw IllegalStateException("HF repo tree response body is empty")
+            val type = object : TypeToken<List<HfTreeItem>>() {}.type
+            return gson.fromJson(body, type)
+                ?: throw IllegalStateException("HF repo tree response parse failed")
+        }
     }
 
     companion object {

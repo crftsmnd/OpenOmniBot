@@ -4,11 +4,11 @@
 package com.alibaba.mls.api.ml
 
 import androidx.annotation.Keep
+import com.google.gson.Gson
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
-import retrofit2.Call
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -16,17 +16,11 @@ import java.util.concurrent.TimeUnit
 
 class MlApiClient {
     private val host = "modelers.cn"
+    private val gson = Gson()
     private var okHttpClient: OkHttpClient? = null
 
-    val apiService: MlApiService
-
     init {
-        val retrofit = Retrofit.Builder()
-            .baseUrl("https://$host/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .client(createOkHttpClient())
-            .build()
-        apiService = retrofit.create(MlApiService::class.java)
+        createOkHttpClient()
     }
 
     private fun createOkHttpClient(): OkHttpClient? {
@@ -40,6 +34,36 @@ class MlApiClient {
         return okHttpClient
     }
 
+    fun getModelFiles(
+        modelGroup: String,
+        modelPath: String,
+        path: String,
+    ): MlRepoInfo {
+        val url = "https://$host/".toHttpUrl().newBuilder()
+            .addPathSegment("api")
+            .addPathSegment("v1")
+            .addPathSegment("file")
+            .addPathSegment(modelGroup)
+            .addPathSegment(modelPath)
+            .addQueryParameter("path", path)
+            .build()
+
+        val request = Request.Builder()
+            .url(url)
+            .get()
+            .build()
+
+        okHttpClient!!.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IllegalStateException("Modelers repo request failed with code ${response.code}: ${response.message}")
+            }
+            val body = response.body?.string()
+                ?: throw IllegalStateException("Modelers repo response body is empty")
+            return gson.fromJson(body, MlRepoInfo::class.java)
+                ?: throw IllegalStateException("Modelers repo response parse failed")
+        }
+    }
+
     @Keep
     interface MlApiService {
         @GET("api/v1/file/{modelGroup}/{modelPath}")
@@ -47,6 +71,6 @@ class MlApiClient {
             @Path("modelGroup") modelGroup: String,
             @Path("modelPath") modelPath: String,
             @Query("path") path: String,
-        ): Call<MlRepoInfo>
+        ): retrofit2.Call<MlRepoInfo>
     }
 }

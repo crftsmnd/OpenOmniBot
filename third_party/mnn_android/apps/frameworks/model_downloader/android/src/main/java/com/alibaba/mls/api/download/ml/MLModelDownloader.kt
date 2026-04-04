@@ -65,43 +65,33 @@ class MLModelDownloader(override var callback: ModelRepoDownloadCallback?,
                     throw FileDownloadException("Invalid model ID format for $modelId, expected format: owner/repo")
                 }
                 
-                val response = mlApiClient.apiService.getModelFiles(split[0], split[1], "").execute()
-                if (response.isSuccessful && response.body() != null) {
-                    val initialInfo = response.body()!!
-                    val repoInfo = if (calculateSize) {
-                        // Get all files recursively for size calculation
-                        val allFiles = mutableListOf<FileInfo>()
-                        getAllFiles(split[0], split[1], "", allFiles)
-                        MlRepoInfo(
-                            initialInfo.code,
-                            initialInfo.msg,
-                            MlRepoData(
-                                tree = allFiles,
-                                last_commit = initialInfo.data.last_commit,
-                                commit_count = initialInfo.data.commit_count
-                            )
+                val initialInfo = mlApiClient.getModelFiles(split[0], split[1], "")
+                val repoInfo = if (calculateSize) {
+                    // Get all files recursively for size calculation
+                    val allFiles = mutableListOf<FileInfo>()
+                    getAllFiles(split[0], split[1], "", allFiles)
+                    MlRepoInfo(
+                        initialInfo.code,
+                        initialInfo.msg,
+                        MlRepoData(
+                            tree = allFiles,
+                            last_commit = initialInfo.data.last_commit,
+                            commit_count = initialInfo.data.commit_count
                         )
-                    } else {
-                        initialInfo
-                    }
-                    
-                    // Call onRepoInfo callback with repo metadata
-                    val lastModified = TimeUtils.convertIsoToTimestamp(repoInfo.data.last_commit?.commit?.created) ?: 0L
-                    val repoSize = if (calculateSize && repoInfo.data.tree.isNotEmpty()) {
-                        repoInfo.data.tree.filter { it.type != "dir" }.sumOf { it.size }
-                    } else {
-                        0L
-                    }
-                    callback?.onRepoInfo(modelId, lastModified, repoSize)
-                    repoInfo
+                    )
                 } else {
-                    val errorMsg = if (!response.isSuccessful) {
-                        "API request failed with code ${response.code()}: ${response.message()}"
-                    } else {
-                        "API response was null or empty"
-                    }
-                    throw FileDownloadException("Failed to fetch repo info for $modelId: $errorMsg")
+                    initialInfo
                 }
+
+                // Call onRepoInfo callback with repo metadata
+                val lastModified = TimeUtils.convertIsoToTimestamp(repoInfo.data.last_commit?.commit?.created) ?: 0L
+                val repoSize = if (calculateSize && repoInfo.data.tree.isNotEmpty()) {
+                    repoInfo.data.tree.filter { it.type != "dir" }.sumOf { it.size }
+                } else {
+                    0L
+                }
+                callback?.onRepoInfo(modelId, lastModified, repoSize)
+                repoInfo
             }.getOrElse { exception ->
                 Log.e(TAG, "Failed to fetch repo info for $modelId", exception)
                 throw FileDownloadException("Failed to fetch repo info for $modelId: ${exception.message}")
@@ -190,9 +180,7 @@ class MLModelDownloader(override var callback: ModelRepoDownloadCallback?,
     private fun getAllFiles(owner: String, repo: String, path: String, allFiles: MutableList<FileInfo>) {
         Log.d(TAG, "getAllFiles: owner: $owner path $path repo:$repo")
         kotlin.runCatching {
-            val response = mlApiClient.apiService.getModelFiles(owner, repo, path).execute()
-            val repoInfo = response.body()
-            
+            val repoInfo = mlApiClient.getModelFiles(owner, repo, path)
             repoInfo?.data?.tree?.forEach { fileInfo ->
                 allFiles.add(fileInfo)
                 // If it's a directory, recursively get its files
