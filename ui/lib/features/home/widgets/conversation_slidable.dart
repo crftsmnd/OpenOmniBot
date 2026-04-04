@@ -27,6 +27,7 @@ class ConversationSlidable extends StatelessWidget {
     this.margin = EdgeInsets.zero,
     this.actionExtentRatioPerAction = 0.24,
     this.dismissThreshold,
+    this.onFullSwipe,
   }) : assert(actions.length > 0, 'actions must not be empty');
 
   final String itemKey;
@@ -38,6 +39,7 @@ class ConversationSlidable extends StatelessWidget {
   final EdgeInsetsGeometry margin;
   final double actionExtentRatioPerAction;
   final double? dismissThreshold;
+  final VoidCallback? onFullSwipe;
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +69,7 @@ class ConversationSlidable extends StatelessWidget {
                 dismissThreshold: resolvedDismissThreshold,
                 closeOnCancel: true,
                 motion: const InversedDrawerMotion(),
-                onDismissed: onDismissed,
+                onDismissed: onFullSwipe ?? onDismissed,
               ),
               children: actions
                   .map(
