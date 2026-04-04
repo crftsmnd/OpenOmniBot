@@ -115,7 +115,11 @@ object MnnLocalModelsManager {
 
         override fun onDownloadFinished(modelId: String, path: String) {
             emitDownloadUpdate(modelId)
-            emitSimpleEvent("downloads_changed")
+            scope.launch {
+                refreshInstalledModelCache(ModelListManager.ChangeReason.MODEL_DOWNLOADED)
+                emitSimpleEvent("downloads_changed")
+                emitConfigChanged()
+            }
         }
 
         override fun onDownloadFailed(modelId: String, e: Exception) {
@@ -130,7 +134,11 @@ object MnnLocalModelsManager {
 
         override fun onDownloadFileRemoved(modelId: String) {
             emitDownloadUpdate(modelId)
-            emitSimpleEvent("downloads_changed")
+            scope.launch {
+                refreshInstalledModelCache(ModelListManager.ChangeReason.MODEL_DELETED)
+                emitSimpleEvent("downloads_changed")
+                emitConfigChanged()
+            }
         }
 
         override fun onDownloadTotalSize(modelId: String, totalSize: Long) {
@@ -814,14 +822,16 @@ object MnnLocalModelsManager {
         val context = appContext ?: return ModelListManager.getAllCurrentModels().orEmpty()
         val baseModels = ModelListManager.getAllCurrentModels().orEmpty()
         return runCatching {
-            mergeSupplementalDownloadedModels(baseModels, context)
+            deduplicateInstalledModels(
+                mergeSupplementalDownloadedModels(baseModels, context)
+            )
         }.onFailure { error ->
             Log.w(
                 TAG,
                 "Failed to merge supplemental installed models, falling back to primary cache",
                 error,
             )
-        }.getOrDefault(baseModels)
+        }.getOrDefault(deduplicateInstalledModels(baseModels))
     }
 
     private fun mergeSupplementalDownloadedModels(
@@ -933,6 +943,21 @@ object MnnLocalModelsManager {
             item.safeCategories().any { it.equals("libs", ignoreCase = true) } ||
             ModelTypeUtils.isAsrModelByTags(safeTags) ||
             ModelTypeUtils.isTtsModelByTags(safeTags)
+    }
+
+    private fun deduplicateInstalledModels(
+        models: List<ModelItemWrapper>,
+    ): List<ModelItemWrapper> {
+        if (models.size <= 1) {
+            return models
+        }
+        val deduplicated = LinkedHashMap<String, ModelItemWrapper>(models.size)
+        models.forEach { wrapper ->
+            val modelId = wrapper.modelItem.modelId?.takeIf { it.isNotBlank() }
+                ?: return@forEach
+            deduplicated.putIfAbsent(modelId, wrapper)
+        }
+        return deduplicated.values.toList()
     }
 
     private fun buildMarketCandidateIds(item: ModelMarketItem): List<String> {
@@ -1264,6 +1289,14 @@ object MnnLocalModelsManager {
         val dir = File(context.cacheDir, "mnn_outputs").apply { mkdirs() }
         val safeId = modelId.replace("/", "_")
         return File(dir, "${safeId}_${System.currentTimeMillis()}.png").absolutePath
+    }
+
+    private suspend fun refreshInstalledModelCache(reason: ModelListManager.ChangeReason) {
+        runCatching {
+            ModelListManager.notifyModelListMayChange(reason)
+        }.onFailure { error ->
+            Log.w(TAG, "Failed to refresh installed model cache for reason=$reason", error)
+        }
     }
 
     private fun finalizeBenchmark(
