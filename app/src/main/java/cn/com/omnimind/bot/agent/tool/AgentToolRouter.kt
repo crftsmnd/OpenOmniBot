@@ -482,6 +482,9 @@ class AgentToolRouter(
                 }
             )
             val payloadJson = json.encodeToString(mapToJsonElement(outcome.toPayload()))
+            // 阻塞式 vlm_task 需要等 Agent 自己产出后续自然语言回复；
+            // 这里不能再触发旧的 onVlmTaskFinished 回调，否则 Flutter 会提前清理当前会话，
+            // 导致随后到达的 onAgentChatMessage / onAgentComplete 被丢弃。
             when (outcome.status) {
                 VlmToolOutcomeStatus.WAITING_INPUT -> {
                     val question = outcome.waitingQuestion
@@ -495,14 +498,12 @@ class AgentToolRouter(
                 }
                 VlmToolOutcomeStatus.ERROR,
                 VlmToolOutcomeStatus.CANCELLED -> {
-                    callback.onVlmTaskFinished()
                     ToolExecutionResult.Error(
                         "vlm_task",
                         outcome.errorMessage ?: outcome.message.ifBlank { "视觉执行失败" }
                     )
                 }
                 VlmToolOutcomeStatus.FINISHED -> {
-                    callback.onVlmTaskFinished()
                     ToolExecutionResult.ContextResult(
                         toolName = "vlm_task",
                         summaryText = outcome.finishedContent

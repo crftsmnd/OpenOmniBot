@@ -244,7 +244,7 @@ interface AgentCallback {
     suspend fun onPermissionRequired(missing: List<String>)
 
     /**
-     * 统一 Agent 的 VLM 子任务已完成（异步回调）
+     * 仅供旧版异步 VLM 任务链路使用；阻塞式统一 Agent 工具不应触发该回调。
      */
     suspend fun onVlmTaskFinished() = Unit
 }
