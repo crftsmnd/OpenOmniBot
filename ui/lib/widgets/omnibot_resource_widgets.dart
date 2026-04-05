@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:ui/services/office_preview_service.dart';
 import 'package:ui/services/omnibot_resource_service.dart';
+import 'package:ui/widgets/image_preview_overlay.dart';
 import 'package:video_player/video_player.dart';
 
 class OmnibotInlineResourceEmbed extends StatelessWidget {
@@ -162,7 +163,16 @@ class _OmnibotInlineImageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: () => _openMetadata(metadata),
+      onTap: () {
+        if (metadata.exists) {
+          ImagePreviewOverlay.show(
+            context,
+            source: FileImageSource(metadata.path),
+          );
+        } else {
+          _openMetadata(metadata);
+        }
+      },
       borderRadius: BorderRadius.circular(16),
       child: Ink(
         decoration: BoxDecoration(

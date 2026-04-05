@@ -385,6 +385,13 @@ mixin _ChatInputAreaComposerMixin
   }
 
   Widget _buildAttachmentPreview() {
+    // Collect all image sources for multi-image preview
+    final imageItems =
+        widget.attachments.where((a) => a.isImage).toList();
+    final imageSources = imageItems
+        .map((a) => FileImageSource(a.path) as ImagePreviewSource)
+        .toList();
+
     return SizedBox(
       height: 72,
       child: ListView.separated(
@@ -394,7 +401,8 @@ mixin _ChatInputAreaComposerMixin
         itemBuilder: (context, index) {
           final item = widget.attachments[index];
           if (item.isImage) {
-            return _buildImageAttachmentTile(item);
+            final imageIndex = imageItems.indexOf(item);
+            return _buildImageAttachmentTile(item, imageSources, imageIndex);
           }
           return _buildFileAttachmentTile(item);
         },
@@ -402,32 +410,43 @@ mixin _ChatInputAreaComposerMixin
     );
   }
 
-  Widget _buildImageAttachmentTile(ChatInputAttachment item) {
-    return Stack(
-      children: [
-        Container(
-          width: 72,
-          height: 72,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFD3E3FB), width: 1),
-            color: const Color(0xFFF1F6FF),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Image.file(
-            File(item.path),
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Center(
-              child: Icon(
-                Icons.image_not_supported_outlined,
-                size: 20,
-                color: Color(0xFF6A83AA),
+  Widget _buildImageAttachmentTile(
+    ChatInputAttachment item,
+    List<ImagePreviewSource> allSources,
+    int tappedIndex,
+  ) {
+    return GestureDetector(
+      onTap: () => ImagePreviewOverlay.showAll(
+        context,
+        sources: allSources,
+        initialIndex: tappedIndex.clamp(0, allSources.length - 1),
+      ),
+      child: Stack(
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFD3E3FB), width: 1),
+              color: const Color(0xFFF1F6FF),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Image.file(
+              File(item.path),
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Icon(
+                  Icons.image_not_supported_outlined,
+                  size: 20,
+                  color: Color(0xFF6A83AA),
+                ),
               ),
             ),
           ),
-        ),
-        _buildAttachmentRemoveButton(item.id),
-      ],
+          _buildAttachmentRemoveButton(item.id),
+        ],
+      ),
     );
   }
 
