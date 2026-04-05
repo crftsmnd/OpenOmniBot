@@ -391,6 +391,10 @@ mixin _ChatInputAreaComposerMixin
     final imageSources = imageItems
         .map((a) => FileImageSource(a.path) as ImagePreviewSource)
         .toList();
+    final heroTags = List.generate(
+      imageItems.length,
+      (i) => 'img_preview_input_${imageItems[i].id}',
+    );
 
     return SizedBox(
       height: 72,
@@ -402,7 +406,9 @@ mixin _ChatInputAreaComposerMixin
           final item = widget.attachments[index];
           if (item.isImage) {
             final imageIndex = imageItems.indexOf(item);
-            return _buildImageAttachmentTile(item, imageSources, imageIndex);
+            return _buildImageAttachmentTile(
+              item, imageSources, imageIndex, heroTags,
+            );
           }
           return _buildFileAttachmentTile(item);
         },
@@ -414,14 +420,15 @@ mixin _ChatInputAreaComposerMixin
     ChatInputAttachment item,
     List<ImagePreviewSource> allSources,
     int tappedIndex,
+    List<String> heroTags,
   ) {
-    final heroTag = 'img_preview_input_${item.id}';
+    final heroTag = heroTags[tappedIndex];
     return GestureDetector(
       onTap: () => ImagePreviewOverlay.showAll(
         context,
         sources: allSources,
         initialIndex: tappedIndex.clamp(0, allSources.length - 1),
-        heroTag: heroTag,
+        heroTags: heroTags,
       ),
       child: Stack(
         children: [

@@ -177,6 +177,10 @@ class MessageBubble extends StatelessWidget {
         .map(_resolveImageSource)
         .whereType<ImagePreviewSource>()
         .toList();
+    final heroTags = List.generate(
+      imageSources.length,
+      (i) => 'img_preview_${message.id}_$i',
+    );
 
     return Wrap(
       spacing: 8,
@@ -185,7 +189,7 @@ class MessageBubble extends StatelessWidget {
         if (_isImageAttachment(item)) {
           final imageIndex = imageAttachments.indexOf(item);
           return _buildImageAttachmentTile(
-            context, item, imageSources, imageIndex,
+            context, item, imageSources, imageIndex, heroTags,
           );
         }
         return _buildFileAttachmentChip(item);
@@ -198,8 +202,9 @@ class MessageBubble extends StatelessWidget {
     Map<String, dynamic> item,
     List<ImagePreviewSource> allSources,
     int tappedIndex,
+    List<String> heroTags,
   ) {
-    final heroTag = 'img_preview_${message.id}_$tappedIndex';
+    final heroTag = heroTags[tappedIndex];
     return GestureDetector(
       onTap: () {
         if (allSources.isNotEmpty) {
@@ -207,7 +212,7 @@ class MessageBubble extends StatelessWidget {
             context,
             sources: allSources,
             initialIndex: tappedIndex.clamp(0, allSources.length - 1),
-            heroTag: heroTag,
+            heroTags: heroTags,
           );
         }
       },

@@ -23,8 +23,8 @@ class MemoryImageSource extends ImagePreviewSource {
 
 /// Lightweight full-screen image preview overlay with pinch-to-zoom and swipe.
 ///
-/// Supports Hero-based zoom transition when [heroTag] is provided.
-/// Wrap the source thumbnail in a [Hero] widget with the same tag.
+/// Supports Hero-based zoom transition when [heroTags] is provided.
+/// Wrap each source thumbnail in a [Hero] widget with the matching tag.
 class ImagePreviewOverlay {
   ImagePreviewOverlay._();
 
@@ -38,23 +38,27 @@ class ImagePreviewOverlay {
       context,
       sources: [source],
       initialIndex: 0,
-      heroTag: heroTag,
+      heroTags: heroTag != null ? [heroTag] : null,
     );
   }
 
   /// Show preview for multiple images with swipe navigation.
+  ///
+  /// [heroTags] should contain one tag per source image, matching the
+  /// [Hero] tags on the corresponding thumbnails.
   static Future<void> showAll(
     BuildContext context, {
     required List<ImagePreviewSource> sources,
     int initialIndex = 0,
-    String? heroTag,
+    List<String>? heroTags,
   }) {
     assert(sources.isNotEmpty);
+    assert(heroTags == null || heroTags.length == sources.length);
     return Navigator.of(context).push(
       _ImagePreviewRoute(
         sources: sources,
         initialIndex: initialIndex,
-        heroTag: heroTag,
+        heroTags: heroTags,
       ),
     );
   }
@@ -64,12 +68,12 @@ class ImagePreviewOverlay {
 class _ImagePreviewRoute extends PageRoute<void> {
   final List<ImagePreviewSource> sources;
   final int initialIndex;
-  final String? heroTag;
+  final List<String>? heroTags;
 
   _ImagePreviewRoute({
     required this.sources,
     required this.initialIndex,
-    this.heroTag,
+    this.heroTags,
   });
 
   @override
@@ -102,7 +106,7 @@ class _ImagePreviewRoute extends PageRoute<void> {
     return _ImagePreviewPage(
       sources: sources,
       initialIndex: initialIndex,
-      heroTag: heroTag,
+      heroTags: heroTags,
       animation: animation,
     );
   }
@@ -111,13 +115,13 @@ class _ImagePreviewRoute extends PageRoute<void> {
 class _ImagePreviewPage extends StatefulWidget {
   final List<ImagePreviewSource> sources;
   final int initialIndex;
-  final String? heroTag;
+  final List<String>? heroTags;
   final Animation<double> animation;
 
   const _ImagePreviewPage({
     required this.sources,
     required this.initialIndex,
-    this.heroTag,
+    this.heroTags,
     required this.animation,
   });
 
@@ -125,78 +129,208 @@ class _ImagePreviewPage extends StatefulWidget {
   State<_ImagePreviewPage> createState() => _ImagePreviewPageState();
 }
 
-class _ImagePreviewPageState extends State<_ImagePreviewPage> {
+class _ImagePreviewPageState extends State<_ImagePreviewPage>
+    with SingleTickerProviderStateMixin {
   late final PageController _pageController;
   late int _currentIndex;
   bool _isZoomed = false;
 
+  // Pull-down-to-dismiss state
+  Offset _dismissOffset = Offset.zero;
+  Offset _pointerStartPos = Offset.zero;
+  int? _activePointerId;
+  bool _verticalDragActive = false;
+  bool _dragDirectionDecided = false;
+  late final AnimationController _snapBackController;
+  late Animation<Offset> _snapBackAnimation;
+
   bool get _hasMultipleImages => widget.sources.length > 1;
+
+  /// Dismiss progress 0.0 (idle) → 1.0 (fully dragged away).
+  double get _dismissProgress =>
+      (_dismissOffset.dy.abs() / 300).clamp(0.0, 1.0);
+
+  /// Resolve the hero tag for the given page index.
+  String? _heroTagAt(int index) {
+    if (widget.heroTags == null || index >= widget.heroTags!.length) {
+      return null;
+    }
+    return widget.heroTags![index];
+  }
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
+    _snapBackAnimation = const AlwaysStoppedAnimation(Offset.zero);
+    _snapBackController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    )..addListener(() {
+        setState(() => _dismissOffset = _snapBackAnimation.value);
+      });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _snapBackController.dispose();
     super.dispose();
   }
 
   void _dismiss() => Navigator.of(context).pop();
 
+  // --------------- Pointer tracking (Listener) ---------------
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (_isZoomed) return;
+
+    if (_activePointerId != null) {
+      // Second finger appeared → cancel any in-progress dismiss drag.
+      _cancelDrag();
+      return;
+    }
+
+    _snapBackController.stop();
+    _activePointerId = event.pointer;
+    _pointerStartPos = event.position;
+    _dragDirectionDecided = false;
+    _verticalDragActive = false;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _activePointerId || _isZoomed) return;
+
+    // Decide drag direction once the pointer moves far enough.
+    if (!_dragDirectionDecided) {
+      final delta = event.position - _pointerStartPos;
+      if (delta.distance < 10) return;
+      _dragDirectionDecided = true;
+      _verticalDragActive = delta.dy.abs() > delta.dx.abs();
+      if (!_verticalDragActive) return;
+    }
+
+    if (!_verticalDragActive) return;
+
+    setState(() {
+      _dismissOffset += Offset(0, event.delta.dy);
+    });
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    if (event.pointer != _activePointerId) return;
+    _activePointerId = null;
+
+    if (!_verticalDragActive) return;
+    _verticalDragActive = false;
+
+    if (_dismissProgress > 0.3) {
+      // Hero stays active so it flies from the dragged position back to
+      // the thumbnail during the route's reverse animation.
+      _dismiss();
+    } else {
+      _animateSnapBack();
+    }
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    if (event.pointer != _activePointerId) return;
+    _cancelDrag();
+  }
+
+  void _cancelDrag() {
+    _activePointerId = null;
+    if (_verticalDragActive && _dismissOffset != Offset.zero) {
+      _verticalDragActive = false;
+      _animateSnapBack();
+    } else {
+      _verticalDragActive = false;
+    }
+  }
+
+  void _animateSnapBack() {
+    _snapBackAnimation = Tween<Offset>(
+      begin: _dismissOffset,
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _snapBackController,
+      curve: Curves.easeOut,
+    ));
+    _snapBackController.forward(from: 0);
+  }
+
+  // --------------- Build ---------------
+
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final scale = 1.0 - _dismissProgress * 0.15;
 
-    return AnimatedBuilder(
-      animation: widget.animation,
-      builder: (context, child) {
-        return ColoredBox(
-          color: Color.fromRGBO(0, 0, 0, 0.87 * widget.animation.value),
-          child: child,
-        );
-      },
-      child: Stack(
-        children: [
-          // Image page view (swipeable)
-          PageView.builder(
-            controller: _pageController,
-            itemCount: widget.sources.length,
-            physics: _isZoomed
-                ? const NeverScrollableScrollPhysics()
-                : const BouncingScrollPhysics(),
-            onPageChanged: (index) => setState(() => _currentIndex = index),
-            itemBuilder: (context, index) {
-              // Only apply hero to the initially tapped image while it's visible
-              final shouldHero = index == widget.initialIndex &&
-                  _currentIndex == widget.initialIndex &&
-                  widget.heroTag != null;
-              return _InteractiveImagePage(
-                source: widget.sources[index],
-                onTap: _dismiss,
-                onScaleChanged: (zoomed) {
-                  if (_isZoomed != zoomed) setState(() => _isZoomed = zoomed);
+    return Listener(
+      onPointerDown: _onPointerDown,
+      onPointerMove: _onPointerMove,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerCancel,
+      child: AnimatedBuilder(
+        animation: widget.animation,
+        builder: (context, child) {
+          final bgOpacity =
+              0.87 * widget.animation.value * (1.0 - _dismissProgress);
+          return ColoredBox(
+            color: Color.fromRGBO(0, 0, 0, bgOpacity),
+            child: child,
+          );
+        },
+        child: Transform(
+          transform: Matrix4.identity()
+            ..translate(_dismissOffset.dx, _dismissOffset.dy)
+            ..scale(scale, scale),
+          alignment: Alignment.center,
+          child: Stack(
+            children: [
+              // Image page view (swipeable)
+              PageView.builder(
+                controller: _pageController,
+                itemCount: widget.sources.length,
+                physics: _isZoomed
+                    ? const NeverScrollableScrollPhysics()
+                    : const BouncingScrollPhysics(),
+                onPageChanged: (index) =>
+                    setState(() => _currentIndex = index),
+                itemBuilder: (context, index) {
+                  // Only the currently visible page gets a Hero tag to
+                  // avoid duplicate-tag conflicts from PageView caching.
+                  final tag = index == _currentIndex
+                      ? _heroTagAt(index)
+                      : null;
+                  return _InteractiveImagePage(
+                    source: widget.sources[index],
+                    onTap: _dismiss,
+                    onScaleChanged: (zoomed) {
+                      if (_isZoomed != zoomed) {
+                        setState(() => _isZoomed = zoomed);
+                      }
+                    },
+                    heroTag: tag,
+                  );
                 },
-                heroTag: shouldHero ? widget.heroTag : null,
-              );
-            },
-          ),
-
-          // Page indicator
-          if (_hasMultipleImages)
-            Positioned(
-              bottom: bottomPadding + 20,
-              left: 0,
-              right: 0,
-              child: FadeTransition(
-                opacity: widget.animation,
-                child: _buildPageIndicator(),
               ),
-            ),
-        ],
+
+              // Page indicator
+              if (_hasMultipleImages)
+                Positioned(
+                  bottom: bottomPadding + 20,
+                  left: 0,
+                  right: 0,
+                  child: FadeTransition(
+                    opacity: widget.animation,
+                    child: _buildPageIndicator(),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
