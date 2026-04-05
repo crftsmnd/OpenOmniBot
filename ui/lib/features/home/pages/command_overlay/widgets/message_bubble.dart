@@ -265,6 +265,7 @@ class MessageBubble extends StatelessWidget {
         return Image.memory(
           bytes,
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => _buildImageFallback(),
         );
       }
@@ -275,6 +276,7 @@ class MessageBubble extends StatelessWidget {
       return Image.network(
         url,
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => _buildImageFallback(),
       );
     }
@@ -284,6 +286,7 @@ class MessageBubble extends StatelessWidget {
         return Image.memory(
           bytes,
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => _buildImageFallback(),
         );
       }
@@ -294,6 +297,7 @@ class MessageBubble extends StatelessWidget {
       return Image.file(
         File(path),
         fit: BoxFit.cover,
+        gaplessPlayback: true,
         errorBuilder: (_, __, ___) => _buildImageFallback(),
       );
     }
@@ -399,12 +403,27 @@ class MessageBubble extends StatelessWidget {
     return '附件';
   }
 
-  Uint8List? _decodeDataUrlBytes(String value) {
+  /// Cache decoded data-URL bytes so that repeated [build] calls reuse
+  /// the same [Uint8List] instance.  This prevents [Image.memory] from
+  /// treating each rebuild as a brand-new image (cache-miss → flicker).
+  static final Map<int, Uint8List> _dataUrlBytesCache = {};
+  static const int _maxCacheEntries = 200;
+
+  static Uint8List? _decodeDataUrlBytes(String value) {
+    final key = value.hashCode;
+    final cached = _dataUrlBytesCache[key];
+    if (cached != null) return cached;
+
     final comma = value.indexOf(',');
     if (comma < 0 || comma + 1 >= value.length) return null;
     final base64Part = value.substring(comma + 1);
     try {
-      return base64Decode(base64Part);
+      final bytes = base64Decode(base64Part);
+      if (_dataUrlBytesCache.length >= _maxCacheEntries) {
+        _dataUrlBytesCache.remove(_dataUrlBytesCache.keys.first);
+      }
+      _dataUrlBytesCache[key] = bytes;
+      return bytes;
     } catch (_) {
       return null;
     }
