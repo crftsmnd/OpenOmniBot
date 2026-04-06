@@ -339,7 +339,7 @@ class _ChatToolActivityStripState extends State<ChatToolActivityStrip> {
       sections.add(preview);
     }
     if (sections.isEmpty) {
-      sections.add('暂无工具调用信息');
+      sections.add('No tool call info');
     }
     return sections.join('\n\n');
   }

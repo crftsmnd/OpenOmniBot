@@ -376,7 +376,7 @@ mixin _ChatPageBrowserMixin on _ChatPageStateBase {
     }
     _cancelNormalSurfaceModelReveal();
     if (!Platform.isAndroid) {
-      showToast('当前平台暂不支持浏览器工具视图', type: ToastType.warning);
+      showToast('Browser tool view not supported on current platform', type: ToastType.warning);
       return;
     }
     await _refreshLiveBrowserSessionSnapshot(syncRuntime: true);

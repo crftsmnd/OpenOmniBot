@@ -104,7 +104,7 @@ class _SettingsPageState extends State<SettingsPage> {
       setState(() {
         hideFromRecentsEnabled = !value;
       });
-      showToast('设置后台隐藏失败', type: ToastType.error);
+      showToast('Failed to set background hide', type: ToastType.error);
     }
   }
 
@@ -136,7 +136,7 @@ class _SettingsPageState extends State<SettingsPage> {
       showToast(value ? '任务完成后将自动返回聊天' : '任务完成后将停留在当前页面');
     } catch (e) {
       if (!mounted) return;
-      showToast('设置失败', type: ToastType.error);
+      showToast('Settings failed', type: ToastType.error);
     }
   }
 
@@ -299,8 +299,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final workspaceMemorySubtitle = !_workspaceMemoryLoaded
         ? '加载中...'
         : workspaceMemoryConfigured
-        ? '已启用 workspace 记忆（嵌入检索可用）'
-        : '使用 workspace 记忆（当前为词法检索）';
+        ? 'Workspace memory enabled (embedding retrieval available)'
+        : 'Using workspace memory (currently lexical retrieval)';
     final sections = _buildSections(workspaceMemorySubtitle);
 
     return Scaffold(
@@ -357,7 +357,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingItem(
             icon: Icons.cloud_sync_outlined,
             iconSvg: 'assets/home/mem0_cloud_setting_icon.svg',
-            title: 'Workspace 记忆配置',
+            title: 'Workspace Memory Config',
             subtitle: workspaceMemorySubtitle,
             onTap: () async {
               await GoRouterManager.pushForResult(
@@ -373,7 +373,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingItem(
             icon: Icons.extension_outlined,
             iconSvg: 'assets/home/mcp_tools_setting_icon.svg',
-            title: 'MCP 工具',
+            title: 'MCP Tools',
             subtitle: '添加、启停和管理远端 MCP 服务',
             onTap: () {
               GoRouterManager.push('/home/mcp_tools');
@@ -483,7 +483,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingItem(
             icon: Icons.info_outline,
             iconSvg: 'assets/home/about_icon.svg',
-            title: '关于小万',
+            title: 'About OmniBot',
             onTap: () {
               GoRouterManager.push('/my/about');
             },

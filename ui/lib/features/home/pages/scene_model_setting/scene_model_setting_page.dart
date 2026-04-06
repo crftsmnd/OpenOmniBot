@@ -61,8 +61,8 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
     'scene.compactor.context': '负责 VLM 执行链的上下文压缩与纠错',
     'scene.compactor.context.chat': 'Handles chat history compression',
     'scene.loading.sprite': '负责生成加载状态文案',
-    'scene.memory.embedding': '负责 workspace 记忆向量检索的嵌入模型',
-    'scene.memory.rollup': '负责夜间记忆整理策略模型',
+    'scene.memory.embedding': 'Embedding model for workspace memory vector retrieval',
+    'scene.memory.rollup': 'Model for nighttime memory organization strategy',
   };
 
   bool _isLoading = true;

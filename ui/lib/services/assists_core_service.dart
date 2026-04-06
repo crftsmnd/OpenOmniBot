@@ -90,7 +90,7 @@ class ModelAvailabilityCheckResult {
       return const ModelAvailabilityCheckResult(
         available: false,
         code: null,
-        message: '检测失败：返回为空',
+        message: 'Detection failed: empty response',
       );
     }
 
@@ -1347,7 +1347,7 @@ class AssistsMessageService {
       return ModelAvailabilityCheckResult(
         available: false,
         code: null,
-        message: e.message ?? '检测失败',
+        message: e.message ?? 'Detection failed',
       );
     } catch (e) {
       return ModelAvailabilityCheckResult(

@@ -476,7 +476,7 @@ mixin TaskExecutionHandler<T extends StatefulWidget> on State<T> {
           id: aiMessageId,
           type: 1,
           user: 2,
-          content: {'text': '该应用未授权，请先在设置中授权后再试', 'id': aiMessageId},
+          content: {'text': 'App not authorized. Please authorize in Settings first', 'id': aiMessageId},
         ),
       );
     });

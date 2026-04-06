@@ -110,7 +110,7 @@ class _TaskCenterPageState extends State<TaskCenterPage> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          '暂无任务',
+                          'No tasks',
                           style: TextStyle(
                             fontSize: 16,
                             color: Colors.grey[500],
@@ -237,7 +237,7 @@ class _TaskCenterPageState extends State<TaskCenterPage> {
                             children: [
                               Icon(Icons.edit, size: 18, color: Colors.grey[600]),
                               SizedBox(width: 8),
-                              Text('编辑'),
+                              Text('Edit'),
                             ],
                           ),
                         ),
@@ -247,7 +247,7 @@ class _TaskCenterPageState extends State<TaskCenterPage> {
                             children: [
                               Icon(Icons.delete, size: 18, color: Colors.grey[600]),
                               SizedBox(width: 8),
-                              Text('删除'),
+                              Text('Delete'),
                             ],
                           ),
                         ),

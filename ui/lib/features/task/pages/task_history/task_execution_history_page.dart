@@ -21,7 +21,7 @@ class TaskExecutionHistoryPage extends StatelessWidget {
             child: Column(
               children: const [
                 Text(
-                  '近3次任务执行历史',
+                  'Last 3 task execution history',
                   style: TextStyle(
                     fontSize: 16,
                     color: Colors.black87,
@@ -35,7 +35,7 @@ class TaskExecutionHistoryPage extends StatelessWidget {
             child: sections.isEmpty
                 ? const Center(
                     child: Text(
-                      '暂无执行历史',
+                      'No execution history',
                       style: TextStyle(fontSize: 14, color: Colors.black54),
                     ),
                   )

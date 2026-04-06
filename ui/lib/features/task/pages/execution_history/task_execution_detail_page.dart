@@ -353,7 +353,7 @@ class _TaskExecutionDetailPageState extends State<TaskExecutionDetailPage> {
         padding: const EdgeInsets.all(32),
         child: Center(
           child: Text(
-            '暂无总结内容',
+            'No summary content',
             style: TextStyle(
               fontSize: AppTextStyles.fontSizeMain,
               color: AppColors.text50,
@@ -521,7 +521,7 @@ class _TaskExecutionDetailPageState extends State<TaskExecutionDetailPage> {
       padding: const EdgeInsets.all(32),
       child: Center(
         child: Text(
-          '暂无执行记录',
+          'No execution records',
           style: TextStyle(
             fontSize: AppTextStyles.fontSizeMain,
             color: AppColors.text50,

@@ -46,7 +46,7 @@ class _TaskEditPageState extends State<TaskEditPage> with WidgetsBindingObserver
 
       final loadedTask = await TaskStorageService.getTaskById(widget.taskId);
       if (loadedTask == null) {
-        _errorMessage = '未找到任务数据';
+        _errorMessage = 'Task data not found';
         initFailed();
         return;
       }
@@ -70,7 +70,7 @@ class _TaskEditPageState extends State<TaskEditPage> with WidgetsBindingObserver
 
   void initFailed() {
     print(_errorMessage);
-    Fluttertoast.showToast(msg: '任务数据加载失败');
+    Fluttertoast.showToast(msg: 'Task data loading failed');
     Navigator.of(context).pop();
   }
 
@@ -121,7 +121,7 @@ class _TaskEditPageState extends State<TaskEditPage> with WidgetsBindingObserver
 
       final success = await TaskStorageService.saveTask(newTask);
       if (!success) {
-        _errorMessage = '本地任务保存失败';
+        _errorMessage = 'Local task save failed';
         saveFailed();
         return;
       }
@@ -134,7 +134,7 @@ class _TaskEditPageState extends State<TaskEditPage> with WidgetsBindingObserver
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('任务保存成功'),
+          content: Text('Task saved successfully'),
           backgroundColor: Colors.green,
         ),
       );
@@ -158,7 +158,7 @@ class _TaskEditPageState extends State<TaskEditPage> with WidgetsBindingObserver
 
   void saveFailed() {
     print(_errorMessage);
-    Fluttertoast.showToast(msg: '任务数据保存失败');
+    Fluttertoast.showToast(msg: 'Task data saving failed');
   }
 
   @override
@@ -195,7 +195,7 @@ class _TaskEditPageState extends State<TaskEditPage> with WidgetsBindingObserver
         child: Column(
           children: [
             SizedBox(height: 50),
-            BotStatus(status: BotStatusType.hint, hintText: '请编辑任务内容。'),
+            BotStatus(status: BotStatusType.hint, hintText: 'Please edit task content.'),
             SizedBox(height: 15),
             EditTaskCard(
               selectedDate: taskDate,

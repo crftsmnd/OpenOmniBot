@@ -397,8 +397,8 @@ class AppDialog {
     BuildContext context, {
     required String title,
     dynamic content,
-    String cancelText = '取消',
-    String confirmText = '确认',
+    String cancelText = 'Cancel',
+    String confirmText = 'Confirm',
     bool barrierDismissible = true,
     double? buttonTextSize,
     Color? confirmButtonColor,
@@ -424,7 +424,7 @@ class AppDialog {
     BuildContext context, {
     required String title,
     dynamic content,
-    String confirmText = '确定',
+    String confirmText = 'Confirm',
     bool barrierDismissible = true,
   }) {
     return showDialog<void>(
@@ -447,8 +447,8 @@ class AppDialog {
     dynamic content,
     String? hintText,
     String? initialValue,
-    String cancelText = '取消',
-    String confirmText = '确认',
+    String cancelText = 'Cancel',
+    String confirmText = 'Confirm',
     bool barrierDismissible = true,
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
@@ -524,8 +524,8 @@ Future<bool?> showCustomConfirmDialog(
   BuildContext context, {
   required String title,
   required dynamic content,
-  String cancelText = '取消',
-  String confirmText = '确认',
+  String cancelText = 'Cancel',
+  String confirmText = 'Confirm',
 }) {
   return AppDialog.confirm(
     context,
@@ -741,7 +741,7 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
               ),
               SizedBox(width: 12),
               Text(
-                '请稍候...',
+                'Please wait...',
                 style: TextStyle(
                   color: Colors.black.withValues(alpha: 0.70),
                   fontSize: 14,
@@ -776,7 +776,7 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
                 ),
                 child: Center(
                   child: Text(
-                    widget.confirmText ?? '确定',
+                    widget.confirmText ?? 'Confirm',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: const Color(0xFF00AEFF),
@@ -811,7 +811,7 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
               ),
               child: Center(
                 child: Text(
-                  widget.cancelText ?? '取消',
+                  widget.cancelText ?? 'Cancel',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: const Color(0xFF00AEFF),
@@ -854,7 +854,7 @@ class _AppDialogWidgetState extends State<_AppDialogWidget> {
               ),
               child: Center(
                 child: Text(
-                  widget.confirmText ?? '确认',
+                  widget.confirmText ?? 'Confirm',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,

@@ -480,8 +480,8 @@ Future<bool> checkAccessibilityPermission(BuildContext context) async {
     // 没有权限，弹出对话框
     final result = await AppDialog.confirm(
       context,
-      title: '无障碍权限',
-      content: '每次开启App需重新授权无障碍的权限，这也是为了你的安全～',
+      title: 'Accessibility Permission',
+      content: 'Accessibility permission needs to be re-authorized each time you open the app, for your security~',
       cancelText: '取消',
       confirmText: '去授权',
     );

@@ -80,7 +80,7 @@ class _WorkspaceMemorySettingPageState
         _rollupEnabled = rollup.enabled;
       });
     } catch (e) {
-      showToast('加载 workspace 记忆配置失败', type: ToastType.error);
+      showToast('Failed to load workspace memory config', type: ToastType.error);
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -163,7 +163,7 @@ class _WorkspaceMemorySettingPageState
     } catch (e) {
       if (!mounted) return;
       setState(() => _embeddingEnabled = !enabled);
-      showToast('记忆嵌入开关更新失败', type: ToastType.error);
+      showToast('Memory embedding switch update failed', type: ToastType.error);
     }
   }
 
@@ -215,7 +215,7 @@ class _WorkspaceMemorySettingPageState
               padding: const EdgeInsets.all(16),
               children: [
                 _buildSwitchCard(
-                  title: '记忆嵌入检索',
+                  title: 'Memory Embedding Retrieval',
                   subtitle: _embeddingConfig?.configured == true
                       ? '已配置，可使用向量检索'
                       : '未配置，将自动降级为词法检索',
@@ -230,7 +230,7 @@ class _WorkspaceMemorySettingPageState
                 ),
                 const SizedBox(height: 12),
                 _buildSwitchCard(
-                  title: '夜间记忆整理（22:00）',
+                  title: 'Nighttime Memory Cleanup (22:00)',
                   subtitle:
                       '最近运行：${_formatTime(_rollupStatus?.lastRunAtMillis)}\n下次运行：${_formatTime(_rollupStatus?.nextRunAtMillis)}',
                   value: _rollupEnabled,
@@ -252,7 +252,7 @@ class _WorkspaceMemorySettingPageState
                 ),
                 const SizedBox(height: 12),
                 _buildEditorCard(
-                  title: 'MEMORY.md（长期记忆）',
+                  title: 'MEMORY.md (Long-term Memory)',
                   controller: _memoryController,
                   saving: _savingMemory,
                   onSave: _saveMemory,

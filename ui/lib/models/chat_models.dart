@@ -102,7 +102,7 @@ class ChatMessage {
   factory ChatMessage.fromBotMessage(BotMessage botMessage) {
     return ChatMessage(
       id: botMessage.id,
-      text: botMessage.text ?? '正在回复...',
+      text: botMessage.text ?? 'Replying...',
       type: MessageType.bot,
       timestamp: botMessage.timestamp,
       blocks: botMessage.blocks,

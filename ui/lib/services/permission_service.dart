@@ -24,8 +24,8 @@ class PermissionService {
       iconPath: 'assets/welcome/permission_installed_apps.svg',
       iconWidth: 32,
       iconHeight: 32,
-      name: '公共文件访问',
-      description: '允许 agent 读取和操作安卓公共存储中的文件与文件夹',
+      name: 'Public File Access',
+      description: 'Allows agent to read and manipulate files and folders in Android public storage',
     ),
   };
 

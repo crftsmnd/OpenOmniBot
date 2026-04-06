@@ -202,7 +202,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
             .toSet();
         _hasInitializedSelection = true;
         _isDetecting = false;
-        _detectError = e.message ?? '检测 Alpine 环境失败';
+        _detectError = e.message ?? 'Alpine environment detection failed';
       });
     } catch (_) {
       if (!mounted) {
@@ -215,7 +215,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
             .toSet();
         _hasInitializedSelection = true;
         _isDetecting = false;
-        _detectError = '检测 Alpine 环境失败';
+        _detectError = 'Alpine environment detection failed';
       });
     }
   }
@@ -243,7 +243,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       setState(() {
         _autoStartTasks = const <EmbeddedTerminalAutoStartTask>[];
         _isAutoStartLoading = false;
-        _autoStartError = e.message ?? '读取自启动任务失败';
+        _autoStartError = e.message ?? 'Failed to read auto-start tasks';
       });
     } catch (_) {
       if (!mounted) {
@@ -252,7 +252,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       setState(() {
         _autoStartTasks = const <EmbeddedTerminalAutoStartTask>[];
         _isAutoStartLoading = false;
-        _autoStartError = '读取自启动任务失败';
+        _autoStartError = 'Failed to read auto-start tasks';
       });
     }
   }
@@ -270,9 +270,9 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
         setupPackageIds: _selectedPackageIds.toList(growable: false),
       );
     } on PlatformException catch (e) {
-      showToast(e.message ?? '打开终端环境配置失败', type: ToastType.error);
+      showToast(e.message ?? 'Failed to open terminal environment config', type: ToastType.error);
     } catch (_) {
-      showToast('打开终端环境配置失败', type: ToastType.error);
+      showToast('Failed to open terminal environment config', type: ToastType.error);
     } finally {
       if (mounted) {
         setState(() {
@@ -307,9 +307,9 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
       if (!mounted) return;
       showToast(task == null ? '已新增自启动任务' : '已更新自启动任务');
     } on PlatformException catch (e) {
-      showToast(e.message ?? '保存自启动任务失败', type: ToastType.error);
+      showToast(e.message ?? 'Failed to save auto-start task', type: ToastType.error);
     } catch (_) {
-      showToast('保存自启动任务失败', type: ToastType.error);
+      showToast('Failed to save auto-start task', type: ToastType.error);
     } finally {
       if (mounted) {
         setState(() {

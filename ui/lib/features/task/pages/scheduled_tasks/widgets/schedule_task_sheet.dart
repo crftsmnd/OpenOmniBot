@@ -154,7 +154,7 @@ class _ScheduleTaskSheetState extends State<ScheduleTaskSheet> {
                 children: [
                   Expanded(
                     child: Text(
-                      '设置定时任务',
+                      'Set Scheduled Task',
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w600,
@@ -612,7 +612,7 @@ class _CountdownInputDialogState extends State<_CountdownInputDialog> {
     final minutes = int.tryParse(_controller.text.trim());
     if (minutes == null || minutes <= 0 || minutes > 1440) {
       setState(() {
-        _errorText = '请输入 1-1440 之间的分钟数';
+        _errorText = 'Please enter minutes between 1-1440';
       });
       return;
     }

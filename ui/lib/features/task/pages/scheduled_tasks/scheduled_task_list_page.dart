@@ -177,7 +177,7 @@ class _ScheduledTaskListPageState extends State<ScheduledTaskListPage> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除定时任务'),
-        content: Text('确定要删除"${task.title}"的定时任务吗？'),
+        content: Text('Confirm delete scheduled task?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -308,7 +308,7 @@ class _ScheduledTaskListPageState extends State<ScheduledTaskListPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         const Text(
-                          '定时任务已更新',
+                          'Scheduled task updated',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -456,7 +456,7 @@ class _ScheduledTaskListPageState extends State<ScheduledTaskListPage> {
             ),
                 Row(
               children: [
-                _buildTabButton(label: '定时任务', tabIndex: _scheduleTab),
+                _buildTabButton(label: 'Scheduled Tasks', tabIndex: _scheduleTab),
                 _buildTabButton(label: '闹钟列表', tabIndex: _alarmTab),
               ],
             ),
@@ -530,12 +530,12 @@ class _ScheduledTaskListPageState extends State<ScheduledTaskListPage> {
           ),
           const SizedBox(height: 16),
           const Text(
-            '暂无定时任务',
+            'No scheduled tasks',
             style: TextStyle(fontSize: 16, color: AppColors.text70),
           ),
           const SizedBox(height: 8),
           const Text(
-            '在任务记录中点击闹钟图标添加',
+            'Add from task records by clicking alarm icon',
             style: TextStyle(fontSize: 14, color: AppColors.text50),
           ),
         ],
@@ -551,7 +551,7 @@ class _ScheduledTaskListPageState extends State<ScheduledTaskListPage> {
           const Icon(Icons.alarm_outlined, size: 64, color: AppColors.text50),
           const SizedBox(height: 16),
           const Text(
-            '暂无应用内闹钟',
+            'No in-app alarms',
             style: TextStyle(fontSize: 16, color: AppColors.text70),
           ),
           const SizedBox(height: 8),

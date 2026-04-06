@@ -955,7 +955,7 @@ class _ChatMessageListState extends State<ChatMessageList> {
         behavior: HitTestBehavior.opaque,
         child: Center(
           child: Text(
-            '有什么可以帮助你的？',
+            'How can I help you?',
             style: TextStyle(
               color: widget.visualProfile.secondaryTextColor,
               fontSize: 14,

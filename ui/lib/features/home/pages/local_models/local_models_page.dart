@@ -577,7 +577,7 @@ class _LocalModelsPageState extends State<LocalModelsPage>
       showToast('已更新当前推理模型');
       _refreshInstalled(silent: true);
     } catch (error) {
-      showToast('设置当前模型失败', type: ToastType.error);
+      showToast('Failed to set current model', type: ToastType.error);
     }
   }
 
@@ -708,7 +708,7 @@ class _LocalModelsPageState extends State<LocalModelsPage>
       setState(() {
         _config = config;
       });
-      showToast('语音模型设置已更新');
+      showToast('Voice model settings updated');
     } catch (error) {
       showToast('更新语音模型失败', type: ToastType.error);
     }

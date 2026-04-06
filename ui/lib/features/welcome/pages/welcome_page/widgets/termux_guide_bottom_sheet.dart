@@ -161,7 +161,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
         GestureDetector(
           onTap: () => Navigator.of(context).pop(),
           child: Text(
-            '稍后设置',
+            'Set Later',
             style: TextStyle(
               color: AppColors.text.withValues(alpha: 0.55),
               fontSize: 12,
@@ -263,7 +263,7 @@ class _TermuxGuideBottomSheetState extends State<TermuxGuideBottomSheet>
         _GuideItem(
           index: '4',
           title: '异常时重新检查',
-          description: '如果终端输出异常或基础包缺失，可以在设置页重新执行环境检查，并确认网络正常。',
+          description: 'If terminal output is abnormal or base packages are missing, go to Settings to re-run environment check and ensure network is working.',
         ),
       ],
     );

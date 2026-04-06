@@ -127,7 +127,7 @@ class _PermissionGuideDetailPageState extends State<PermissionGuideDetailPage> {
           ),
           onPressed: _openSystemSettings,
           child: const Text(
-            '我已了解，去设置',
+            'I understand, go to settings',
             style: TextStyle(
               color: Colors.white,
               fontSize: 15,
@@ -319,7 +319,7 @@ class _PermissionGuideDetailPageState extends State<PermissionGuideDetailPage> {
       if (!mounted) {
         return;
       }
-      showToast('打开系统设置失败', type: ToastType.error);
+      showToast('Failed to open system settings', type: ToastType.error);
     }
   }
 }

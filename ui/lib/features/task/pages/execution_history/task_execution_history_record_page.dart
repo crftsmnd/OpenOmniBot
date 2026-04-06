@@ -625,9 +625,9 @@ class _TaskExecutionHistoryRecordPageState
     );
     if (!mounted) return;
     if (success) {
-      showToast('任务开始执行', type: ToastType.success);
+      showToast('Task started', type: ToastType.success);
     } else {
-      showToast('任务执行失败', type: ToastType.error);
+      showToast('Task execution failed', type: ToastType.error);
     }
   }
 
@@ -664,7 +664,7 @@ class _TaskExecutionHistoryRecordPageState
     ScheduledTaskSchedulerService.scheduleTask(result);
     await _loadScheduledTaskKeys();
     if (mounted) {
-      showToast('定时任务已设置', type: ToastType.success);
+      showToast('Scheduled task set', type: ToastType.success);
     }
   }
 
@@ -848,7 +848,7 @@ class _TaskExecutionHistoryRecordPageState
 
       // 显示删除结果
       if (successCount > 0) {
-        showToast('已删除', type: ToastType.success);
+        showToast('Deleted', type: ToastType.success);
       }
     }
   }
@@ -883,10 +883,10 @@ class _TaskExecutionHistoryRecordPageState
   void _deleteExecutionRecord(int recordId) {
     AppDialog.confirm(
       context,
-      title: '确定删除吗？',
-      content: '删除后该内容将不可找回',
+      title: 'Confirm delete?',
+      content: 'Deleted content cannot be recovered',
       cancelText: '取消',
-      confirmText: '删除',
+      confirmText: 'Delete',
       confirmButtonColor: AppColors.alertRed,
     ).then((result) async {
       if (result == true) {
@@ -900,7 +900,7 @@ class _TaskExecutionHistoryRecordPageState
     try {
       bool success = await CacheUtil.deleteExecutionRecordById(recordId);
       if (!success) {
-        showToast('删除失败', type: ToastType.error);
+        showToast('Delete failed', type: ToastType.error);
         return;
       }
 
@@ -909,14 +909,14 @@ class _TaskExecutionHistoryRecordPageState
         taskExecutionInfos.removeWhere((record) => record.id == recordId);
       });
 
-      showToast('删除成功', type: ToastType.success);
+      showToast('Delete successful', type: ToastType.success);
 
       // 重新加载标签统计
       await _loadExecutionTags();
       _loadMemorySummary();
     } catch (e) {
       print('Error deleting card: $e');
-      showToast('删除失败', type: ToastType.error);
+      showToast('Delete failed', type: ToastType.error);
     }
   }
 
@@ -936,7 +936,7 @@ class _TaskExecutionHistoryRecordPageState
       appBar: _isSelectionMode
           ? _buildSelectionAppBar(filterRecords)
           : const CommonAppBar(
-              title: '任务记录',
+              title: 'Task Records',
               showAiBadge: true,
               primary: true,
             ),
@@ -1078,7 +1078,7 @@ class _TaskExecutionHistoryRecordPageState
           ),
           const SizedBox(height: 12),
           Text(
-            '暂无执行记录',
+            'No execution records',
             style: TextStyle(
               fontSize: AppTextStyles.fontSizeH3,
               fontWeight: AppTextStyles.fontWeightMedium,
@@ -1092,7 +1092,7 @@ class _TaskExecutionHistoryRecordPageState
             alignment: Alignment.center,
             width: 192,
             child: Text(
-              '小万为你执行的任务，后续都会在此展示',
+              'Tasks executed by OmniBot will be shown here',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: AppTextStyles.fontSizeMain,

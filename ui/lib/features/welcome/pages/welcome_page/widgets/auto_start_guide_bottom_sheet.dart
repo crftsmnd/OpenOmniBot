@@ -62,7 +62,7 @@ class _AutoStartGuideBottomSheetState extends State<AutoStartGuideBottomSheet>
   final PageController _pageController = PageController(viewportFraction: 0.8);
   static const List<_GuidePageData> _guidePages = [
     _GuidePageData(
-      title: '打开"设置",搜索"应用启动管理"',
+      title: 'Open Settings, search App Startup Management',
       subtitle: '开启该权限后，可保证小万在后台持续为您提供陪伴，不会被系统识别为异常应用，您可通过搜索找到该功能',
       imagePath: 'assets/welcome/auto_start_guide_1.png',
     ),
@@ -208,7 +208,7 @@ class _AutoStartGuideBottomSheetState extends State<AutoStartGuideBottomSheet>
           GestureDetector(
             onTap: () => Navigator.of(context).pop(),
             child: Text(
-              '稍后设置',
+              'Set Later',
               style: TextStyle(
                 color: Colors.black.withOpacity(0.50),
                 fontSize: 12,
@@ -346,7 +346,7 @@ class _AutoStartGuideBottomSheetState extends State<AutoStartGuideBottomSheet>
                 ),
                 alignment: Alignment.center,
                 child: const Text(
-                  '去设置',
+                  'Go to Settings',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w400,

@@ -537,7 +537,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
               ),
             ),
             subtitle: const Text(
-              '同时作用于聊天页和 Workspace 页面，并自动保存',
+              'Applies to chat and workspace pages, auto-saves',
               style: TextStyle(fontSize: 12, color: AppColors.text70),
             ),
             value: _draftConfig.enabled,

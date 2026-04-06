@@ -56,7 +56,7 @@ class OmnibotOfficePreviewService {
         'office_word' => _parseWordPreview(archive),
         'office_sheet' => _parseWorkbookPreview(archive),
         'office_slide' => _parseSlidePreview(archive),
-        _ => throw StateError('暂不支持该 Office 文件类型'),
+        _ => throw StateError('Office file type not supported'),
       };
     } on XmlParserException catch (error) {
       throw StateError('Office 文件结构解析失败: ${error.message}');
@@ -86,7 +86,7 @@ class OmnibotOfficePreviewService {
     }
 
     if (paragraphs.isEmpty) {
-      throw StateError('未找到可预览的 Word 文本内容');
+      throw StateError('No previewable Word text content found');
     }
 
     return OmnibotOfficePreviewData(
@@ -98,7 +98,7 @@ class OmnibotOfficePreviewService {
       sections: <OmnibotOfficePreviewSection>[
         OmnibotOfficePreviewSection(
           title: '正文',
-          subtitle: '滚动查看文档提取内容',
+          subtitle: 'Scroll to view extracted content',
           lines: paragraphs,
         ),
       ],
@@ -152,7 +152,7 @@ class OmnibotOfficePreviewService {
     }
 
     if (sections.isEmpty) {
-      throw StateError('未找到可预览的 Excel 工作表内容');
+      throw StateError('No previewable Excel sheet content found');
     }
 
     return OmnibotOfficePreviewData(
@@ -208,7 +208,7 @@ class OmnibotOfficePreviewService {
     if (sparseRows.isEmpty) {
       return OmnibotOfficePreviewSection(
         title: sheetName,
-        subtitle: '未提取到单元格内容',
+        subtitle: 'No cell content extracted',
         lines: const <String>['该工作表暂无可预览文本'],
       );
     }

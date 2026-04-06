@@ -270,7 +270,7 @@ class _FourthWelcomePageState extends State<FourthWelcomePage>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '设置权限',
+          'Set Permissions',
           style: TextStyle(
             color: AppColors.text,
             fontSize: 20,

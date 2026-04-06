@@ -47,7 +47,7 @@ class AgentScheduleBridgeService {
       normalizedTask,
     );
     if (!saved) {
-      throw StateError('定时任务保存失败');
+      throw StateError('Scheduled task save failed');
     }
     if (normalizedTask.isEnabled) {
       ScheduledTaskSchedulerService.scheduleTask(normalizedTask);
@@ -148,7 +148,7 @@ class AgentScheduleBridgeService {
       updated,
     );
     if (!saved) {
-      throw StateError('定时任务更新失败');
+      throw StateError('Scheduled task update failed');
     }
     if (updated.isEnabled) {
       ScheduledTaskSchedulerService.scheduleTask(updated);
@@ -179,7 +179,7 @@ class AgentScheduleBridgeService {
       taskId,
     );
     if (!deleted) {
-      throw StateError('定时任务删除失败');
+      throw StateError('Scheduled task delete failed');
     }
     return {
       'success': true,

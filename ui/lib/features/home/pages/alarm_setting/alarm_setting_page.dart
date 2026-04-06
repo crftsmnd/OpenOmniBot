@@ -127,7 +127,7 @@ class _AlarmSettingPageState extends State<AlarmSettingPage> {
     });
 
     if (payload['success'] == true) {
-      showToast('闹钟设置已保存', type: ToastType.success);
+      showToast('Alarm settings saved', type: ToastType.success);
       return;
     }
 
