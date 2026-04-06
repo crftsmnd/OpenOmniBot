@@ -82,7 +82,7 @@ class _AuthorizeSettingPageState extends State<AuthorizeSettingPage> with Widget
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
-      appBar: const CommonAppBar(title: '应用权限授权', primary: true),
+      appBar: const CommonAppBar(title: 'App Permissions', primary: true),
       body: SafeArea(
         top: false,
         child: SingleChildScrollView(
@@ -93,8 +93,8 @@ class _AuthorizeSettingPageState extends State<AuthorizeSettingPage> with Widget
               // 通知设置组
               _buildSettingsCard([
                 _buildSwitchItem(
-                  title: '接收消息通知',
-                  subtitle: '打开后可以及时了解任务进展',
+                  title: 'Message Notifications',
+                  subtitle: 'Get task progress updates',
                   value: notificationEnabled,
                   onChanged: (val) async {
                     await CacheUtil.cacheBool("notification_enabled", val);
@@ -110,8 +110,8 @@ class _AuthorizeSettingPageState extends State<AuthorizeSettingPage> with Widget
               // 权限设置组
               _buildSettingsCard([
                 _buildPermissionItem(
-                  title: '后台运行权限',
-                  subtitle: '小万可以在陪伴时更了解您的喜好',
+                  title: 'Background Run Permission',
+                  subtitle: 'OmniBot can learn your preferences',
                   isEnabled: _backgroundRunning,
                   isTop: true,
                   onTap: () {
@@ -119,23 +119,23 @@ class _AuthorizeSettingPageState extends State<AuthorizeSettingPage> with Widget
                   },
                 ),
                 _buildPermissionItem(
-                  title: '悬浮窗权限',
-                  subtitle: '小万可在屏幕中实时活动，随时给予陪伴',
+                  title: 'Floating Window Permission',
+                  subtitle: 'OmniBot can show on screen for companionship',
                   isEnabled: _overlayPermission,
                   onTap: () {
                     spePermission.invokeMethod('openOverlaySettings');
                   },
                 ),
                 _buildPermissionItem(
-                  title: '应用列表读取',
-                  subtitle: '小万可以知道能帮你做什么事情',
+                  title: 'App List Reading',
+                  subtitle: 'OmniBot can know what it can do for you',
                   isEnabled: _installedAppsPermission,
                   onTap: () {
                     spePermission.invokeMethod('openInstalledAppsSettings');
                   },
                 ),
                 _buildPermissionItem(
-                  title: '无障碍辅助权限',
+                  title: 'Accessibility Permission',
                   subtitle: '小万执行任务时，需要给予我操作的权限',
                   isEnabled: _accessibilityPermission,
                   isBottom: true,

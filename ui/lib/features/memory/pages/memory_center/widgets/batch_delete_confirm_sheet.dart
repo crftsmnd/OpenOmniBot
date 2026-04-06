@@ -12,7 +12,7 @@ class BatchDeleteConfirmSheet extends StatelessWidget {
   const BatchDeleteConfirmSheet({
     Key? key,
     required this.count,
-    this.unit = '记忆',
+    this.unit = 'Memory',
   }) : super(key: key);
   @override
   Widget build(BuildContext context) {

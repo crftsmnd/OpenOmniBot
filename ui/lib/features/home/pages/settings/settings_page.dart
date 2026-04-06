@@ -305,7 +305,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CommonAppBar(title: '设置', primary: true),
+      appBar: const CommonAppBar(title: 'Settings', primary: true),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -420,7 +420,7 @@ class _SettingsPageState extends State<SettingsPage> {
         items: [
           _SettingItem(
             icon: Icons.alarm_outlined,
-            title: '闹钟设置',
+            title: 'Alarm Settings',
             subtitle: '配置默认铃声、本地 mp3 或 mp3 直链',
             onTap: () {
               GoRouterManager.push('/home/alarm_setting');
@@ -428,8 +428,8 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           _SettingItem(
             icon: Icons.wallpaper_outlined,
-            title: '外观设置',
-            subtitle: '配置共享背景图、聊天字号和文本颜色',
+            title: 'Appearance Settings',
+            subtitle: 'Configure shared background, chat text size and color',
             onTap: () {
               GoRouterManager.push('/home/background_setting');
             },
@@ -452,7 +452,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingItem(
             icon: Icons.chat_outlined,
             iconSvg: 'assets/home/auto_back_chat_setting_icon.svg',
-            title: '任务完成后自动回聊天',
+            title: 'Auto return to chat after task',
             subtitle: '关闭后，任务结束将停留在当前完成页面',
             trailing: _buildSwitchTrailing(
               value: _autoBackToChatAfterTaskEnabled,

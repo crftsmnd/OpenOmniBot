@@ -296,7 +296,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
             _buildMenuSection([
               _DrawerMenuItem(
                 icon: 'assets/home/setting_icon.svg',
-                title: '设置',
+                title: 'Settings',
                 onTap: () {
                   Navigator.pop(context);
                   GoRouterManager.push('/home/settings');
@@ -578,7 +578,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '聊天记录',
+                  'Chat History',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
@@ -649,7 +649,7 @@ class HomeDrawerState extends ConsumerState<HomeDrawer> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
-              '暂无聊天记录',
+              'No Chat History',
               style: TextStyle(
                 fontSize: 14,
                 color: AppColors.text.withOpacity(0.4),

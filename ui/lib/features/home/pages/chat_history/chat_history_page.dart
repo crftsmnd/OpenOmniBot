@@ -202,9 +202,9 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
     );
   }
 
-  String get _pageTitle => widget.archivedOnly ? '归档对话' : '聊天记录';
+  String get _pageTitle => widget.archivedOnly ? 'Archived Chats' : 'Chat History';
 
-  String get _emptyTitle => widget.archivedOnly ? '暂无归档对话' : '暂无聊天记录';
+  String get _emptyTitle => widget.archivedOnly ? 'No Archived Chats' : 'No Chat History';
 
   List<ConversationSlideAction> _buildActions(ConversationModel conversation) {
     final primaryAction = ConversationSlideAction(
@@ -327,7 +327,7 @@ class _ChatHistoryPageState extends State<ChatHistoryPage> {
     }
 
     return Text(
-      '左滑聊天记录即可归档',
+      'Swipe left to archive chat',
       style: TextStyle(fontSize: 13, color: Colors.grey[500]),
     );
   }

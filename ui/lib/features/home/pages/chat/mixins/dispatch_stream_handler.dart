@@ -271,7 +271,7 @@ mixin DispatchStreamHandler<T extends StatefulWidget> on State<T> {
           type: 1,
           user: 2,
           content: {
-            'text': '统一 Agent 已启用，旧聊天分发链路已移除，请检查模型配置后重试。',
+            'text': 'Unified Agent enabled. Old chat chain removed. Check model config and retry.',
             'id': '$taskID-disabled',
           },
           isError: true,

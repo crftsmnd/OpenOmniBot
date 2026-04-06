@@ -132,7 +132,7 @@ String resolveAgentToolTypeLabel(Map<String, dynamic> cardData) {
     case 'calendar':
       return '日历';
     case 'memory':
-      return '记忆';
+      return 'Memory';
     case 'skill':
       return 'Skill';
     case 'subagent':
@@ -140,7 +140,7 @@ String resolveAgentToolTypeLabel(Map<String, dynamic> cardData) {
     case 'mcp':
       return 'MCP';
     default:
-      return '工具';
+      return 'Tools';
   }
 }
 

@@ -319,7 +319,7 @@ class _ChatPreviewChrome extends StatelessWidget {
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
-              '聊天文本 · ${visualProfile.previewToneLabel}',
+              'Chat Text: ${visualProfile.previewToneLabel}',
               style: TextStyle(
                 color: visualProfile.secondaryTextColor,
                 fontSize: 11 * textScale,
@@ -335,7 +335,7 @@ class _ChatPreviewChrome extends StatelessWidget {
               _PreviewMessageCard(
                 alignment: Alignment.centerLeft,
                 widthFactor: 0.66,
-                title: '这是一段聊天文本示例',
+                title: 'This is a sample chat text',
                 subtitle: '会根据背景整体深浅切换',
                 visualProfile: visualProfile,
                 userStyle: false,

@@ -409,7 +409,7 @@ mixin _ChatPageConversationFlowMixin on _ChatPageStateBase {
   @override
   Future<void> _sendChatMessage(String aiMessageId) async {
     if (!_isOpenClawSurface) {
-      handleAgentError('统一 Agent 已启用，旧聊天链路已移除，请检查配置后重试。');
+      handleAgentError('Unified Agent enabled. Old chat chain removed. Check config and retry.');
       return;
     }
     try {

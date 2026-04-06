@@ -484,7 +484,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
                 children: BackgroundPreviewKind.values.map((kind) {
                   final selected = _previewKind == kind;
                   final label = kind == BackgroundPreviewKind.chat
-                      ? '聊天预览'
+                      ? 'Chat Preview'
                       : 'Workspace 预览';
                   return ChoiceChip(
                     key: ValueKey('background-preview-kind-${kind.name}'),
@@ -645,7 +645,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
             },
           ),
           _buildSliderRow(
-            label: '聊天文本大小',
+            label: 'Chat Text Size',
             subtitle: '仅调整用户消息、AI 回复与思考区字号',
             value: _draftConfig.chatTextSize,
             min: 12,
@@ -720,7 +720,7 @@ class _BackgroundSettingPageState extends State<BackgroundSettingPage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '聊天文本颜色',
+          'Chat Text Color',
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,

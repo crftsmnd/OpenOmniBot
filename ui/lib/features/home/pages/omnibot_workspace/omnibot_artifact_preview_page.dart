@@ -176,7 +176,7 @@ class _OmnibotArtifactPreviewPageState
     if (_isDirty) {
       final confirmed = await AppDialog.confirm(
         context,
-        title: '放弃修改',
+        title: 'Discard Changes',
         content: '当前有未保存修改，确认放弃吗？',
         cancelText: '继续编辑',
         confirmText: '放弃',
@@ -256,7 +256,7 @@ class _OmnibotArtifactPreviewPageState
     }
     final confirmed = await AppDialog.confirm(
       context,
-      title: '退出编辑',
+      title: 'Exit Edit',
       content: '当前有未保存修改，确认退出吗？',
       cancelText: '继续编辑',
       confirmText: '退出',
@@ -383,7 +383,7 @@ class _OmnibotArtifactPreviewPageState
               );
             },
             icon: const Icon(Icons.language_outlined),
-            label: const Text('在 WebView 中打开'),
+            label: const Text('Open in WebView'),
           ),
         );
       case 'text':
@@ -434,7 +434,7 @@ class _OmnibotArtifactPreviewPageState
                 FilledButton.icon(
                   onPressed: _handleOpenWithSystem,
                   icon: const Icon(Icons.open_in_new_outlined),
-                  label: const Text('系统打开'),
+                  label: const Text('Open with System'),
                 ),
               ],
             ),
@@ -479,7 +479,7 @@ class _OmnibotArtifactPreviewPageState
     }
     actions.addAll([
       IconButton(
-        tooltip: '系统打开',
+        tooltip: 'Open with System',
         onPressed: widget.exists ? _handleOpenWithSystem : null,
         icon: SvgPicture.asset(
           _externalLinkIconAsset,

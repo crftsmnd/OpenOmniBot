@@ -359,10 +359,10 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
     }
     final confirmed = await AppDialog.confirm(
       context,
-      title: '删除自启动任务',
+      title: 'Delete Auto-start Task',
       content: '确认删除“${task.name}”吗？',
       cancelText: '取消',
-      confirmText: '删除',
+      confirmText: 'Delete',
     );
     if (confirmed != true || _isAutoStartBusy) {
       return;
@@ -438,7 +438,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
-      appBar: const CommonAppBar(title: 'Alpine 环境', primary: true),
+      appBar: const CommonAppBar(title: 'Alpine Environment', primary: true),
       body: SafeArea(
         top: false,
         child: RefreshIndicator(
@@ -521,7 +521,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
   Widget _buildIntroCard() {
     final readyCount = _items.where((item) => item.ready).length;
     return _buildSectionCard(
-      title: '环境配置',
+      title: 'Environment Config',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -580,7 +580,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
 
   Widget _buildAutoStartSection() {
     return _buildSectionCard(
-      title: '自启动任务',
+      title: 'Auto-start Tasks',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -602,7 +602,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                       ? null
                       : () => _openAutoStartTaskDialog(),
                   icon: const Icon(Icons.add_rounded),
-                  label: const Text('新增任务'),
+                  label: const Text('Add Task'),
                 ),
               ),
               const SizedBox(width: 10),
@@ -612,7 +612,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                       ? null
                       : () => openNativeTerminal(),
                   icon: const Icon(Icons.terminal_rounded),
-                  label: const Text('打开 ReTerminal'),
+                  label: const Text('Open ReTerminal'),
                 ),
               ),
             ],
@@ -684,7 +684,7 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                     runSpacing: 8,
                     children: [
                       _buildLegendTag(
-                        label: task.enabled ? '开机打开 app 后启动' : '未启用',
+                        label: task.enabled ? 'Start after opening app' : 'Disabled',
                         backgroundColor: task.enabled
                             ? const Color(0xFFEAF2FF)
                             : const Color(0xFFF1F5F9),
@@ -759,21 +759,21 @@ class _TermuxSettingPageState extends State<TermuxSettingPage>
                   ? null
                   : () => _runAutoStartTask(task),
               icon: const Icon(Icons.play_arrow_rounded, size: 18),
-              label: Text(task.running ? '已在运行' : '立即启动'),
+              label: Text(task.running ? 'Running' : 'Start Now'),
             ),
             TextButton.icon(
               onPressed: _isAutoStartBusy
                   ? null
                   : () => _openAutoStartTaskDialog(task: task),
               icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('编辑'),
+              label: const Text('Edit'),
             ),
             TextButton.icon(
               onPressed: _isAutoStartBusy
                   ? null
                   : () => _deleteAutoStartTask(task),
               icon: const Icon(Icons.delete_outline_rounded, size: 18),
-              label: const Text('删除'),
+              label: const Text('Delete'),
             ),
           ],
         ),
@@ -997,7 +997,7 @@ class _AutoStartTaskDialogState extends State<_AutoStartTaskDialog> {
   Widget build(BuildContext context) {
     final editing = widget.task != null;
     return AlertDialog(
-      title: Text(editing ? '编辑自启动任务' : '新增自启动任务'),
+      title: Text(editing ? 'Edit Auto-start Task' : 'New Auto-start Task'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1039,7 +1039,7 @@ class _AutoStartTaskDialogState extends State<_AutoStartTaskDialog> {
                   _enabled = value;
                 });
               },
-              title: const Text('打开 Omnibot 时自动启动'),
+              title: const Text('Auto-start when opening Omnibot'),
             ),
           ],
         ),

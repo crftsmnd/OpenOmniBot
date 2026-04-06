@@ -59,7 +59,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
     'scene.dispatch.model': '负责任务理解与分流决策',
     'scene.vlm.operation.primary': '负责执行 UI 操作主链路',
     'scene.compactor.context': '负责 VLM 执行链的上下文压缩与纠错',
-    'scene.compactor.context.chat': '负责聊天历史压缩总结',
+    'scene.compactor.context.chat': 'Handles chat history compression',
     'scene.loading.sprite': '负责生成加载状态文案',
     'scene.memory.embedding': '负责 workspace 记忆向量检索的嵌入模型',
     'scene.memory.rollup': '负责夜间记忆整理策略模型',
@@ -531,7 +531,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: const CommonAppBar(title: '场景模型配置', primary: true),
+      appBar: const CommonAppBar(title: 'Scene Model Config', primary: true),
       body: SafeArea(
         top: false,
         child: _isLoading
@@ -569,7 +569,7 @@ class _SceneModelSettingPageState extends State<SceneModelSettingPage> {
                                       ),
                                     )
                                   : const Icon(Icons.refresh, size: 16),
-                              label: const Text('刷新模型列表'),
+                              label: const Text('Refresh Model List'),
                             ),
                           ],
                         ),

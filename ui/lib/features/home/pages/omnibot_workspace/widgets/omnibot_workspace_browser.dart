@@ -748,7 +748,7 @@ class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     final isDirectory = sourceType == FileSystemEntityType.directory;
     final nextName = (await AppDialog.input(
       context,
-      title: isDirectory ? '重命名文件夹' : '重命名文件',
+      title: isDirectory ? 'Rename Folder' : 'Rename File',
       hintText: '请输入新名称',
       initialValue: oldName,
       confirmText: '保存',
@@ -814,7 +814,7 @@ class OmnibotWorkspaceBrowserState extends State<OmnibotWorkspaceBrowser> {
     final isDirectory = sourceType == FileSystemEntityType.directory;
     final confirmed = await AppDialog.confirm(
       context,
-      title: isDirectory ? '删除文件夹' : '删除文件',
+      title: isDirectory ? 'Delete Folder' : 'Delete File',
       content: '确认删除“$name”？删除后不可恢复。',
       cancelText: '取消',
       confirmText: '删除',
